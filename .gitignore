@@ -1,0 +1,7 @@
+node_modules/
+.pulso/
+.idea/
+.playwright-mcp/
+.DS_Store
+*.log
+*.tgz

@@ -1,0 +1,41 @@
+{
+  "name": "pulso-opencode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Adaptive delivery orchestration for OpenCode",
+  "license": "UNLICENSED",
+  "bin": {
+    "pulso-breaker": "bin/pulso-breaker.js",
+    "pulso-dashboard": "bin/pulso-dashboard.js"
+  },
+  "files": [
+    "agents/",
+    "bin/",
+    "commands/",
+    "lib/",
+    "plugins/",
+    "scripts/",
+    "skills/",
+    "test/",
+    "tools/",
+    "README.md",
+    "opencode.example.jsonc",
+    "pulso.manifest.json"
+  ],
+  "scripts": {
+    "bootstrap": "node scripts/sync.mjs export --force",
+    "install:local": "node scripts/install.mjs install --set-default",
+    "install:local:force": "node scripts/install.mjs install --set-default --force",
+    "uninstall:local": "node scripts/install.mjs uninstall",
+    "dashboard": "node bin/pulso-dashboard.js --open",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.2",
+    "jsonc-parser": "^3.3.1",
+    "zod": "^4.1.5"
+  }
+}
