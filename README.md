@@ -1,60 +1,199 @@
 # Pulso
 
-Pulso is an adaptive delivery orchestrator for OpenCode. This project packages its agents, protocol, plugins, tools, control-plane libraries, CLI, and tests as one versionable source of truth.
+**Pulso** es un orquestador adaptativo de entrega para [OpenCode](https://opencode.ai). Reúne en un único repositorio versionable los agentes, el protocolo de coordinación, los plugins, las herramientas, las bibliotecas del plano de control, la CLI y las pruebas que gobiernan una entrega técnica asistida por agentes.
 
-The default delivery path is deliberately small: Pulso coordinates and delegates directly to Executor. Planner, Challenger, Explorer, Verifier, and auditors are optional capabilities selected only for concrete ambiguity, missing evidence, or risk. Pulso and Executor perform simple file reads and narrow searches themselves; Explorer is reserved for iterative discovery, cross-file traces, or parallel research.
+Su diseño prioriza una idea sencilla: aplicar el menor proceso que permita entregar un cambio verificable y seguro. El flujo habitual conecta directamente a Pulso con Executor; Planner, Challenger, Explorer, Verifier y los auditores se incorporan únicamente cuando existe ambigüedad, evidencia insuficiente o un riesgo concreto.
 
-## Requirements
+## Resumen ejecutivo y propósito
 
-- Node.js 22.5 or newer (`node:sqlite` is used by the experience engine).
-- OpenCode with a configured model provider.
+Pulso actúa como responsable técnico de una solicitud: conserva el objetivo, las decisiones, los bloqueos y el estado de cada tarea, mientras delega el trabajo especializado con contratos acotados. El sistema evita que la coordinación se convierta en burocracia y exige evidencia para declarar una entrega completa.
 
-## Development
+El proyecto está orientado a equipos que necesitan:
+
+- Coordinar tareas de ingeniería con agentes especializados sin perder el control del alcance.
+- Reducir los ciclos de reparación especulativos y preservar la trazabilidad de la validación.
+- Mantener memoria técnica y métricas operativas entre objetivos, sin almacenar datos sensibles en el estado del repositorio.
+- Adaptar la ejecución a contextos BBVA —incluidos CELLS y APX— cuando la evidencia del proyecto lo justifica.
+
+## Arquitectura y flujo de entrega
+
+Pulso se organiza como un plano de control local sobre OpenCode. El orquestador recibe el objetivo, inspecciona el estado mínimo necesario y selecciona una ruta determinista mediante señales de riesgo.
+
+```text
+Solicitud del usuario
+        │
+        ▼
+Pulso (objetivo, decisiones y enrutamiento)
+        │
+        ├── Ruta rápida: Executor
+        ├── Ruta normal: Executor + Verifier
+        ├── Ruta planificada: Planner → Executor
+        └── Ruta sensible: Executor + auditor específico
+        │
+        ▼
+Evidencia de implementación y validación
+        │
+        ▼
+Experiencia, métricas y cierre del objetivo
+```
+
+Las rutas se escogen por señales explícitas, como ambigüedad, dependencias, cambios entre capas, autenticación, persistencia, datos sensibles, operaciones remotas, cambios destructivos o evidencia de validación contradictoria. No se añaden especialistas por orden ceremonial: se incorporan solo si ayudan a resolver un hecho, una decisión o un riesgo material.
+
+Para editar, Executor adquiere un *lease* de 30 minutos sobre la tarea. Los cambios que se solapan se serializan; únicamente pueden paralelizarse trabajos independientes. La integración Git es deliberadamente restrictiva: requiere una petición explícita del usuario y una referencia Jira válida.
+
+## Componentes y capas del sistema
+
+| Capa | Componentes | Responsabilidad |
+| --- | --- | --- |
+| Orquestación | `agents/pulso.md`, `tools/pulso_route.ts` | Define el objetivo, mantiene decisiones y bloqueos, y selecciona la ruta mínima de entrega. |
+| Ejecución y revisión | `pulso-executor`, Planner, Challenger, Explorer, Verifier y auditores | Implementan o aportan evidencia dentro de límites de autoridad y alcance definidos. |
+| Protocolo y estado | `skills/pulso-protocol/`, `.pulso/` | Establece contratos de tareas, propiedad del estado, *leases* y comunicación entre agentes. |
+| Resiliencia | `plugins/pulso-circuit-breaker.mjs`, `lib/pulso-circuit-breaker-core.js` | Limita reparaciones repetitivas y bloquea mutaciones cuando una tarea entra en un estado de riesgo. |
+| Experiencia y observabilidad | `plugins/pulso-experience-engine.mjs`, dashboard y reporter | Conserva métricas y memorias verificadas en SQLite, y presenta el estado operativo de forma local. |
+| Operación e instalación | `scripts/`, `bin/`, `tools/`, `pulso.manifest.json` | Sincroniza la distribución, instala el runtime y ofrece diagnóstico y operación local. |
+
+El estado de coordinación vive en `.pulso/` y no se versiona. Incluye el estado compartido, contratos de tarea, estados de circuit breaker y *leases*. El motor de experiencia utiliza un almacén SQLite externo al estado de tareas; la memoria técnica se curará únicamente tras cierres `verified` o `integrated`.
+
+## Integración con el ecosistema BBVA
+
+Pulso no presupone un stack BBVA para todos los repositorios. Detecta el perfil del proyecto a partir de evidencia y carga las habilidades aplicables solo cuando corresponden:
+
+| Contexto confirmado | Habilidades aplicables |
+| --- | --- |
+| Proyecto BBVA | `bbva-engineering` |
+| Aplicación CELLS | `bbva-engineering`, `bbva-cells` |
+| Comportamiento o pruebas CELLS | Las anteriores y `bbva-cells-testing` |
+| Unidad de despliegue APX | `bbva-engineering`, `bbva-apx` |
+| Comportamiento o pruebas APX | Las anteriores y `bbva-apx-testing` |
+| Integración CELLS con APX | Todas las habilidades CELLS y APX pertinentes |
+
+Esta integración es condicional y basada en evidencia: si el contexto no está confirmado, el perfil permanece como `unknown`. Así se evitan reglas de plataforma ajenas al repositorio y se conserva el cumplimiento de las convenciones BBVA cuando sí aplican.
+
+## Ecosistema de agentes y autoridades
+
+Cada actor tiene una responsabilidad limitada para evitar conflictos de estado y autoaprobación:
+
+| Agente o componente | Autoridad principal |
+| --- | --- |
+| `pulso` | Objetivo, prioridades, decisiones, bloqueos, asignación y ciclo de vida de tareas. |
+| `pulso-planner` | Crea contratos de tareas y actualiza exclusivamente su sección `plan`. |
+| `pulso-executor` | Implementa el cambio, gestiona `execution` e `integration`, y libera el *lease*. |
+| `pulso-verifier` y auditores | Proporcionan revisión independiente y de solo lectura. |
+| `pulso-challenger` | Revisa riesgos irreversibles, dependencias nuevas o decisiones materiales sin modificar el estado. |
+| `pulso-experience-curator` y `pulso-delivery-reporter` | Generan propuestas de memoria y comunicación operativa; no cambian el resultado técnico. |
+| Plugins y herramientas Pulso | Son propietarios exclusivos del circuit breaker, el almacén de experiencia, el enrutamiento, los *leases* y el diagnóstico. |
+
+Los especialistas entregan evidencia estructurada y no pueden modificar la intención del usuario, las prioridades ni el alcance sin una delegación explícita. Pulso no declara éxito por narración: requiere pruebas, auditoría, verificación o confirmación humana pertinente.
+
+## Concurrencia y resiliencia con circuit breaker
+
+La concurrencia se protege mediante *leases* por tarea. Un Executor debe poseer un *lease* activo para editar y solo pueden recuperarse *leases* vencidos; nunca se desplaza a un propietario activo. El plugin valida además que las mutaciones se mantengan dentro de las rutas autorizadas por el contrato de tarea.
+
+El circuit breaker observa validaciones y ciclos de reparación para evitar insistir sobre el mismo error. Por defecto abre el circuito ante dos errores de validación repetidos o tres ciclos de reparación sin progreso. Cuando está abierto, bloquea las herramientas mutantes, pero conserva la investigación de solo lectura y la validación diagnóstica. El reinicio del circuito requiere intervención humana mediante `pulso-breaker`.
+
+Los fallos de infraestructura —por ejemplo, dependencias ausentes, puertos ocupados o navegadores de prueba no disponibles— se registran por separado y no abren el circuito. El consumo de tokens también es observacional: permite medir la operación sin impedir por sí mismo la entrega.
+
+## Requisitos
+
+- Node.js 22.5 o superior; el motor de experiencia utiliza `node:sqlite`.
+- OpenCode con un proveedor de modelos configurado.
+- `npm` para instalar dependencias y ejecutar los comandos del proyecto.
+
+## Desarrollo
+
+Instale dependencias y ejecute la suite de pruebas:
 
 ```bash
 npm install
 npm test
 ```
 
-Edit Pulso in this repository. Install its runtime files and register its plugins in OpenCode with:
+Edite Pulso en este repositorio. Para instalar sus archivos de runtime y registrar los plugins en OpenCode, ejecute:
 
 ```bash
 npm run install:local
 ```
 
-The installer defaults to `~/.config/opencode`. Set `OPENCODE_CONFIG_DIR` to target another installation. It preserves JSONC formatting and existing configuration, deduplicates plugin entries, and sets Pulso as the default agent. It refuses to overwrite divergent managed files; inspect them first, then use `npm run install:local:force` when replacement is intentional.
+El instalador usa `~/.config/opencode` de forma predeterminada. Defina `OPENCODE_CONFIG_DIR` para utilizar otra instalación. Conserva el formato JSONC y la configuración existente, elimina entradas de plugins duplicadas y configura Pulso como agente predeterminado.
 
-Remove only project-managed runtime files whose contents still match this repository and unregister Pulso's plugins with:
+El instalador no sobrescribe archivos administrados que hayan divergido de este repositorio. Revise primero esas diferencias y use el siguiente comando solo cuando el reemplazo sea intencional:
+
+```bash
+npm run install:local:force
+```
+
+Para retirar únicamente los archivos gestionados por el proyecto que siguen coincidiendo con este repositorio y desregistrar sus plugins:
 
 ```bash
 npm run uninstall:local
 ```
 
-Quit and restart OpenCode after installation because agents, skills, tools, and plugins are loaded at startup.
+Reinicie OpenCode después de instalar o desinstalar: los agentes, habilidades, herramientas y plugins se cargan al iniciar la aplicación.
 
-## Dashboard
+## Instalación local
 
-Ask Pulso to open the dashboard or run `/pulso-dashboard` inside OpenCode. From this repository, `npm run dashboard` opens the same local view. It shows objective status and duration, token and run totals, per-agent activity, human interventions, repair cycles, verified memories, and profile preferences. Select an objective to inspect its measured timing and agent breakdown.
+La instalación local sincroniza los archivos listados en `pulso.manifest.json` hacia la configuración de OpenCode. El manifiesto incluye agentes, comandos, protocolo, plugins, herramientas, bibliotecas de control y binarios necesarios para ejecutar Pulso.
 
-The dashboard binds only to `127.0.0.1`, uses a temporary access token, reads SQLite without modifying it, and stops after 30 minutes of inactivity or when its Stop server button is pressed.
+Flujo recomendado:
 
-Run `/pulso-doctor` inside OpenCode for a read-only health check of agents, plugins, tools, local task state, and the experience store.
+```bash
+npm install
+npm test
+npm run install:local
+```
 
-## OpenCode Configuration
+Tras reiniciar OpenCode, Pulso quedará disponible como agente predeterminado según la configuración de ejemplo.
 
-Merge the relevant fields from `opencode.example.jsonc` into the target `opencode.jsonc`. Plugin paths are relative to that configuration file. Agent models are examples and can be changed without modifying Pulso's behavior contracts.
+## Dashboard y Doctor
 
-## Repository Layout
+Abra el dashboard de métricas y experiencia de la instalación actual de estas formas:
 
-- `agents/`: orchestrator and bounded specialists.
-- `skills/pulso-protocol/`: shared coordination and state protocol.
-- `plugins/`: circuit breaker and experience engine.
-- `tools/`: deterministic routing, leases, skill digest, and health check.
-- `lib/`: control-plane implementation.
-- `bin/`: operator CLI.
-- `test/`: control-plane tests.
-- `pulso.manifest.json`: files synchronized by the installer.
+```text
+/pulso-dashboard
+```
+
+o, desde este repositorio:
+
+```bash
+npm run dashboard
+```
+
+El dashboard muestra estado y duración de objetivos, tokens y ejecuciones, actividad por agente, intervenciones humanas, ciclos de reparación, memorias verificadas y preferencias de perfil. Permite inspeccionar el desglose temporal y de agentes de cada objetivo.
+
+El servidor se enlaza exclusivamente a `127.0.0.1`, usa un token temporal de acceso, lee SQLite sin modificarlo y se detiene tras 30 minutos de inactividad o al pulsar **Stop server**.
+
+Para un diagnóstico de solo lectura de agentes, plugins, herramientas, estado local y almacén de experiencia, ejecute dentro de OpenCode:
+
+```text
+/pulso-doctor
+```
+
+## Configuración
+
+Combine los campos pertinentes de `opencode.example.jsonc` con el `opencode.jsonc` de destino. Las rutas de los plugins son relativas al archivo de configuración de OpenCode.
+
+El archivo de ejemplo configura `pulso` como `default_agent`, registra los plugins de circuit breaker y experiencia, y propone modelos para cada agente. Los modelos son ejemplos operativos: pueden sustituirse sin modificar los contratos de comportamiento de Pulso.
+
+## Estructura del repositorio
+
+```text
+agents/                   Orquestador y especialistas acotados
+bin/                      CLI de operación local
+commands/                 Comandos de OpenCode para dashboard y diagnóstico
+lib/                      Implementación del plano de control
+plugins/                  Circuit breaker y motor de experiencia
+scripts/                  Instalación y sincronización del runtime
+skills/pulso-protocol/    Protocolo compartido de coordinación y estado
+pulso.manifest.json       Archivos sincronizados por el instalador
+opencode.example.jsonc    Configuración de referencia para OpenCode
+```
 
 ## Bootstrap
 
-`npm run bootstrap` imports the runtime manifest files from an existing OpenCode installation. Tests and other development-only files remain repository-owned and are never expected in the OpenCode configuration directory. Bootstrap is intended only to initialize or deliberately reconcile this repository. Normal development flows from this project to OpenCode, not the reverse.
+El comando de bootstrap importa los archivos del manifiesto de runtime desde una instalación existente de OpenCode:
+
+```bash
+npm run bootstrap
+```
+
+Las pruebas y demás archivos exclusivos de desarrollo permanecen bajo propiedad del repositorio y no se esperan en el directorio de configuración de OpenCode. Use bootstrap únicamente para inicializar o reconciliar deliberadamente el repositorio. El flujo normal de desarrollo sincroniza desde este proyecto hacia OpenCode, no en sentido inverso.
