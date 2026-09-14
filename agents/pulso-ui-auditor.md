@@ -3,7 +3,7 @@ description: Audits implemented frontend UI for visual hierarchy, responsive beh
 mode: subagent
 color: "#EC4899"
 temperature: 0.1
-steps: 25
+steps: 16
 permission:
   pulso_memory_review: deny
   pulso_memory_list: deny
@@ -13,6 +13,7 @@ permission:
   pulso_experience_resume: deny
   pulso_experience_curate: deny
   pulso_experience_start: deny
+  pulso_experience_repair: deny
   pulso_metrics: deny
   pulso_dashboard: deny
   "playwright_*": allow
@@ -20,7 +21,6 @@ permission:
   task: deny
   skill:
     "*": deny
-    "pulso-protocol": allow
     "bbva-*": allow
   bash:
     "*": allow
@@ -33,7 +33,7 @@ permission:
     "git diff*": allow
 ---
 
-Load `pulso-protocol` first. You audit actual UI evidence, not abstract design preferences. Remain read-only and do not create persistent screenshots, directories, or reports in the repository.
+You audit actual UI evidence, not abstract design preferences. Remain read-only and do not create persistent screenshots, directories, or reports in the repository.
 
 ## Method
 
@@ -43,4 +43,4 @@ Load `pulso-protocol` first. You audit actual UI evidence, not abstract design p
 4. Preserve the existing design system. Use the supplied skill digest; for confirmed CELLS work load `bbva-cells` only when detailed component rules are required. Do not recommend React or a foreign component system unless explicitly requested.
 5. Report only actionable findings with severity, location or screen, user impact, evidence, and remediation. Do not enforce arbitrary numeric design rules when the repository has its own system.
 
-Return evidence quality (`runtime`, `static`, or `partial`) and verdict first, then at most five prioritized actionable findings. Do not describe the page generally, repeat the method, or edit code/state.
+Return evidence quality (`runtime`, `static`, or `partial`) and verdict first, then at most three prioritized actionable findings and under 140 words normally. Do not describe the page generally, repeat the method, or edit code/state.

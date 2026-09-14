@@ -1,12 +1,13 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import crypto from "node:crypto"
 import { tool } from "@opencode-ai/plugin"
 import core from "../lib/pulso-control-core.js"
 
 const requiredAgents = [
   "pulso", "pulso-planner", "pulso-challenger", "pulso-executor", "pulso-explorer", "pulso-verifier",
-  "pulso-code-auditor", "pulso-integration-auditor", "pulso-security-auditor", "pulso-ui-auditor", "pulso-experience-curator",
+  "pulso-integration-auditor", "pulso-security-auditor", "pulso-ui-auditor", "pulso-experience-curator", "pulso-delivery-reporter",
 ]
 
 export default tool({
@@ -65,6 +66,22 @@ export default tool({
         findings.push({ severity: "error", code: "experience_store_unreadable", detail: "Experience store is not readable" })
       }
     } else findings.push({ severity: "warning", code: "experience_store_missing", detail: "No Pulso experience has been recorded yet" })
+    const reconciliationLog = path.join(path.dirname(experience), "reconciliation.jsonl")
+    if (fs.existsSync(reconciliationLog)) {
+      const projectKey = crypto.createHash("sha256").update(String(context.directory)).digest("hex").slice(0, 24)
+      try {
+        const recent = fs.readFileSync(reconciliationLog, "utf8").trim().split("\n").slice(-200)
+          .map((line) => JSON.parse(line))
+          .filter((item) => item.project_key === projectKey)
+        const latestCompleted = [...recent].reverse().find((item) => item.code === "reconciliation_completed")
+        const latestIssue = [...recent].reverse().find((item) => ["lookup_timeout", "lookup_failed", "cycle_detected", "self_parent", "foreign_project_session", "depth_limit", "budget_exhausted", "row_skipped", "reconciliation_failed"].includes(item.code))
+        if (latestIssue && (!latestCompleted || latestIssue.timestamp > latestCompleted.timestamp)) {
+          findings.push({ severity: "warning", code: "experience_reconciliation_issue", detail: `${latestIssue.code}; run pulso_experience_repair after OpenCode is responsive` })
+        }
+      } catch {
+        findings.push({ severity: "warning", code: "experience_diagnostics_unreadable", detail: "Pulso reconciliation diagnostics could not be parsed" })
+      }
+    }
     return JSON.stringify({ status: findings.some((item) => item.severity === "error") ? "unhealthy" : findings.length ? "warning" : "healthy", findings })
   },
 })

@@ -10,7 +10,42 @@ const REPORTER = "pulso-delivery-reporter";
 const curatorSessions = new Map();
 const reporterSessions = new Map();
 const pendingPrimarySessions = new Map();
+const SESSION_LOOKUP_TIMEOUT_MS = 350;
+const RECONCILIATION_BUDGET_MS = 900;
+const RECONCILIATION_RUN_LIMIT = 100;
+const RECONCILIATION_LOG_LIMIT = 256 * 1024;
 let SQLiteDatabase;
+
+function reconciliationLogPath() {
+  return path.join(path.dirname(databasePath()), "reconciliation.jsonl");
+}
+
+function logExperienceFinding(directory, stage, code, detail = {}) {
+  try {
+    const file = reconciliationLogPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    if (fs.existsSync(file) && fs.statSync(file).size > RECONCILIATION_LOG_LIMIT) {
+      const content = fs.readFileSync(file, "utf8");
+      fs.writeFileSync(file, content.slice(-Math.floor(RECONCILIATION_LOG_LIMIT / 2)), { mode: 0o600 });
+    }
+    fs.appendFileSync(file, `${JSON.stringify({
+      timestamp: new Date().toISOString(), project_key: core.projectKey(directory), stage, code, ...detail,
+    })}\n`, { mode: 0o600 });
+  } catch {
+    // Diagnostics must never interfere with OpenCode startup.
+  }
+}
+
+function withTimeout(promise, milliseconds, message) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), milliseconds);
+      timer.unref?.();
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
 
 function sessionGet(client, sessionID, directory) {
   return client.session.get({ path: { id: sessionID }, query: { directory } });
@@ -161,20 +196,49 @@ function migrateSessionObjectiveIDs(db, directory) {
   }
 }
 
-async function parentObjective(input, db, sessionID) {
+async function parentObjective(input, sessionID, deadline = Date.now() + RECONCILIATION_BUDGET_MS) {
   let currentID = sessionID;
+  const visited = new Set();
   for (let depth = 0; depth < 8; depth += 1) {
     try {
-      const session = responseData(await sessionGet(input.client, currentID, input.directory));
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return { issue: "budget_exhausted" };
+      if (visited.has(currentID)) {
+        logExperienceFinding(input.directory, "session_hierarchy", "cycle_detected", { session_id: currentID });
+        return null;
+      }
+      visited.add(currentID);
+      const session = responseData(await withTimeout(
+        sessionGet(input.client, currentID, input.directory), Math.min(SESSION_LOOKUP_TIMEOUT_MS, remaining), "session lookup timeout",
+      ));
+      if (session?.directory && path.resolve(session.directory) !== path.resolve(input.directory)) {
+        logExperienceFinding(input.directory, "session_hierarchy", "foreign_project_session", { session_id: currentID });
+        return null;
+      }
+      if (depth > 0) {
+        const db = database();
+        let run;
+        try {
+          run = db.prepare("SELECT objective_key, objective_id FROM agent_runs WHERE session_id = ?").get(currentID);
+        } finally {
+          db.close();
+        }
+        if (run) return run;
+      }
       if (!session?.parentID) return null;
-      const run = db.prepare("SELECT objective_key, objective_id FROM agent_runs WHERE session_id = ?").get(session.parentID);
-      if (run) return run;
+      if (session.parentID === currentID) {
+        logExperienceFinding(input.directory, "session_hierarchy", "self_parent", { session_id: currentID });
+        return { issue: "self_parent" };
+      }
       currentID = session.parentID;
-    } catch {
-      return null;
+    } catch (error) {
+      const issue = error?.message === "session lookup timeout" ? "lookup_timeout" : "lookup_failed";
+      logExperienceFinding(input.directory, "session_hierarchy", issue, { session_id: currentID });
+      return { issue };
     }
   }
-  return null;
+  logExperienceFinding(input.directory, "session_hierarchy", "depth_limit", { session_id: sessionID });
+  return { issue: "depth_limit" };
 }
 
 function mergeObjectiveRuns(db, sourceKey, targetKey, targetID) {
@@ -190,19 +254,39 @@ function mergeObjectiveRuns(db, sourceKey, targetKey, targetID) {
 
 async function reconcileActiveTaskObjectives(input) {
   if (!input.client?.session?.get) return;
-  const db = database();
   const key = core.projectKey(input.directory);
-  const runs = db.prepare(`SELECT r.session_id, r.objective_key, r.objective_id, r.finished_at, o.title, o.started_at AS objective_started_at
-    FROM agent_runs r JOIN objectives o ON o.objective_key = r.objective_key
-    WHERE o.project_key = ? AND o.status = 'active' AND o.id LIKE 'PULSO-%'`).all(key);
+  const snapshot = database();
+  let runs;
+  try {
+    runs = snapshot.prepare(`SELECT r.session_id, r.objective_key, r.objective_id, r.finished_at, o.title, o.started_at AS objective_started_at
+      FROM agent_runs r JOIN objectives o ON o.objective_key = r.objective_key
+      WHERE o.project_key = ? AND o.status = 'active' AND o.id LIKE 'PULSO-%'
+      ORDER BY o.started_at DESC LIMIT ?`).all(key, RECONCILIATION_RUN_LIMIT);
+  } finally {
+    snapshot.close();
+  }
   const closures = new Map();
   const reopens = new Map();
-  for (const run of runs) {
-    const parent = await parentObjective(input, db, run.session_id);
-    if (!parent || parent.objective_key === run.objective_key) continue;
-    db.prepare("UPDATE agent_runs SET objective_key = ?, objective_id = ? WHERE session_id = ?")
-      .run(parent.objective_key, parent.objective_id, run.session_id);
+  let reassigned = 0;
+  let skipped = 0;
+  const deadline = Date.now() + RECONCILIATION_BUDGET_MS;
+  const resolved = await Promise.all(runs.map(async (run) => ({ run, parent: await parentObjective(input, run.session_id, deadline) })));
+  for (const { run, parent } of resolved) {
     try {
+      if (parent?.issue) {
+        skipped += 1;
+        logExperienceFinding(input.directory, "reconcile_row", parent.issue, { objective_id: run.objective_id, session_id: run.session_id });
+        continue;
+      }
+      if (!parent || parent.objective_key === run.objective_key) continue;
+      const db = database();
+      try {
+        const update = db.prepare("UPDATE agent_runs SET objective_key = ?, objective_id = ? WHERE session_id = ? AND objective_key = ?")
+          .run(parent.objective_key, parent.objective_id, run.session_id, run.objective_key);
+        reassigned += Number(update.changes) || 0;
+      } finally {
+        db.close();
+      }
       const task = JSON.parse(fs.readFileSync(path.join(input.directory, ".pulso", "tasks", `${run.objective_id}.json`), "utf8"));
       if (["implemented", "verified", "integrated", "blocked", "failed", "cancelled"].includes(task.status)) {
         const previous = closures.get(parent.objective_key);
@@ -218,10 +302,13 @@ async function reconcileActiveTaskObjectives(input) {
         const previous = reopens.get(parent.objective_key);
         if (!previous || String(run.objective_started_at) > String(previous)) reopens.set(parent.objective_key, run.objective_started_at);
       }
-    } catch {
-      // Historical task state is optional; leave the parent active when no terminal evidence exists.
+    } catch (error) {
+      skipped += 1;
+      logExperienceFinding(input.directory, "reconcile_row", "row_skipped", { objective_id: run.objective_id, session_id: run.session_id });
+      // Historical task state is optional; one bad row must not stop reconciliation.
     }
   }
+  const db = database();
   db.prepare(`DELETE FROM objectives WHERE project_key = ? AND status = 'active' AND id LIKE 'PULSO-%'
     AND NOT EXISTS (SELECT 1 FROM agent_runs r WHERE r.objective_key = objectives.objective_key)`).run(key);
   db.prepare(`UPDATE objectives SET tokens = (SELECT COALESCE(SUM(r.tokens), 0) FROM agent_runs r WHERE r.objective_key = objectives.objective_key)
@@ -242,6 +329,31 @@ async function reconcileActiveTaskObjectives(input) {
       (SELECT MAX(r.finished_at) FROM agent_runs r WHERE r.objective_key = objectives.objective_key), finished_at)
     WHERE project_key = ? AND status = 'implemented'`).run(key);
   db.close();
+  logExperienceFinding(input.directory, "active_objective_reconciliation", "reconciliation_completed", { rows: runs.length, reassigned, skipped });
+  return { rows: runs.length, reassigned, skipped };
+}
+
+async function runExperienceMaintenance(input) {
+  const result = { migrated: false, reconciliation: null, errors: [] };
+  try {
+    const db = database();
+    try {
+      migrateSessionObjectiveIDs(db, input.directory);
+      result.migrated = true;
+    } finally {
+      db.close();
+    }
+  } catch {
+    result.errors.push("objective_id_migration");
+    logExperienceFinding(input.directory, "objective_id_migration", "migration_failed");
+  }
+  try {
+    result.reconciliation = await reconcileActiveTaskObjectives(input);
+  } catch {
+    result.errors.push("active_objective_reconciliation");
+    logExperienceFinding(input.directory, "active_objective_reconciliation", "reconciliation_failed");
+  }
+  return result;
 }
 
 function remember(db, candidate, projectKey) {
@@ -400,12 +512,13 @@ function repairCycles(directory, objectiveID) {
 }
 
 export async function PulsoExperienceEnginePlugin(input) {
-  await loadSQLite();
-  const initialized = database();
-  migrateSessionObjectiveIDs(initialized, input.directory);
-  initialized.close();
-  await reconcileActiveTaskObjectives(input);
   const { tool } = await import("@opencode-ai/plugin");
+  try {
+    await loadSQLite();
+    setTimeout(() => { void runExperienceMaintenance(input); }, 0);
+  } catch {
+    logExperienceFinding(input.directory, "sqlite_bootstrap", "sqlite_unavailable");
+  }
   return {
     "chat.message": async (event, output) => {
       const match = (output.parts || []).map((part) => part.text || part.prompt || "").join("\n").match(/\bPULSO_TASK_ID=(PULSO-\d+)\b/);
@@ -419,22 +532,23 @@ export async function PulsoExperienceEnginePlugin(input) {
         db.close();
         return;
       }
-      const parent = pulsoSession ? null : await parentObjective(input, db, event.sessionID);
+      db.close();
+      const parent = pulsoSession ? null : await parentObjective(input, event.sessionID);
       const objectiveID = current?.objective_id || parent?.objective_id;
       if (!objectiveID) {
-        db.close();
         return;
       }
+      const tracked = database();
       const objectiveKey = core.objectiveKey(input.directory, objectiveID);
       const title = objectiveTitle(output.parts, objectiveID);
       const now = new Date().toISOString();
-      db.prepare(`INSERT INTO objectives (objective_key, id, project_key, title, status, started_at)
+      tracked.prepare(`INSERT INTO objectives (objective_key, id, project_key, title, status, started_at)
         VALUES (?, ?, ?, ?, 'active', ?)
         ON CONFLICT(objective_key) DO UPDATE SET
           title = CASE WHEN objectives.title = objectives.id THEN excluded.title ELSE objectives.title END`)
         .run(objectiveKey, objectiveID, key, title, now);
-      db.prepare("INSERT OR IGNORE INTO agent_runs (objective_key, objective_id, agent, session_id, started_at) VALUES (?, ?, ?, ?, ?)").run(objectiveKey, objectiveID, event.agent, event.sessionID, now);
-      db.close();
+      tracked.prepare("INSERT OR IGNORE INTO agent_runs (objective_key, objective_id, agent, session_id, started_at) VALUES (?, ?, ?, ?, ?)").run(objectiveKey, objectiveID, event.agent, event.sessionID, now);
+      tracked.close();
     },
     tool: {
       pulso_experience_start: tool({
@@ -486,6 +600,11 @@ export async function PulsoExperienceEnginePlugin(input) {
           pendingPrimarySessions.delete(context.sessionID);
           return `${objectiveID} ${action === "new" ? "created" : "resumed"}: ${reason.trim()}`;
         },
+      }),
+      pulso_experience_repair: tool({
+        description: "Retry bounded fail-open Pulso experience maintenance for the current project and report skipped historical rows.",
+        args: {},
+        execute: async () => JSON.stringify(await runExperienceMaintenance(input)),
       }),
       pulso_memory_recall: tool({
         description: "Retrieve at most three relevant verified Pulso lessons for the current project.",

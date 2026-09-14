@@ -3,7 +3,7 @@ description: Implements and validates one bounded Pulso task, and optionally cre
 mode: subagent
 color: "#F59E0B"
 temperature: 0.1
-steps: 40
+steps: 30
 permission:
   pulso_lease: allow
   pulso_memory_review: deny
@@ -14,6 +14,7 @@ permission:
   pulso_experience_resume: deny
   pulso_experience_curate: deny
   pulso_experience_start: deny
+  pulso_experience_repair: deny
   pulso_metrics: deny
   pulso_dashboard: deny
   edit: allow
@@ -96,4 +97,4 @@ Load `pulso-protocol` first. Your delegation must include `PULSO_TASK_ID=PULSO-x
 - After commit, inspect committed paths and deletions. Amend, push, reset, restore, clean, stash, broad staging, or commit-all operations require explicit runtime confirmation because they can affect unrelated or remote work.
 - Record commit evidence in `integration` and transition `implemented|verified -> integrated`. A commit failure or stale/failed validation blocks integration, not the completed implementation.
 
-Return a compact `Pulso Result`: outcome first, changed paths, validation results, optional commit, and only material deviations or blockers. Omit empty sections and routine command narration.
+Return a compact `Pulso Result`, normally under 140 words: outcome first, changed paths, validation results, optional commit, and only material deviations or blockers. Omit empty sections and routine command narration.

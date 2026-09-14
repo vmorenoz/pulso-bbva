@@ -47,7 +47,7 @@ test("doctor reports a healthy configured control plane", async () => {
     process.env.XDG_DATA_HOME = path.join(directory, "data");
     for (const agent of [
       "pulso", "pulso-planner", "pulso-challenger", "pulso-executor", "pulso-explorer", "pulso-verifier",
-      "pulso-code-auditor", "pulso-integration-auditor", "pulso-security-auditor", "pulso-ui-auditor", "pulso-experience-curator",
+      "pulso-integration-auditor", "pulso-security-auditor", "pulso-ui-auditor", "pulso-experience-curator", "pulso-delivery-reporter",
     ]) {
       fs.mkdirSync(path.join(configRoot, "agents"), { recursive: true });
       fs.writeFileSync(path.join(configRoot, "agents", `${agent}.md`), "---\n---\n");

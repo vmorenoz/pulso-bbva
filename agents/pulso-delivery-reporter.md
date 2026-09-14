@@ -14,6 +14,7 @@ permission:
   pulso_experience_resume: deny
   pulso_experience_curate: deny
   pulso_experience_start: deny
+  pulso_experience_repair: deny
   pulso_metrics: deny
   pulso_dashboard: deny
   edit: deny

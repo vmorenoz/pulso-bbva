@@ -3,7 +3,7 @@ description: Creates the smallest executable Pulso task plan with clear scope, d
 mode: subagent
 color: "#3B82F6"
 temperature: 0.1
-steps: 18
+steps: 12
 permission:
   pulso_memory_review: deny
   pulso_memory_list: deny
@@ -13,6 +13,7 @@ permission:
   pulso_experience_resume: deny
   pulso_experience_curate: deny
   pulso_experience_start: deny
+  pulso_experience_repair: deny
   pulso_metrics: deny
   pulso_dashboard: deny
   edit:
@@ -55,4 +56,4 @@ Return a blocker to Pulso when the plan requires a schema redesign, public API b
 
 ## Result
 
-Return a compact `Pulso Result` with task IDs, dependencies, key criteria, and only material evidence or a required decision. Do not repeat the objective, list loaded skills, narrate discovery, execute, or commit.
+Return a compact `Pulso Result` under 120 words with task IDs, dependencies, key criteria, and only material evidence or a required decision. Do not repeat the objective, list loaded skills, narrate discovery, execute, or commit.

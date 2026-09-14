@@ -263,6 +263,7 @@ test("reconciles active historical task objectives into their primary session", 
       ...(path.id === "executor-session" ? { parentID: "primary-session" } : {}),
     } }) } };
     const reconciled = await PulsoExperienceEnginePlugin({ directory, client });
+    await new Promise((resolve) => setTimeout(resolve, 50));
     const metrics = JSON.parse(await reconciled.tool.pulso_metrics.execute({}, { directory }));
     assert.equal(metrics.objectives.length, 1);
     assert.equal(metrics.objectives[0].id, "PULSO-OBJ-001");
@@ -298,6 +299,7 @@ test("migrates internal SESSION ids to stable Pulso objective ids", async () => 
     db.close();
 
     const migrated = await PulsoExperienceEnginePlugin({ directory, client: { session: {} } });
+    await new Promise((resolve) => setTimeout(resolve, 25));
     const metrics = JSON.parse(await migrated.tool.pulso_metrics.execute({ objective_id: "PULSO-OBJ-001" }, { directory }));
     assert.equal(metrics.objectives[0].id, "PULSO-OBJ-001");
     assert.equal(metrics.agent_runs[0].runs, 1);
@@ -400,6 +402,84 @@ test("runs verified curation through the legacy plugin SDK shape and stores a me
     const metrics = JSON.parse(await plugin.tool.pulso_metrics.execute({ objective_id: "PULSO-OBJ-001" }, { directory }));
     assert.equal(metrics.objectives[0].curation_status, "completed");
     assert.match(metrics.objectives[0].curation_result, /Se guardaron 1 memorias/);
+  } finally {
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("does not block startup when historical session lookup hangs", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-startup-timeout-"));
+  const previousDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(root, "data");
+  const directory = path.join(root, "project");
+  fs.mkdirSync(directory);
+  try {
+    const { PulsoExperienceEnginePlugin } = await import("../plugins/pulso-experience-engine.mjs");
+    const seed = await PulsoExperienceEnginePlugin({ directory, client: { session: {} } });
+    await seed["chat.message"]({ agent: "pulso", sessionID: "primary" }, { parts: [{ text: "Historical objective" }] });
+    await seed.tool.pulso_experience_start.execute({ action: "new", title: "Historical objective", reason: "This creates a historical active run." }, { directory, sessionID: "primary" });
+    const file = path.join(process.env.XDG_DATA_HOME, "opencode", "pulso", "experience.sqlite");
+    const db = new DatabaseSync(file);
+    const key = experienceCore.projectKey(directory);
+    db.prepare("UPDATE objectives SET id = 'PULSO-900', objective_key = ? WHERE project_key = ?").run(`${key}:PULSO-900`, key);
+    db.prepare("UPDATE agent_runs SET objective_id = 'PULSO-900', objective_key = ? WHERE session_id = 'primary'").run(`${key}:PULSO-900`);
+    db.close();
+
+    const started = Date.now();
+    const plugin = await PulsoExperienceEnginePlugin({ directory, client: { session: { get: async () => new Promise(() => {}) } } });
+    assert.ok(Date.now() - started < 200);
+    assert.ok(plugin.tool.pulso_metrics);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    const log = fs.readFileSync(path.join(process.env.XDG_DATA_HOME, "opencode", "pulso", "reconciliation.jsonl"), "utf8");
+    assert.match(log, /"code":"lookup_timeout"/);
+  } finally {
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skips circular historical session hierarchy without failing startup", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-startup-cycle-"));
+  const previousDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(root, "data");
+  const directory = path.join(root, "project");
+  fs.mkdirSync(directory);
+  try {
+    const { PulsoExperienceEnginePlugin } = await import("../plugins/pulso-experience-engine.mjs");
+    const seed = await PulsoExperienceEnginePlugin({ directory, client: { session: {} } });
+    await seed["chat.message"]({ agent: "pulso", sessionID: "cycle" }, { parts: [{ text: "Circular objective" }] });
+    await seed.tool.pulso_experience_start.execute({ action: "new", title: "Circular objective", reason: "This creates a circular session fixture." }, { directory, sessionID: "cycle" });
+    const plugin = await PulsoExperienceEnginePlugin({ directory, client: { session: { get: async ({ path }) => ({ data: { id: path.id, parentID: path.id, directory } }) } } });
+    assert.ok(plugin.tool.pulso_metrics);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const log = fs.readFileSync(path.join(process.env.XDG_DATA_HOME, "opencode", "pulso", "reconciliation.jsonl"), "utf8");
+    assert.match(log, /"code":"self_parent"/);
+  } finally {
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skips historical sessions that belong to another project directory", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-foreign-session-"));
+  const previousDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(root, "data");
+  const directory = path.join(root, "project");
+  fs.mkdirSync(directory);
+  try {
+    const { PulsoExperienceEnginePlugin } = await import("../plugins/pulso-experience-engine.mjs");
+    const seed = await PulsoExperienceEnginePlugin({ directory, client: { session: {} } });
+    await seed["chat.message"]({ agent: "pulso", sessionID: "foreign" }, { parts: [{ text: "Foreign objective" }] });
+    await seed.tool.pulso_experience_start.execute({ action: "new", title: "Foreign objective", reason: "This creates a foreign session fixture." }, { directory, sessionID: "foreign" });
+    const plugin = await PulsoExperienceEnginePlugin({ directory, client: { session: { get: async ({ path }) => ({ data: { id: path.id, parentID: "other", directory: path.resolve?.("/tmp/other") || "/tmp/other" } }) } } });
+    assert.ok(plugin.tool.pulso_metrics);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const log = fs.readFileSync(path.join(process.env.XDG_DATA_HOME, "opencode", "pulso", "reconciliation.jsonl"), "utf8");
+    assert.match(log, /"code":"foreign_project_session"/);
   } finally {
     if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = previousDataHome;

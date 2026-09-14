@@ -41,6 +41,7 @@ test("reserves human-confirmed memory mutation for Pulso", () => {
   assert.match(agent("pulso"), /pulso_experience_resume: allow/);
   assert.match(agent("pulso"), /pulso_experience_curate: allow/);
   assert.match(agent("pulso"), /pulso_experience_start: allow/);
+  assert.match(agent("pulso"), /pulso_experience_repair: allow/);
   for (const name of fs.readdirSync(agentsDirectory).filter((name) => name.endsWith(".md") && name !== "pulso.md")) {
     const contents = fs.readFileSync(path.join(agentsDirectory, name), "utf8");
     assert.match(contents, /pulso_memory_review: deny/, name);
@@ -48,6 +49,7 @@ test("reserves human-confirmed memory mutation for Pulso", () => {
     assert.match(contents, /pulso_experience_resume: deny/, name);
     assert.match(contents, /pulso_experience_curate: deny/, name);
     assert.match(contents, /pulso_experience_start: deny/, name);
+    assert.match(contents, /pulso_experience_repair: deny/, name);
   }
 });
 
