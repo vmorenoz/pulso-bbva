@@ -75,7 +75,9 @@ export default tool({
           .filter((item) => item.project_key === projectKey)
         const latestCompleted = [...recent].reverse().find((item) => item.code === "reconciliation_completed")
         const latestIssue = [...recent].reverse().find((item) => ["lookup_timeout", "lookup_failed", "cycle_detected", "self_parent", "foreign_project_session", "depth_limit", "budget_exhausted", "row_skipped", "reconciliation_failed"].includes(item.code))
-        if (latestIssue && (!latestCompleted || latestIssue.timestamp > latestCompleted.timestamp)) {
+        if (latestCompleted && Number(latestCompleted.skipped) > 0) {
+          findings.push({ severity: "warning", code: "experience_reconciliation_issue", detail: `${latestCompleted.skipped} historical row(s) skipped; run pulso_experience_repair after OpenCode is responsive` })
+        } else if (latestIssue && (!latestCompleted || latestIssue.timestamp > latestCompleted.timestamp)) {
           findings.push({ severity: "warning", code: "experience_reconciliation_issue", detail: `${latestIssue.code}; run pulso_experience_repair after OpenCode is responsive` })
         }
       } catch {

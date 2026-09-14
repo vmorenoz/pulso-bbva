@@ -287,7 +287,13 @@ async function reconcileActiveTaskObjectives(input) {
       } finally {
         db.close();
       }
-      const task = JSON.parse(fs.readFileSync(path.join(input.directory, ".pulso", "tasks", `${run.objective_id}.json`), "utf8"));
+      let task;
+      try {
+        task = JSON.parse(fs.readFileSync(path.join(input.directory, ".pulso", "tasks", `${run.objective_id}.json`), "utf8"));
+      } catch {
+        // Task history is optional and does not invalidate a safe session reassignment.
+        continue;
+      }
       if (["implemented", "verified", "integrated", "blocked", "failed", "cancelled"].includes(task.status)) {
         const previous = closures.get(parent.objective_key);
         if (!previous || String(run.objective_started_at) > String(previous.started_at)) {
@@ -302,7 +308,7 @@ async function reconcileActiveTaskObjectives(input) {
         const previous = reopens.get(parent.objective_key);
         if (!previous || String(run.objective_started_at) > String(previous)) reopens.set(parent.objective_key, run.objective_started_at);
       }
-    } catch (error) {
+    } catch {
       skipped += 1;
       logExperienceFinding(input.directory, "reconcile_row", "row_skipped", { objective_id: run.objective_id, session_id: run.session_id });
       // Historical task state is optional; one bad row must not stop reconciliation.
