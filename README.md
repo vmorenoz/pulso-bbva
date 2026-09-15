@@ -1,19 +1,36 @@
 # Pulso
 
-**Pulso** es un framework de orquestación adaptativa de entrega para [OpenCode](https://opencode.ai) y GitHub Copilot CLI. Reúne en un único repositorio versionable los agentes, el protocolo de coordinación, los adaptadores de runtime, las herramientas, las bibliotecas del plano de control, la CLI y las pruebas que gobiernan una entrega técnica asistida por agentes.
+**Pulso** convierte una solicitud de ingeniería en un cambio implementado, validado y trazable. Es un framework local de orquestación adaptativa para [OpenCode](https://opencode.ai) y GitHub Copilot CLI que coordina especialistas, protege el alcance y exige evidencia antes de declarar una entrega completa.
 
-Su diseño prioriza una idea sencilla: aplicar el menor proceso que permita entregar un cambio verificable y seguro. El flujo habitual conecta directamente a Pulso con Executor; Planner, Challenger, Explorer, Verifier y los auditores se incorporan únicamente cuando existe ambigüedad, evidencia insuficiente o un riesgo concreto.
+Su principio es sencillo: **usar el menor proceso que permita entregar con confianza**. Una corrección acotada va directamente a Executor; planificación, exploración, verificación y auditorías aparecen solo cuando aportan valor real.
 
-## Resumen ejecutivo y propósito
+## Capacidades
 
-Pulso actúa como responsable técnico de una solicitud: conserva el objetivo, las decisiones, los bloqueos y el estado de cada tarea, mientras delega el trabajo especializado con contratos acotados. El sistema evita que la coordinación se convierta en burocracia y exige evidencia para declarar una entrega completa.
+| Capacidad | Qué aporta |
+| --- | --- |
+| Orquestación adaptativa | Selecciona rutas rápidas, normales, planificadas o sensibles a partir de señales concretas de riesgo. |
+| Entrega de extremo a extremo | Coordina descubrimiento, implementación, pruebas, revisión e integración Git sin abandonar el objetivo original. |
+| Contratos de trabajo | Limita cada tarea por rutas permitidas, exclusiones, criterios de aceptación, validación y autoridad explícita. |
+| Especialistas bajo demanda | Incorpora Planner, Explorer, Verifier, Challenger y auditores únicamente cuando la tarea los necesita. |
+| Autointegración de agentes | `/pulso-autointegrate` descubre, entrevista y registra agentes personalizados en una agenda global para delegarlos mediante tareas nativas de OpenCode. |
+| Seguridad operativa | Usa *leases*, control de alcance, circuit breaker, protección de cambios ajenos y restricciones sobre Git y operaciones remotas. |
+| Verificación basada en evidencia | Diferencia implementación, verificación e integración; una narración del agente nunca basta para declarar éxito. |
+| Memoria técnica selectiva | Conserva únicamente lecciones verificadas y reutilizables, sin guardar conversaciones, payloads ni datos sensibles. |
+| Preferencias controladas | Propone preferencias a partir del uso, pero requiere aprobación humana antes de convertirlas en comportamiento estable. |
+| Observabilidad local | Dashboard y métricas muestran objetivos, agentes, duración, validaciones, reparaciones e intervenciones humanas. |
+| Diagnóstico y recuperación | Doctor, *leases* recuperables y reparación de experiencia permiten detectar y resolver estado inconsistente sin borrar trabajo útil. |
+| Perfiles de modelos | Permite elegir perfiles OpenAI o Claude y asigna modelos por nivel de razonamiento y coste. |
+| OpenCode y Copilot CLI | Comparte protocolo y plano de control mediante adaptadores específicos, sin contaminar sesiones donde Pulso no está activo. |
+| Contexto BBVA | Activa reglas especializadas para BBVA, CELLS y APX solo cuando el repositorio proporciona evidencia suficiente. |
 
-El proyecto está orientado a equipos que necesitan:
+## Por qué Pulso
 
-- Coordinar tareas de ingeniería con agentes especializados sin perder el control del alcance.
-- Reducir los ciclos de reparación especulativos y preservar la trazabilidad de la validación.
-- Mantener memoria técnica y métricas operativas entre objetivos, sin almacenar datos sensibles en el estado del repositorio.
-- Adaptar la ejecución a contextos BBVA —incluidos CELLS y APX— cuando la evidencia del proyecto lo justifica.
+- **No crea un enjambre por defecto.** La ruta habitual es Pulso → Executor.
+- **No entrega autonomía sin límites.** Los permisos técnicos se refuerzan con contratos, *leases* y guards de runtime.
+- **No confunde actividad con progreso.** Detiene ciclos repetitivos y mantiene disponibles el diagnóstico y la evidencia.
+- **No hace crecer su prompt con cada extensión.** Los agentes personalizados viven en una agenda consultada bajo demanda.
+- **No convierte todo en memoria.** Solo cura resultados verificados con valor reutilizable.
+- **No obliga a cambiar de herramientas.** Funciona sobre los flujos nativos de OpenCode y Copilot CLI.
 
 ## Arquitectura y flujo de entrega
 
@@ -46,6 +63,7 @@ Para editar, Executor adquiere un *lease* de 30 minutos sobre la tarea. Los camb
 | Capa | Componentes | Responsabilidad |
 | --- | --- | --- |
 | Orquestación | `agents/pulso.md`, `tools/pulso_route.ts` | Define el objetivo, mantiene decisiones y bloqueos, y selecciona la ruta mínima de entrega. |
+| Contactos de agentes | `/pulso-autointegrate`, `pulso_agent_contacts` | Descubre especialistas externos, conserva fichas aprobadas globalmente y los recupera bajo demanda sin ampliar el prompt permanente. |
 | Ejecución y revisión | `pulso-executor`, Planner, Challenger, Explorer, Verifier y auditores | Implementan o aportan evidencia dentro de límites de autoridad y alcance definidos. |
 | Protocolo y estado | `skills/pulso-protocol/`, `.pulso/` | Establece contratos de tareas, propiedad del estado, *leases* y comunicación entre agentes. |
 | Resiliencia | `plugins/pulso-circuit-breaker.mjs`, `lib/pulso-circuit-breaker-core.js` | Limita reparaciones repetitivas y bloquea mutaciones cuando una tarea entra en un estado de riesgo. |
@@ -168,6 +186,20 @@ npm run install:both
 
 Tras reiniciar OpenCode, Pulso quedará disponible para selección; solo será el agente predeterminado si se instaló con `--set-default`. En Copilot CLI se selecciona con `copilot --agent pulso` o `/agent`.
 
+## Contactos de agentes
+
+OpenCode puede conectar agentes personalizados existentes mediante una experiencia interactiva:
+
+```text
+/pulso-autointegrate
+```
+
+Pulso escanea definiciones globales y de proyecto, permite elegir agentes nuevos o modificados, los entrevista mediante una tarea nativa visible y solicita aprobación antes de añadirlos a la agenda global. Las fichas se guardan en el directorio de datos local de OpenCode; no almacenan el prompt completo del agente ni se incorporan a la memoria técnica.
+
+Durante una entrega, Pulso consulta la agenda únicamente cuando necesita un especialista que sus agentes internos no cubren. Solo puede delegar contactos vigentes y aprobados, siempre mediante `task` y con `PULSO_TASK_ID` y `PULSO_CONTACT_ID`. Las entrevistas son de solo lectura; los contactos con capacidad de edición quedan sujetos al scope, lease y circuit breaker de la tarea y nunca pueden modificar `.pulso/**`.
+
+Esta primera versión está disponible en OpenCode. El soporte equivalente para Copilot CLI queda fuera de este alcance.
+
 ## Dashboard y Doctor
 
 Abra el dashboard de métricas y experiencia de la instalación actual de estas formas:
@@ -205,7 +237,7 @@ agents/                   Orquestador y especialistas acotados
 bin/                      CLI de operación local
 com.github.copilot/       Comandos y hooks del plugin Copilot
 copilot/                  Adaptador MCP y perfiles de agentes para Copilot CLI
-commands/                 Comandos de OpenCode para dashboard y diagnóstico
+commands/                 Comandos interactivos de OpenCode
 lib/                      Implementación del plano de control
 plugins/                  Circuit breaker y motor de experiencia
 scripts/                  Instalación y sincronización del runtime

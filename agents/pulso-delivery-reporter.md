@@ -17,6 +17,7 @@ permission:
   pulso_experience_repair: deny
   pulso_metrics: deny
   pulso_dashboard: deny
+  pulso_agent_contacts: deny
   edit: deny
   bash: deny
   task: deny

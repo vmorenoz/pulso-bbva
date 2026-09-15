@@ -28,6 +28,18 @@ test("keeps validation and integration in the existing task lifecycle", () => {
   assert.match(agent("pulso-executor"), /Record commit evidence in `integration` and transition `implemented\|verified -> integrated`/);
 });
 
+test("limits open task delegation to Pulso agents and approved contacts", () => {
+  const pulso = agent("pulso");
+  assert.match(pulso, /task:\n\s+"\*": allow/);
+  assert.match(pulso, /Do not overuse `task`/);
+  assert.match(pulso, /built-in `pulso-\*` agents or user-approved contacts/);
+  assert.match(pulso, /PULSO_CONTACT_ID/);
+  const command = fs.readFileSync(path.resolve(agentsDirectory, "..", "commands", "pulso-autointegrate.md"), "utf8");
+  assert.match(command, /agent: pulso/);
+  assert.match(command, /PULSO_CONTACT_PROBE/);
+  assert.match(command, /native question tool/);
+});
+
 test("defines mutation paths inside the nested task scope", () => {
   const pulso = agent("pulso");
   const protocol = fs.readFileSync(path.resolve(agentsDirectory, "..", "skills", "pulso-protocol", "SKILL.md"), "utf8");
@@ -56,6 +68,7 @@ test("reserves human-confirmed memory mutation for Pulso", () => {
     const contents = fs.readFileSync(path.join(agentsDirectory, name), "utf8");
     assert.match(contents, /pulso_memory_review: deny/, name);
     assert.match(contents, /pulso_dashboard: deny/, name);
+    assert.match(contents, /pulso_agent_contacts: deny/, name);
     assert.match(contents, /pulso_experience_resume: deny/, name);
     assert.match(contents, /pulso_experience_curate: deny/, name);
     assert.match(contents, /pulso_experience_start: deny/, name);

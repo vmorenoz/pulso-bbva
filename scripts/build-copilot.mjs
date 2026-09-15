@@ -44,6 +44,8 @@ function generateAgents(target, profileName) {
     const { description, body } = parseAgent(path.join(sourceAgents, entry));
     const runtimeBody = name === "pulso"
       ? body.replace("omit `objective_id`", "pass the `objective_id` returned by `pulso_experience_start`")
+        .replace(/^- If you need a specialist not covered by your built-in agents, query `pulso_agent_contacts`.*\n/m, "")
+        .replace(/^- Do not overuse `task`:.*`pulso_agent_contacts`.*\n/m, "")
         .replace(/Run repository and Git commands directly through `bash`\./g, "Use `pulso_primary_git` for repository and Git metadata.")
         .replace(/Reading `git status`, `git log`, `git show`, and `git rev-parse` for orchestration metadata is allowed directly and is not delegated discovery\./g, "Use `pulso_primary_git` for `git status`, `git log`, `git show`, and `git rev-parse` orchestration metadata.")
         .replace(/For `untracked`, add `\.pulso\/` only to the repository's local Git exclude resolved by `git rev-parse --git-path info\/exclude`; for `tracked`, remove only that Pulso-managed local exclude entry/g, "Use `pulso_primary_artifacts` to add or remove only Pulso's local `.pulso/` exclude entry")

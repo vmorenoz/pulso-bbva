@@ -41,6 +41,7 @@ test("ships a valid Copilot plugin with every Pulso agent", () => {
   assert.doesNotMatch(copilotPulso, /gpt-5\.6-sol|claude-opus/);
   assert.match(copilotPulso, /"ask_user"/);
   assert.match(copilotPulso, /never call `task_complete`/);
+  assert.doesNotMatch(copilotPulso, /pulso_agent_contacts|PULSO_CONTACT_ID/);
   assert.doesNotMatch(copilotPulso, /omit `objective_id`/);
   assert.doesNotMatch(copilotPulso, /Hooks supply/);
   const tools = (name) => JSON.parse(fs.readFileSync(path.join(root, "copilot", "profiles", "openai", "agents", `${name}.agent.md`), "utf8").match(/^tools: (.+)$/m)[1]);

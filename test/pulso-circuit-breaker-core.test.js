@@ -293,3 +293,128 @@ test("supports legacy task contracts with mutation scope at the root", async () 
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("allows only discovered probes and registered contacts through native task delegation", async () => {
+  const { PulsoCircuitBreakerPlugin } = await import("../plugins/pulso-circuit-breaker.mjs");
+  const contacts = require("../lib/pulso-agent-contacts.js");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-contact-guard-"));
+  const previousConfig = process.env.OPENCODE_CONFIG_DIR;
+  const previousData = process.env.XDG_DATA_HOME;
+  try {
+    process.env.OPENCODE_CONFIG_DIR = path.join(directory, "config");
+    process.env.XDG_DATA_HOME = path.join(directory, "data");
+    const agents = path.join(process.env.OPENCODE_CONFIG_DIR, "agents");
+    fs.mkdirSync(agents, { recursive: true });
+    fs.writeFileSync(path.join(agents, "oracle-reviewer.md"), "---\ndescription: Reviews Oracle SQL.\nmode: subagent\n---\nReview SQL.\n");
+    const candidate = contacts.scan(directory)[0];
+    const hooks = await PulsoCircuitBreakerPlugin({ directory, client: {} });
+    await hooks["chat.message"]({ agent: "pulso", sessionID: "primary" }, { parts: [{ text: "Coordinate work" }] });
+
+    await assert.rejects(
+      () => hooks["tool.execute.before"](
+        { sessionID: "primary", tool: "task" },
+        { args: { subagent_type: "oracle-reviewer", prompt: "No markers" } },
+      ),
+      /required delegation markers/,
+    );
+    await hooks["tool.execute.before"](
+      { sessionID: "primary", tool: "task" },
+      { args: { subagent_type: "oracle-reviewer", prompt: "PULSO_CONTACT_PROBE=oracle-reviewer" } },
+    );
+    await hooks["chat.message"](
+      { agent: "oracle-reviewer", sessionID: "probe" },
+      { parts: [{ text: "PULSO_CONTACT_PROBE=oracle-reviewer" }] },
+    );
+    await assert.rejects(
+      () => hooks["tool.execute.before"]({ sessionID: "probe", tool: "write" }, { args: { filePath: "profile.txt" } }),
+      /probe oracle-reviewer cannot use tools/,
+    );
+
+    contacts.register(directory, {
+      agent: "oracle-reviewer",
+      digest: candidate.digest,
+      description: "Oracle SQL specialist",
+      use_when: ["Oracle SQL"],
+      avoid_when: [],
+      capabilities: ["review"],
+      mutation: "scoped",
+    });
+    const prompt = "PULSO_TASK_ID=PULSO-001\nPULSO_CONTACT_ID=oracle-reviewer";
+    await assert.rejects(
+      () => hooks["tool.execute.before"](
+        { sessionID: "primary", tool: "task" },
+        { args: { subagent_type: "oracle-reviewer", prompt } },
+      ),
+      /required delegation markers/,
+    );
+    const taskDirectory = path.join(directory, ".pulso", "tasks");
+    const leaseDirectory = path.join(directory, ".pulso", "leases");
+    fs.mkdirSync(taskDirectory, { recursive: true });
+    fs.mkdirSync(leaseDirectory, { recursive: true });
+    fs.writeFileSync(path.join(taskDirectory, "PULSO-001.json"), JSON.stringify({
+      id: "PULSO-001", status: "ready", scope: { allowed_paths: ["src/**"], excluded_paths: [] },
+    }));
+    fs.writeFileSync(path.join(leaseDirectory, "PULSO-001.json"), JSON.stringify({
+      task_id: "PULSO-001", status: "active", owner_session: "contact", expires_at: "2999-01-01T00:00:00.000Z",
+    }));
+    await hooks["tool.execute.before"](
+      { sessionID: "primary", tool: "task" },
+      { args: { subagent_type: "oracle-reviewer", prompt } },
+    );
+    await hooks["chat.message"](
+      { agent: "oracle-reviewer", sessionID: "contact" },
+      { parts: [{ text: prompt }] },
+    );
+    await hooks["tool.execute.before"](
+      { sessionID: "contact", tool: "write" },
+      { args: { filePath: "src/query.sql" } },
+    );
+    await assert.rejects(
+      () => hooks["tool.execute.before"](
+        { sessionID: "contact", tool: "bash" },
+        { args: { command: "npm test" } },
+      ),
+      /cannot use bash/,
+    );
+    await assert.rejects(
+      () => hooks["tool.execute.before"](
+        { sessionID: "contact", tool: "task" },
+        { args: { subagent_type: "general", prompt: "Delegate" } },
+      ),
+      /cannot use task/,
+    );
+    await assert.rejects(
+      () => hooks["tool.execute.before"](
+        { sessionID: "contact", tool: "write" },
+        { args: { filePath: ".pulso/tasks/PULSO-001.json" } },
+      ),
+      /outside PULSO-001 scope/,
+    );
+    contacts.register(directory, {
+      agent: "oracle-reviewer",
+      digest: candidate.digest,
+      description: "Oracle SQL specialist",
+      use_when: ["Oracle SQL"],
+      avoid_when: [],
+      capabilities: ["review"],
+      mutation: "read_only",
+    });
+    await hooks["chat.message"](
+      { agent: "oracle-reviewer", sessionID: "read-only-contact" },
+      { parts: [{ text: prompt }] },
+    );
+    await assert.rejects(
+      () => hooks["tool.execute.before"](
+        { sessionID: "read-only-contact", tool: "write" },
+        { args: { filePath: "src/query.sql" } },
+      ),
+      /registered as read-only/,
+    );
+  } finally {
+    if (previousConfig === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+    else process.env.OPENCODE_CONFIG_DIR = previousConfig;
+    if (previousData === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousData;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
