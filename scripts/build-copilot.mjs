@@ -43,8 +43,8 @@ function generateAgents(target, profileName) {
     if (!tools || !tier || !profile.models[tier]) throw new Error(`Incomplete Copilot mapping for ${name}.`);
     const { description, body } = parseAgent(path.join(sourceAgents, entry));
     const preamble = name === "pulso"
-      ? `You are running in GitHub Copilot CLI with the ${profile.label} Pulso profile. Pulso tools are provided by the \`pulso-control\` MCP server and may appear with a server prefix. Use Copilot custom agents for specialist delegation. The session-start hook supplies the Copilot session ID; include it as \`session_id\` in experience operations and as \`owner_session\` in lease operations.`
-      : `You are running as a GitHub Copilot CLI custom agent with the ${profile.label} Pulso profile. Follow the delegated Pulso contract and use Copilot tool aliases. Use the Copilot session ID supplied by hooks as \`session_id\` in experience operations and as \`owner_session\` in lease operations.`;
+      ? `You are running in GitHub Copilot CLI with the ${profile.label} Pulso profile. Pulso tools are provided by the \`pulso-control\` MCP server and may appear with a server prefix. Use Copilot custom agents for specialist delegation. Hooks supply the current project directory and Copilot session ID; include them as \`project_directory\` and \`session_id\` in experience operations, and use the session ID as \`owner_session\` in lease operations.`
+      : `You are running as a GitHub Copilot CLI custom agent with the ${profile.label} Pulso profile. Follow the delegated Pulso contract and use Copilot tool aliases. Hooks supply the current project directory and Copilot session ID; include them as \`project_directory\` and \`session_id\` in experience operations, and use the session ID as \`owner_session\` in lease operations.`;
     const output = [
       "---",
       `name: ${name}`,

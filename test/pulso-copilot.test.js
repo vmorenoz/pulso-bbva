@@ -5,6 +5,7 @@ const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const test = require("node:test");
 
 const root = path.resolve(__dirname, "..");
@@ -33,12 +34,23 @@ test("ships a valid Copilot plugin with every Pulso agent", () => {
 
 test("Copilot MCP exposes and executes the shared control plane", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-copilot-mcp-"));
+  const secondDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-copilot-mcp-second-"));
   const dataHome = path.join(directory, "data");
+  let client;
+  let resumedClient;
+  let noRootsClient;
   try {
     fs.writeFileSync(path.join(directory, "PULSO.md"), "---\nschema_version: 1\nartifacts: untracked\n---\n\n## Project Rules\n");
     const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
     const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
-    const client = new Client({ name: "pulso-test", version: "1.0.0" });
+    const { ListRootsRequestSchema } = await import("@modelcontextprotocol/sdk/types.js");
+    let currentRoots = [directory];
+    let rootsFailure = false;
+    client = new Client({ name: "pulso-test", version: "1.0.0" }, { capabilities: { roots: { listChanged: true } } });
+    client.setRequestHandler(ListRootsRequestSchema, async () => {
+      if (rootsFailure) throw new Error("roots unavailable");
+      return { roots: currentRoots.map((item) => ({ uri: pathToFileURL(item).href, name: path.basename(item) })) };
+    });
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [path.join(root, "copilot", "dist", "pulso-mcp-server.mjs")],
@@ -53,15 +65,34 @@ test("Copilot MCP exposes and executes the shared control plane", async () => {
     }
     const routed = await client.callTool({ name: "pulso_route", arguments: { objective: "Fix a bounded display defect" } });
     assert.equal(JSON.parse(routed.content[0].text).route, "fast");
+    const firstDoctor = JSON.parse((await client.callTool({ name: "pulso_doctor", arguments: {} })).content[0].text);
+    assert.equal(firstDoctor.project.directory, fs.realpathSync(directory));
+    rootsFailure = true;
+    assert.equal((await client.callTool({ name: "pulso_doctor", arguments: {} })).isError, true);
+    rootsFailure = false;
     const lease = await client.callTool({ name: "pulso_lease", arguments: { action: "acquire", task_id: "PULSO-001" } });
     assert.equal(JSON.parse(lease.content[0].text).status, "active");
     await client.callTool({ name: "pulso_lease", arguments: { action: "release", task_id: "PULSO-001" } });
     const started = await client.callTool({ name: "pulso_experience_start", arguments: { action: "new", title: "Copilot identity test", reason: "This verifies stable Copilot session identity.", session_id: "copilot-session-stable" } });
     const objectiveID = started.content[0].text.match(/PULSO-OBJ-\d+/)?.[0];
     assert.ok(objectiveID);
+    currentRoots = [directory, secondDirectory];
+    const ambiguous = await client.callTool({ name: "pulso_doctor", arguments: {} });
+    assert.equal(ambiguous.isError, true);
+    const escaped = await client.callTool({ name: "pulso_doctor", arguments: { project_directory: os.tmpdir() } });
+    assert.equal(escaped.isError, true);
+    const secondDoctor = JSON.parse((await client.callTool({ name: "pulso_doctor", arguments: { project_directory: secondDirectory } })).content[0].text);
+    assert.equal(secondDoctor.project.directory, fs.realpathSync(secondDirectory));
+    assert.notEqual(secondDoctor.project.key, firstDoctor.project.key);
+    const isolated = await client.callTool({ name: "pulso_metrics", arguments: { session_id: "copilot-session-stable", project_directory: secondDirectory } });
+    assert.deepEqual(JSON.parse(isolated.content[0].text).objectives, []);
+    const secondStarted = await client.callTool({ name: "pulso_experience_start", arguments: { action: "new", title: "Second Copilot project", reason: "This verifies repository-scoped Copilot sessions.", session_id: "copilot-session-stable", project_directory: secondDirectory } });
+    assert.match(secondStarted.content[0].text, /created/);
+    currentRoots = [directory];
     await client.close();
 
-    const resumedClient = new Client({ name: "pulso-resume-test", version: "1.0.0" });
+    resumedClient = new Client({ name: "pulso-resume-test", version: "1.0.0" }, { capabilities: { roots: { listChanged: true } } });
+    resumedClient.setRequestHandler(ListRootsRequestSchema, async () => ({ roots: [{ uri: pathToFileURL(directory).href, name: "current-project" }] }));
     const resumedTransport = new StdioClientTransport({
       command: process.execPath,
       args: [path.join(root, "copilot", "dist", "pulso-mcp-server.mjs")],
@@ -74,8 +105,26 @@ test("Copilot MCP exposes and executes the shared control plane", async () => {
     assert.equal(finalized.isError, undefined);
     assert.match(finalized.content[0].text, new RegExp(objectiveID));
     await resumedClient.close();
+
+    noRootsClient = new Client({ name: "pulso-no-roots-test", version: "1.0.0" });
+    const noRootsTransport = new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(root, "copilot", "dist", "pulso-mcp-server.mjs")],
+      cwd: directory,
+      env: { ...process.env, XDG_DATA_HOME: dataHome },
+      stderr: "pipe",
+    });
+    await noRootsClient.connect(noRootsTransport);
+    assert.equal((await noRootsClient.callTool({ name: "pulso_doctor", arguments: {} })).isError, true);
+    const explicitDoctor = await noRootsClient.callTool({ name: "pulso_doctor", arguments: { project_directory: directory } });
+    assert.equal(JSON.parse(explicitDoctor.content[0].text).project.directory, fs.realpathSync(directory));
+    await noRootsClient.close();
   } finally {
+    await noRootsClient?.close().catch(() => {});
+    await resumedClient?.close().catch(() => {});
+    await client?.close().catch(() => {});
     fs.rmSync(directory, { recursive: true, force: true });
+    fs.rmSync(secondDirectory, { recursive: true, force: true });
   }
 });
 

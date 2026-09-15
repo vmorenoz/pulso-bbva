@@ -18,14 +18,19 @@ function output(value = {}) {
 
 if (hook === "sessionStart" || hook === "SessionStart") {
   const config = path.join(cwd, "PULSO.md");
-  const sessionContext = eventSession ? ` The current Copilot session ID is ${eventSession}; pass it as session_id to Pulso experience calls and as owner_session to every pulso_lease call.` : "";
+  const sessionContext = `${eventSession ? ` The current Copilot session ID is ${eventSession}; pass it as session_id to Pulso experience calls and as owner_session to every pulso_lease call.` : ""} Pass ${cwd} as project_directory to every pulso-control MCP call.`;
   if (!fs.existsSync(config)) output({ additionalContext: `Pulso is installed. Before delivery work, ask once whether .pulso artifacts should be tracked and create root PULSO.md using the pulso-protocol skill.${sessionContext}` });
   else output({ additionalContext: `Apply this repository's Pulso configuration and project rules.${sessionContext}\n\n${fs.readFileSync(config, "utf8").slice(0, 20000)}` });
   process.exit(0);
 }
 
 if (hook === "subagentStart") {
-  output(eventSession ? { additionalContext: `Use ${eventSession} as session_id in Pulso experience calls and as owner_session in every pulso_lease call.` } : {});
+  output({ additionalContext: `${eventSession ? `Use ${eventSession} as session_id in Pulso experience calls and as owner_session in every pulso_lease call. ` : ""}Pass ${cwd} as project_directory to every pulso-control MCP call.` });
+  process.exit(0);
+}
+
+if (hook === "userPromptSubmitted") {
+  output({ additionalContext: `The current project directory is ${cwd}; pass it as project_directory to every pulso-control MCP call.` });
   process.exit(0);
 }
 

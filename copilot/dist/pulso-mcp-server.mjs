@@ -7351,11 +7351,11 @@ var require_pulso_experience_core = __commonJS({
     "use strict";
     var crypto3 = __require("crypto");
     var SENSITIVE = /(?:api[_-]?key|authorization|bearer\s+\S+|password|secret|token|customer|cliente|payload|\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b|\b[\w.+-]+@[\w.-]+\.[A-Z]{2,}\b|\b(?:\+?\d[\s.-]?){8,15}\b)/i;
-    function projectKey(directory2) {
-      return crypto3.createHash("sha256").update(String(directory2)).digest("hex").slice(0, 24);
+    function projectKey(directory) {
+      return crypto3.createHash("sha256").update(String(directory)).digest("hex").slice(0, 24);
     }
-    function objectiveKey(directory2, objectiveID) {
-      return `${projectKey(directory2)}:${objectiveID}`;
+    function objectiveKey(directory, objectiveID) {
+      return `${projectKey(directory)}:${objectiveID}`;
     }
     function fingerprint(memory) {
       return crypto3.createHash("sha256").update([memory.scope, memory.scope === "project" ? memory.project_key || "" : "", memory.context, memory.trap, memory.rule].join("\n").toLowerCase().replace(/\s+/g, " ")).digest("hex");
@@ -49643,7 +49643,7 @@ var SQLiteDatabase;
 function reconciliationLogPath() {
   return path.join(path.dirname(databasePath()), "reconciliation.jsonl");
 }
-function logExperienceFinding(directory2, stage, code, detail = {}) {
+function logExperienceFinding(directory, stage, code, detail = {}) {
   try {
     const file3 = reconciliationLogPath();
     fs.mkdirSync(path.dirname(file3), { recursive: true, mode: 448 });
@@ -49653,7 +49653,7 @@ function logExperienceFinding(directory2, stage, code, detail = {}) {
     }
     fs.appendFileSync(file3, `${JSON.stringify({
       timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      project_key: import_pulso_experience_core.default.projectKey(directory2),
+      project_key: import_pulso_experience_core.default.projectKey(directory),
       stage,
       code,
       ...detail
@@ -49672,19 +49672,19 @@ function withTimeout(promise3, milliseconds, message) {
     })
   ]).finally(() => clearTimeout(timer));
 }
-function sessionGet(client, sessionID2, directory2) {
-  return client.session.get({ path: { id: sessionID2 }, query: { directory: directory2 } });
+function sessionGet(client, sessionID2, directory) {
+  return client.session.get({ path: { id: sessionID2 }, query: { directory } });
 }
-function sessionMessages(client, sessionID2, directory2, limit = 10) {
-  return client.session.messages({ path: { id: sessionID2 }, query: { directory: directory2, limit } });
+function sessionMessages(client, sessionID2, directory, limit = 10) {
+  return client.session.messages({ path: { id: sessionID2 }, query: { directory, limit } });
 }
-function sessionCreate(client, directory2, parentID, title) {
-  return client.session.create({ body: { parentID, title }, query: { directory: directory2 } });
+function sessionCreate(client, directory, parentID, title) {
+  return client.session.create({ body: { parentID, title }, query: { directory } });
 }
-function sessionPrompt(client, sessionID2, directory2, agent, text2) {
+function sessionPrompt(client, sessionID2, directory, agent, text2) {
   return client.session.prompt({
     path: { id: sessionID2 },
-    query: { directory: directory2 },
+    query: { directory },
     body: { agent, parts: [{ type: "text", text: text2 }] }
   });
 }
@@ -49785,14 +49785,14 @@ function nextObjectiveID(db, projectKey) {
   }, 0) + 1;
   return `PULSO-OBJ-${String(next).padStart(3, "0")}`;
 }
-function migrateSessionObjectiveIDs(db, directory2) {
-  const key = import_pulso_experience_core.default.projectKey(directory2);
+function migrateSessionObjectiveIDs(db, directory) {
+  const key = import_pulso_experience_core.default.projectKey(directory);
   const rows = db.prepare("SELECT objective_key, id FROM objectives WHERE project_key = ? AND id LIKE 'SESSION-%' ORDER BY started_at, objective_key").all(key);
   db.exec("BEGIN IMMEDIATE");
   try {
     for (const row of rows) {
       const id = nextObjectiveID(db, key);
-      const objectiveKey = import_pulso_experience_core.default.objectiveKey(directory2, id);
+      const objectiveKey = import_pulso_experience_core.default.objectiveKey(directory, id);
       db.prepare("UPDATE objectives SET objective_key = ?, id = ?, title = CASE WHEN title = ? THEN 'Pulso objective' ELSE title END WHERE objective_key = ?").run(objectiveKey, id, row.id, row.objective_key);
       db.prepare("UPDATE agent_runs SET objective_key = ?, objective_id = ? WHERE objective_key = ?").run(objectiveKey, id, row.objective_key);
     }
@@ -50087,8 +50087,8 @@ async function startExperienceCurator(input2, context, objectiveID, projectKey, 
     return false;
   }
 }
-function repairCycles(directory2, objectiveID) {
-  const file3 = path.join(directory2, ".pulso", "circuit-breakers", `${objectiveID}.json`);
+function repairCycles(directory, objectiveID) {
+  const file3 = path.join(directory, ".pulso", "circuit-breakers", `${objectiveID}.json`);
   try {
     if (fs.lstatSync(file3).isSymbolicLink()) return 0;
     return Math.max(0, Number(JSON.parse(fs.readFileSync(file3, "utf8")).repair_cycles) || 0);
@@ -50394,10 +50394,12 @@ async function PulsoExperienceEnginePlugin(input2) {
 
 // copilot/pulso-mcp-server.mjs
 var executeFile = promisify(execFile);
-var directory = process.cwd();
+var startupDirectory = fs2.realpathSync(process.cwd());
 var sessionID = process.env.COPILOT_SESSION_ID || `copilot-${process.pid}-${crypto2.randomUUID()}`;
 var pluginRoot = path2.resolve(path2.dirname(fileURLToPath(import.meta.url)), "../..");
 var spawnedSessions = /* @__PURE__ */ new Map();
+var experienceByDirectory = /* @__PURE__ */ new Map();
+var MAX_EXPERIENCE_DIRECTORIES = 8;
 function text(value) {
   return { content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] };
 }
@@ -50439,9 +50441,49 @@ function copilotClient() {
   };
 }
 var server = new McpServer({ name: "pulso-control", version: "0.2.0" });
-var experience = await PulsoExperienceEnginePlugin({ directory, client: copilotClient() });
+async function resolveDirectory(explicit) {
+  let roots = [];
+  const supportsRoots = Boolean(server.server.getClientCapabilities()?.roots);
+  if (supportsRoots) {
+    let result;
+    try {
+      result = await Promise.race([
+        server.server.listRoots(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("roots timeout")), 1e3))
+      ]);
+    } catch (error106) {
+      throw new Error(`Unable to resolve the active Copilot workspace root: ${error106.message}`);
+    }
+    roots = result.roots.filter((item) => item.uri.startsWith("file://")).map((item) => fs2.realpathSync(fileURLToPath(item.uri)));
+    if (roots.length === 0) throw new Error("Copilot exposed roots capability without a file workspace root.");
+  }
+  if (explicit) {
+    if (!path2.isAbsolute(explicit)) throw new Error("project_directory must be an absolute Copilot workspace root.");
+    const candidate = fs2.realpathSync(explicit);
+    if (roots.length && !roots.includes(candidate)) throw new Error(`project_directory is not an active Copilot workspace root: ${candidate}`);
+    if (!supportsRoots && candidate !== startupDirectory) throw new Error("Copilot did not expose workspace roots; refusing a project_directory outside the MCP startup workspace.");
+    return candidate;
+  }
+  if (roots.length === 1) return roots[0];
+  if (roots.length > 1) throw new Error("Multiple Copilot workspace roots are active; pass project_directory explicitly.");
+  throw new Error("The MCP client did not expose workspace roots; pass project_directory explicitly.");
+}
+function experienceFor(projectDirectory) {
+  if (!experienceByDirectory.has(projectDirectory)) {
+    if (experienceByDirectory.size >= MAX_EXPERIENCE_DIRECTORIES) experienceByDirectory.delete(experienceByDirectory.keys().next().value);
+    experienceByDirectory.set(projectDirectory, PulsoExperienceEnginePlugin({ directory: projectDirectory, client: copilotClient() }));
+  }
+  return experienceByDirectory.get(projectDirectory);
+}
+function experienceSessionID(projectDirectory, supplied) {
+  const project = crypto2.createHash("sha256").update(projectDirectory).digest("hex").slice(0, 24);
+  return `copilot:${project}:${supplied || sessionID}`;
+}
 function register(name, description, inputSchema, handler, annotations = {}) {
-  server.registerTool(name, { description, inputSchema, annotations }, async (args) => text(await handler(args)));
+  server.registerTool(name, { description, inputSchema: { ...inputSchema, project_directory: external_exports.string().min(1).optional() }, annotations }, async ({ project_directory, ...args }) => {
+    const projectDirectory = await resolveDirectory(project_directory);
+    return text(await handler(args, projectDirectory));
+  });
 }
 register("pulso_route", "Select the smallest Pulso delivery route using deterministic risk signals.", {
   objective: external_exports.string().min(3),
@@ -50457,9 +50499,9 @@ register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable P
   task_id: external_exports.string().regex(/^PULSO-\d+$/),
   ttl_minutes: external_exports.number().int().min(5).max(240).default(30),
   owner_session: external_exports.string().min(1).optional()
-}, async ({ action, task_id, ttl_minutes = 30, owner_session }) => {
+}, async ({ action, task_id, ttl_minutes = 30, owner_session }, projectDirectory) => {
   const leaseOwner = owner_session || sessionID;
-  const file3 = path2.join(import_pulso_file_state.default.safeDirectory(directory, [".pulso", "leases"]), `${task_id}.json`);
+  const file3 = path2.join(import_pulso_file_state.default.safeDirectory(projectDirectory, [".pulso", "leases"]), `${task_id}.json`);
   return import_pulso_file_state.default.withFileLock(file3, () => {
     const existing = fs2.existsSync(file3) ? JSON.parse(fs2.readFileSync(file3, "utf8")) : null;
     if (action === "status") return JSON.stringify(existing || { task_id, status: "none" });
@@ -50485,9 +50527,9 @@ register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable P
 register("pulso_dashboard", "Start a temporary local read-only Pulso dashboard.", {
   open: external_exports.boolean().default(false),
   timeout_minutes: external_exports.number().int().min(5).max(240).default(30)
-}, async ({ open: open2 = false, timeout_minutes = 30 }) => {
+}, async ({ open: open2 = false, timeout_minutes = 30 }, projectDirectory) => {
   const script = path2.join(pluginRoot, "bin", "pulso-dashboard.js");
-  const args = [script, "--project", directory, "--port", "0", "--timeout", String(timeout_minutes)];
+  const args = [script, "--project", projectDirectory, "--port", "0", "--timeout", String(timeout_minutes)];
   if (open2) args.push("--open");
   const child = spawn(process.execPath, args, { detached: true, stdio: ["ignore", "pipe", "pipe"] });
   const url3 = await new Promise((resolve, reject) => {
@@ -50511,12 +50553,12 @@ register("pulso_dashboard", "Start a temporary local read-only Pulso dashboard."
   child.unref();
   return JSON.stringify({ status: "started", url: url3, expires_after_minutes: timeout_minutes });
 });
-register("pulso_doctor", "Run a read-only Copilot Pulso health check.", {}, async () => {
+register("pulso_doctor", "Run a read-only Copilot Pulso health check.", {}, async (_, projectDirectory) => {
   const findings = [];
   if (!fs2.existsSync(path2.join(pluginRoot, "plugin.json"))) findings.push({ severity: "error", code: "missing_plugin_manifest" });
-  if (!fs2.existsSync(path2.join(directory, "PULSO.md"))) findings.push({ severity: "warning", code: "missing_project_config" });
+  if (!fs2.existsSync(path2.join(projectDirectory, "PULSO.md"))) findings.push({ severity: "warning", code: "missing_project_config" });
   for (const folder of ["tasks", "leases", "circuit-breakers"]) {
-    const target = path2.join(directory, ".pulso", folder);
+    const target = path2.join(projectDirectory, ".pulso", folder);
     if (!fs2.existsSync(target)) continue;
     for (const name of fs2.readdirSync(target).filter((entry) => entry.endsWith(".json"))) {
       try {
@@ -50526,22 +50568,26 @@ register("pulso_doctor", "Run a read-only Copilot Pulso health check.", {}, asyn
       }
     }
   }
-  return JSON.stringify({ status: findings.some((item) => item.severity === "error") ? "unhealthy" : findings.length ? "warning" : "healthy", runtime: "copilot", findings });
+  const projectKey = crypto2.createHash("sha256").update(projectDirectory).digest("hex").slice(0, 24);
+  return JSON.stringify({ status: findings.some((item) => item.severity === "error") ? "unhealthy" : findings.length ? "warning" : "healthy", runtime: "copilot", project: { directory: projectDirectory, key: projectKey }, findings });
 }, { readOnlyHint: true });
-for (const [name, definition] of Object.entries(experience.tool)) {
-  const baseSchemas = {
-    pulso_experience_start: { action: external_exports.enum(["new", "resume"]), title: external_exports.string().min(3), objective_id: external_exports.string().regex(/^PULSO-OBJ-\d+$/).optional(), reason: external_exports.string().min(10) },
-    pulso_experience_repair: {},
-    pulso_memory_recall: { query: external_exports.string().min(3), tags: external_exports.array(external_exports.string()).optional() },
-    pulso_experience_finalize: { objective_id: external_exports.string().regex(/^(?:PULSO-\d+|PULSO-OBJ-\d+)$/).optional(), title: external_exports.string().min(3), status: external_exports.enum(["implemented", "partially_verified", "verified", "integrated", "blocked", "failed", "cancelled"]), summary: external_exports.string().min(10), evidence: external_exports.array(external_exports.string()).min(1), verification_gaps: external_exports.array(external_exports.string().min(3)).default([]), human_interventions: external_exports.number().int().min(0).default(0) },
-    pulso_experience_curate: { objective_id: external_exports.string().regex(/^PULSO-OBJ-\d+$|^PULSO-\d+$/) },
-    pulso_experience_resume: { objective_id: external_exports.string().regex(/^PULSO-OBJ-\d+$/) },
-    pulso_memory_list: {},
-    pulso_memory_review: { action: external_exports.enum(["retire", "approve_preference", "reject_preference", "promote_global"]), id: external_exports.string(), reason: external_exports.string().min(1) },
-    pulso_profile_recall: {},
-    pulso_metrics: { objective_id: external_exports.string().regex(/^(?:PULSO-\d+|PULSO-OBJ-\d+)$/).optional() }
-  };
-  const schema = { ...baseSchemas[name], session_id: external_exports.string().min(1).optional() };
-  register(name, definition.description || name, schema, ({ session_id, ...args }) => definition.execute(args, { directory, sessionID: session_id || sessionID }), ["pulso_memory_recall", "pulso_memory_list", "pulso_profile_recall", "pulso_metrics"].includes(name) ? { readOnlyHint: true } : {});
+var experienceSchemas = {
+  pulso_experience_start: { action: external_exports.enum(["new", "resume"]), title: external_exports.string().min(3), objective_id: external_exports.string().regex(/^PULSO-OBJ-\d+$/).optional(), reason: external_exports.string().min(10) },
+  pulso_experience_repair: {},
+  pulso_memory_recall: { query: external_exports.string().min(3), tags: external_exports.array(external_exports.string()).optional() },
+  pulso_experience_finalize: { objective_id: external_exports.string().regex(/^(?:PULSO-\d+|PULSO-OBJ-\d+)$/).optional(), title: external_exports.string().min(3), status: external_exports.enum(["implemented", "partially_verified", "verified", "integrated", "blocked", "failed", "cancelled"]), summary: external_exports.string().min(10), evidence: external_exports.array(external_exports.string()).min(1), verification_gaps: external_exports.array(external_exports.string().min(3)).default([]), human_interventions: external_exports.number().int().min(0).default(0) },
+  pulso_experience_curate: { objective_id: external_exports.string().regex(/^PULSO-OBJ-\d+$|^PULSO-\d+$/) },
+  pulso_experience_resume: { objective_id: external_exports.string().regex(/^PULSO-OBJ-\d+$/) },
+  pulso_memory_list: {},
+  pulso_memory_review: { action: external_exports.enum(["retire", "approve_preference", "reject_preference", "promote_global"]), id: external_exports.string(), reason: external_exports.string().min(1) },
+  pulso_profile_recall: {},
+  pulso_metrics: { objective_id: external_exports.string().regex(/^(?:PULSO-\d+|PULSO-OBJ-\d+)$/).optional() }
+};
+for (const [name, baseSchema] of Object.entries(experienceSchemas)) {
+  const schema = { ...baseSchema, session_id: external_exports.string().min(1).optional() };
+  register(name, `Pulso experience operation: ${name}.`, schema, async ({ session_id, ...args }, projectDirectory) => {
+    const experience = await experienceFor(projectDirectory);
+    return experience.tool[name].execute(args, { directory: projectDirectory, sessionID: experienceSessionID(projectDirectory, session_id) });
+  }, ["pulso_memory_recall", "pulso_memory_list", "pulso_profile_recall", "pulso_metrics"].includes(name) ? { readOnlyHint: true } : {});
 }
 await server.connect(new StdioServerTransport());

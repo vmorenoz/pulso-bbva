@@ -9,6 +9,14 @@
         "timeoutSec": 5
       }
     ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "exec": "node",
+        "args": ["${PLUGIN_ROOT}/copilot/pulso-hook.mjs", "userPromptSubmitted"],
+        "timeoutSec": 5
+      }
+    ],
     "preToolUse": [
       {
         "type": "command",
