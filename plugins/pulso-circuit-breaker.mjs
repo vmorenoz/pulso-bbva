@@ -56,6 +56,15 @@ function matchesScope(candidate, rule) {
   return new RegExp(`^${pattern}$`).test(candidate);
 }
 
+function mutationScope(task) {
+  // Contracts created before scope was documented as nested stored these at the root.
+  const scope = task.scope && typeof task.scope === "object" ? task.scope : task;
+  return {
+    allowed: Array.isArray(scope.allowed_paths) ? scope.allowed_paths : [],
+    excluded: Array.isArray(scope.excluded_paths) ? scope.excluded_paths : [],
+  };
+}
+
 function enforceMutation(directory, sessionID, taskID, tool, args) {
   const { task, lease } = readTaskAndLease(directory, taskID);
   if (!["ready", "in_progress"].includes(task.status)) throw new Error(`${taskID} cannot be mutated while status is ${task.status}.`);
@@ -65,8 +74,7 @@ function enforceMutation(directory, sessionID, taskID, tool, args) {
   }
   const candidates = mutationPaths(tool, args);
   if (candidates.length === 0) throw new Error(`Cannot determine mutation paths for ${tool}.`);
-  const allowed = task.scope?.allowed_paths || [];
-  const excluded = task.scope?.excluded_paths || [];
+  const { allowed, excluded } = mutationScope(task);
   for (const raw of candidates) {
     const candidate = relativePath(directory, raw);
     const ownState = candidate === `.pulso/tasks/${taskID}.json`;
@@ -134,12 +142,16 @@ function migrateLegacyTokenCaps(directory) {
 }
 
 export async function PulsoCircuitBreakerPlugin(input) {
-  migrateLegacyTokenCaps(input.directory);
+  let migrated = false;
   return {
     "chat.message": async (event, output) => {
       if (!TRACKED_AGENTS.has(event.agent || "")) return;
       const taskID = taskIDFromParts(output.parts);
       if (!taskID) throw new Error(`${event.agent} requires PULSO_TASK_ID=PULSO-xxx for circuit-breaker enforcement.`);
+      if (!migrated) {
+        migrateLegacyTokenCaps(input.directory);
+        migrated = true;
+      }
       sessionTasks.set(event.sessionID, { taskID, agent: event.agent });
       const state = await update(input.directory, taskID, (current) => {
         core.addSession(current, event.sessionID);

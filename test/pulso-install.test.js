@@ -9,6 +9,7 @@ const test = require("node:test");
 
 const root = path.resolve(__dirname, "..");
 const sync = path.join(root, "scripts", "sync.mjs");
+const install = path.join(root, "scripts", "install.mjs");
 
 test("preflight prevents a late conflict from leaving a partial installation", () => {
   const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-sync-conflict-"));
@@ -40,5 +41,22 @@ test("installation rejects a symlinked destination component", () => {
   } finally {
     fs.rmSync(configRoot, { recursive: true, force: true });
     fs.rmSync(external, { recursive: true, force: true });
+  }
+});
+
+test("failed OpenCode synchronization releases its configuration lock", () => {
+  const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-install-lock-"));
+  try {
+    const conflict = path.join(configRoot, "agents", "pulso.md");
+    fs.mkdirSync(path.dirname(conflict), { recursive: true });
+    fs.writeFileSync(conflict, "customized\n");
+    const result = spawnSync(process.execPath, [install, "install", "--profile", "openai"], {
+      cwd: root, env: { ...process.env, OPENCODE_CONFIG_DIR: configRoot }, encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.equal(fs.existsSync(path.join(configRoot, "opencode.jsonc.lock")), false);
+    assert.equal(fs.readFileSync(conflict, "utf8"), "customized\n");
+  } finally {
+    fs.rmSync(configRoot, { recursive: true, force: true });
   }
 });

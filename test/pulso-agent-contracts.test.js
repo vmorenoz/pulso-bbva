@@ -28,9 +28,19 @@ test("keeps validation and integration in the existing task lifecycle", () => {
   assert.match(agent("pulso-executor"), /Record commit evidence in `integration` and transition `implemented\|verified -> integrated`/);
 });
 
+test("defines mutation paths inside the nested task scope", () => {
+  const pulso = agent("pulso");
+  const protocol = fs.readFileSync(path.resolve(agentsDirectory, "..", "skills", "pulso-protocol", "SKILL.md"), "utf8");
+  assert.match(pulso, /nested `scope` object containing `allowed_paths` and `excluded_paths`/);
+  assert.match(protocol, /`scope: \{ allowed_paths: \[\.\.\.\], excluded_paths: \[\.\.\.\] \}`/);
+  assert.match(protocol, /never write them at the task root/);
+});
+
 test("uses Explorer only for iterative discovery and keeps it read-only", () => {
   const explorer = agent("pulso-explorer");
   assert.match(explorer, /iterative discovery, a cross-file trace, or parallel research/);
+  assert.match(explorer, /Use an available MCP tool only when it is necessary/);
+  assert.match(explorer, /never call one as a no-op, progress marker, or unnecessary substitute/);
   assert.match(explorer, /bash: deny/);
   assert.match(explorer, /edit: deny/);
 });
@@ -92,4 +102,17 @@ test("loads one-time project configuration without treating preferences as a das
   assert.match(pulso, /include the compact digest plus the applicable `PULSO\.md` project rules/);
   assert.match(pulso, /Mentions of metrics, memories, preferences, configuration, or `PULSO\.md` are not dashboard requests/);
   assert.match(pulso, /"PULSO\.md": allow/);
+});
+
+test("allows Pulso to use MCP tools only for necessary evidence", () => {
+  const pulso = agent("pulso");
+  assert.doesNotMatch(pulso, /"playwright_\*": deny/);
+  assert.match(pulso, /Use an available MCP tool only when it is necessary/);
+  assert.match(pulso, /never call one as a no-op, progress marker, or unnecessary substitute/);
+});
+
+test("uses native interactive tools for every user question", () => {
+  const pulso = agent("pulso");
+  assert.match(pulso, /Whenever asking the user a question, use the runtime's interactive question tool instead of plain prose/);
+  assert.match(pulso, /`question` in OpenCode or `ask_user` in GitHub Copilot CLI/);
 });

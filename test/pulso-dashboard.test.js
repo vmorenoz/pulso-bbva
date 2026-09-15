@@ -63,6 +63,51 @@ test("loads project metrics and experience without modifying SQLite", () => {
   }
 });
 
+test("marks Copilot objectives as token tracking unavailable", () => {
+  const item = fixture();
+  const previousDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = item.dataHome;
+  try {
+    const db = new DatabaseSync(dashboard.databasePath());
+    db.prepare("UPDATE agent_runs SET session_id = 'copilot:project:session'").run();
+    db.close();
+    const data = dashboard.loadDashboardData(item.project);
+    assert.equal(data.objectives[0].token_tracking, "unavailable");
+    assert.equal(data.summary.tokens, 0);
+    assert.equal(data.summary.token_tracking, "unavailable");
+    assert.match(dashboard.renderDashboard("token", "nonce"), /N\/D/);
+  } finally {
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
+    fs.rmSync(item.root, { recursive: true, force: true });
+  }
+});
+
+test("retains measured tokens when OpenCode and Copilot runs are mixed", () => {
+  const item = fixture();
+  const previousDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = item.dataHome;
+  try {
+    const db = new DatabaseSync(dashboard.databasePath());
+    const key = experience.projectKey(item.project);
+    db.prepare("UPDATE agent_runs SET tokens = 0 WHERE id = 1").run();
+    db.prepare("INSERT INTO agent_runs VALUES (2, ?, 'PULSO-001', 'pulso-executor', 'copilot:project:session', 999, '2026-01-01', '2026-01-02')").run(`${key}:PULSO-001`);
+    db.close();
+    const data = dashboard.loadDashboardData(item.project);
+    assert.equal(data.objectives[0].token_tracking, "mixed");
+    assert.equal(data.objectives[0].tokens, 0);
+    assert.equal(data.summary.token_tracking, "mixed");
+    assert.equal(data.summary.tokens, 0);
+    assert.equal(data.agent_runs.find((run) => run.agent === "pulso-executor").token_tracking, "mixed");
+    assert.match(dashboard.renderDashboard("token", "nonce"), /tokens\(data\.summary\.tokens,data\.summary\.token_tracking\)/);
+    assert.match(dashboard.renderDashboard("token", "nonce"), /tracking==='unavailable'\?'N\/D'/);
+  } finally {
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
+    fs.rmSync(item.root, { recursive: true, force: true });
+  }
+});
+
 test("uses a readable fallback when a legacy objective title equals its id", () => {
   const item = fixture();
   const previousDataHome = process.env.XDG_DATA_HOME;

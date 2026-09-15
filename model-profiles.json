@@ -1,0 +1,33 @@
+{
+  "agent_tiers": {
+    "pulso": "standard",
+    "pulso-planner": "standard",
+    "pulso-challenger": "standard",
+    "pulso-executor": "standard",
+    "pulso-explorer": "light",
+    "pulso-verifier": "standard",
+    "pulso-integration-auditor": "standard",
+    "pulso-security-auditor": "standard",
+    "pulso-ui-auditor": "standard",
+    "pulso-experience-curator": "light",
+    "pulso-delivery-reporter": "light"
+  },
+  "profiles": {
+    "openai": {
+      "label": "OpenAI",
+      "models": {
+        "deep": "gpt-5.6-sol",
+        "standard": "gpt-5.6-terra",
+        "light": "gpt-5.6-luna"
+      }
+    },
+    "claude": {
+      "label": "Claude",
+      "models": {
+        "deep": "claude-opus-4.8",
+        "standard": "claude-sonnet-5",
+        "light": "claude-haiku-4.5"
+      }
+    }
+  }
+}

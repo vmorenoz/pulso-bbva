@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "matcher": "apply_patch|edit|str_replace_editor|create|write|bash|powershell|execute|shell",
+        "exec": "node",
+        "args": ["${PLUGIN_ROOT}/copilot/pulso-hook.mjs", "preToolUse"],
+        "timeoutSec": 5
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "matcher": "apply_patch|edit|str_replace_editor|create|write|bash|powershell|execute|shell",
+        "exec": "node",
+        "args": ["${PLUGIN_ROOT}/copilot/pulso-hook.mjs", "postToolUse"],
+        "timeoutSec": 5
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "type": "command",
+        "matcher": "apply_patch|edit|str_replace_editor|create|write|bash|powershell|execute|shell",
+        "exec": "node",
+        "args": ["${PLUGIN_ROOT}/copilot/pulso-hook.mjs", "postToolUseFailure"],
+        "timeoutSec": 5
+      }
+    ],
+    "subagentStart": [
+      {
+        "type": "command",
+        "matcher": "pulso-planner|pulso-executor",
+        "exec": "node",
+        "args": ["${PLUGIN_ROOT}/copilot/pulso-hook.mjs", "subagentStart"],
+        "timeoutSec": 5
+      }
+    ],
+    "subagentStop": [
+      {
+        "type": "command",
+        "matcher": "pulso-planner|pulso-executor",
+        "exec": "node",
+        "args": ["${PLUGIN_ROOT}/copilot/pulso-hook.mjs", "subagentStop"],
+        "timeoutSec": 5
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "exec": "node",
+        "args": ["${PLUGIN_ROOT}/copilot/pulso-hook.mjs", "sessionEnd"],
+        "timeoutSec": 5
+      }
+    ]
+  }
+}

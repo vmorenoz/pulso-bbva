@@ -7,7 +7,7 @@
   ],
   "agent": {
     "pulso": { "model": "github-copilot/gpt-5.6-terra" },
-    "pulso-planner": { "model": "github-copilot/gpt-5.6-sol" },
+    "pulso-planner": { "model": "github-copilot/gpt-5.6-terra" },
     "pulso-challenger": { "model": "github-copilot/gpt-5.6-terra" },
     "pulso-experience-curator": { "model": "github-copilot/gpt-5.6-luna" },
     "pulso-delivery-reporter": { "model": "github-copilot/gpt-5.6-luna" },

@@ -9,9 +9,16 @@ import stateFiles from "../lib/pulso-file-state.js";
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const configRoot = path.resolve(process.env.OPENCODE_CONFIG_DIR || path.join(os.homedir(), ".config", "opencode"));
 const configFile = path.join(configRoot, "opencode.jsonc");
+const profileFile = path.join(configRoot, "pulso-profile.json");
 const operation = process.argv[2];
 const force = process.argv.includes("--force");
 const setDefault = process.argv.includes("--set-default");
+const profileIndex = process.argv.indexOf("--profile");
+const profileName = profileIndex >= 0 ? process.argv[profileIndex + 1] : "openai";
+const modelProfiles = JSON.parse(fs.readFileSync(path.join(projectRoot, "model-profiles.json"), "utf8"));
+const selectedProfile = modelProfiles.profiles[profileName];
+const managedModels = new Set(Object.values(modelProfiles.profiles).flatMap((profile) => Object.values(profile.models)).map((model) => `github-copilot/${model}`));
+const legacyManagedAgents = ["pulso-code-auditor"];
 const pluginPaths = [
   "./plugins/pulso-circuit-breaker.mjs",
   "./plugins/pulso-experience-engine.mjs",
@@ -19,17 +26,18 @@ const pluginPaths = [
 const formattingOptions = { insertSpaces: true, tabSize: 2, eol: "\n" };
 
 if (!["install", "uninstall"].includes(operation)) {
-  throw new Error("Usage: node scripts/install.mjs <install|uninstall> [--set-default] [--force]");
+  throw new Error("Usage: node scripts/install.mjs <install|uninstall> [--profile openai|claude] [--set-default] [--force]");
 }
+if (operation === "install" && !selectedProfile) throw new Error(`Unknown model profile: ${profileName}.`);
 
 function runSync(action) {
   const args = [path.join(projectRoot, "scripts", "sync.mjs"), action];
   if (force) args.push("--force");
   const result = spawnSync(process.execPath, args, { cwd: projectRoot, encoding: "utf8", stdio: "inherit" });
-  if (result.status !== 0) process.exit(result.status || 1);
+  if (result.status !== 0) throw new Error(`OpenCode runtime sync failed with status ${result.status || 1}.`);
 }
 
-function updatedConfigText() {
+function updatedConfigText(storedProfile, managedProfile) {
   fs.mkdirSync(configRoot, { recursive: true });
   let text = fs.existsSync(configFile)
     ? fs.readFileSync(configFile, "utf8")
@@ -44,10 +52,32 @@ function updatedConfigText() {
     : currentPlugins.filter(plugin => !pluginPaths.includes(plugin));
   text = applyEdits(text, modify(text, ["plugin"], nextPlugins, { formattingOptions }));
 
+  for (const agent of legacyManagedAgents) {
+    if (managedModels.has(config.agent?.[agent]?.model)) {
+      text = applyEdits(text, modify(text, ["agent", agent], undefined, { formattingOptions }));
+    }
+  }
+
   if (operation === "install" && setDefault) {
     text = applyEdits(text, modify(text, ["default_agent"], "pulso", { formattingOptions }));
   } else if (operation === "uninstall" && config.default_agent === "pulso") {
     text = applyEdits(text, modify(text, ["default_agent"], undefined, { formattingOptions }));
+  }
+
+  if (operation === "install") {
+    const conflicts = Object.entries(modelProfiles.agent_tiers).filter(([agent, tier]) => {
+      const current = config.agent?.[agent]?.model;
+      const desired = `github-copilot/${selectedProfile.models[tier]}`;
+      return current && current !== desired && !managedModels.has(current);
+    }).map(([agent]) => agent);
+    if (conflicts.length && !force) throw new Error(`Refusing to overwrite customized OpenCode agent models without --force:\n${conflicts.join("\n")}`);
+  }
+  for (const [agent, tier] of Object.entries(modelProfiles.agent_tiers)) {
+    if (operation === "install") {
+      text = applyEdits(text, modify(text, ["agent", agent, "model"], `github-copilot/${selectedProfile.models[tier]}`, { formattingOptions }));
+    } else if (managedProfile && storedProfile.models?.[agent] === config.agent?.[agent]?.model) {
+      text = applyEdits(text, modify(text, ["agent", agent, "model"], undefined, { formattingOptions }));
+    }
   }
 
   return text;
@@ -55,11 +85,22 @@ function updatedConfigText() {
 
 fs.mkdirSync(configRoot, { recursive: true, mode: 0o700 });
 stateFiles.withFileLock(configFile, () => {
-  const text = updatedConfigText();
+  let storedProfile = null;
+  try { storedProfile = JSON.parse(fs.readFileSync(profileFile, "utf8")); } catch {}
+  const validProfile = storedProfile?.schema_version === 1 && Object.hasOwn(modelProfiles.profiles, storedProfile.profile);
+  const managedProfile = validProfile && storedProfile.managed_by === "pulso";
+  const preserveProfile = operation === "install" && validProfile && !managedProfile && storedProfile.profile === profileName && !force;
+  if (operation === "install" && fs.existsSync(profileFile) && !managedProfile && !preserveProfile && !force) throw new Error(`Refusing to overwrite customized Pulso profile metadata without --force: ${profileFile}`);
+  const text = updatedConfigText(storedProfile, managedProfile);
   runSync(operation);
   const temporary = `${configFile}.${process.pid}.tmp`;
   fs.writeFileSync(temporary, text, { mode: 0o600 });
   fs.renameSync(temporary, configFile);
+  if (operation === "install" && !preserveProfile) {
+    const models = Object.fromEntries(Object.entries(modelProfiles.agent_tiers).map(([agent, tier]) => [agent, `github-copilot/${selectedProfile.models[tier]}`]));
+    stateFiles.writeAtomic(profileFile, { schema_version: 1, managed_by: "pulso", profile: profileName, models });
+  }
+  else if (managedProfile) fs.rmSync(profileFile, { force: true });
 });
 
 console.log(`${operation}: OpenCode configuration updated at ${configFile}`);
