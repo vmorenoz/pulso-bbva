@@ -150,7 +150,7 @@ Reinicie OpenCode o abra una sesión nueva de Copilot CLI después de instalar o
 
 OpenCode conserva su distribución actual: la instalación sincroniza los archivos listados en `pulso.manifest.json`, registra circuit breaker y experiencia, y puede configurar `pulso` como agente predeterminado.
 
-Copilot CLI consume este repositorio como un plugin Agent Plugins 1.0. Los perfiles en `com.github.copilot/agents/` se generan desde los agentes canónicos de `agents/`; `skills/pulso-protocol/` se comparte sin duplicación; `pulso-control` expone routing, leases, doctor, dashboard, métricas, memoria y experiencia mediante MCP. Los hooks cargan `PULSO.md`, restringen mutaciones al alcance de una tarea con lease y mantienen el circuit breaker.
+Copilot CLI consume este repositorio como un plugin Agent Plugins 1.0. Los perfiles en `copilot/profiles/<profile>/agents/` se generan desde los agentes canónicos de `agents/` y el instalador coloca únicamente el perfil elegido en `~/.copilot/agents`; el plugin no aporta una segunda copia. `skills/pulso-protocol/` se comparte sin duplicación y `pulso-control` expone routing, leases, doctor, dashboard, métricas, memoria y experiencia mediante MCP. Los hooks cargan `PULSO.md`, restringen mutaciones al alcance de una tarea con lease y mantienen el circuit breaker.
 
 Flujo recomendado:
 
@@ -197,8 +197,8 @@ El archivo de ejemplo configura `pulso` como `default_agent`, registra los plugi
 ```text
 agents/                   Orquestador y especialistas acotados
 bin/                      CLI de operación local
-com.github.copilot/       Agentes, comandos y hooks generados para Copilot
-copilot/                  Adaptador MCP y hooks de GitHub Copilot CLI
+com.github.copilot/       Comandos y hooks del plugin Copilot
+copilot/                  Adaptador MCP y perfiles de agentes para Copilot CLI
 commands/                 Comandos de OpenCode para dashboard y diagnóstico
 lib/                      Implementación del plano de control
 plugins/                  Circuit breaker y motor de experiencia

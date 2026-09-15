@@ -102,3 +102,9 @@ test("allows Pulso to use MCP tools only for necessary evidence", () => {
   assert.match(pulso, /Use an available MCP tool only when it is necessary/);
   assert.match(pulso, /never call one as a no-op, progress marker, or unnecessary substitute/);
 });
+
+test("uses native interactive tools for every user question", () => {
+  const pulso = agent("pulso");
+  assert.match(pulso, /Whenever asking the user a question, use the runtime's interactive question tool instead of plain prose/);
+  assert.match(pulso, /`question` in OpenCode or `ask_user` in GitHub Copilot CLI/);
+});

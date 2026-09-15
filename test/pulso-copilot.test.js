@@ -17,13 +17,17 @@ test("ships a valid Copilot plugin with every Pulso agent", () => {
   assert.equal(plugin.name, "pulso");
   assert.equal(mcp.mcpServers["pulso-control"].type, "stdio");
   const sources = fs.readdirSync(path.join(root, "agents")).filter((name) => name.endsWith(".md")).sort();
-  const generated = fs.readdirSync(path.join(root, "com.github.copilot", "agents")).filter((name) => name.endsWith(".agent.md")).map((name) => name.replace(".agent.md", ".md")).sort();
+  const generated = fs.readdirSync(path.join(root, "copilot", "profiles", "openai", "agents")).filter((name) => name.endsWith(".agent.md")).map((name) => name.replace(".agent.md", ".md")).sort();
   assert.deepEqual(generated, sources);
-  assert.match(fs.readFileSync(path.join(root, "com.github.copilot", "agents", "pulso-planner.agent.md"), "utf8"), /model: gpt-5\.6-terra/);
+  assert.equal(fs.existsSync(path.join(root, "com.github.copilot", "agents")), false);
+  assert.match(fs.readFileSync(path.join(root, "copilot", "profiles", "openai", "agents", "pulso-planner.agent.md"), "utf8"), /model: gpt-5\.6-terra/);
   assert.match(fs.readFileSync(path.join(root, "copilot", "profiles", "claude", "agents", "pulso-planner.agent.md"), "utf8"), /model: claude-sonnet-5/);
   assert.match(fs.readFileSync(path.join(root, "copilot", "profiles", "claude", "agents", "pulso.agent.md"), "utf8"), /model: claude-sonnet-5/);
   assert.match(fs.readFileSync(path.join(root, "copilot", "profiles", "claude", "agents", "pulso-explorer.agent.md"), "utf8"), /model: claude-haiku-4\.5/);
-  assert.doesNotMatch(fs.readFileSync(path.join(root, "com.github.copilot", "agents", "pulso-planner.agent.md"), "utf8"), /gpt-5\.6-sol|claude-opus/);
+  const copilotPulso = fs.readFileSync(path.join(root, "copilot", "profiles", "openai", "agents", "pulso.agent.md"), "utf8");
+  assert.doesNotMatch(copilotPulso, /gpt-5\.6-sol|claude-opus/);
+  assert.match(copilotPulso, /"ask_user"/);
+  assert.match(copilotPulso, /never call `task_complete`/);
   for (const profile of ["openai", "claude"]) {
     for (const name of fs.readdirSync(path.join(root, "copilot", "profiles", profile, "agents"))) {
       assert.doesNotMatch(fs.readFileSync(path.join(root, "copilot", "profiles", profile, "agents", name), "utf8"), /gpt-5\.6-sol|claude-opus/);

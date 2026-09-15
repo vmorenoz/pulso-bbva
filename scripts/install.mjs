@@ -33,7 +33,7 @@ function runSync(action) {
   const args = [path.join(projectRoot, "scripts", "sync.mjs"), action];
   if (force) args.push("--force");
   const result = spawnSync(process.execPath, args, { cwd: projectRoot, encoding: "utf8", stdio: "inherit" });
-  if (result.status !== 0) process.exit(result.status || 1);
+  if (result.status !== 0) throw new Error(`OpenCode runtime sync failed with status ${result.status || 1}.`);
 }
 
 function updatedConfigText(storedProfile, managedProfile) {

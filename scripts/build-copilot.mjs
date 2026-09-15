@@ -10,7 +10,7 @@ const targetCommands = path.join(root, "com.github.copilot", "commands");
 const modelProfiles = JSON.parse(fs.readFileSync(path.join(root, "model-profiles.json"), "utf8"));
 
 const toolsets = {
-  pulso: ["read", "search", "edit", "execute", "agent", "web", "todo", "pulso-control/*"],
+  pulso: ["read", "search", "edit", "execute", "agent", "ask_user", "web", "todo", "pulso-control/*"],
   "pulso-planner": ["read", "search", "edit", "pulso-control/*"],
   "pulso-challenger": ["read", "search"],
   "pulso-executor": ["read", "search", "edit", "execute", "web", "pulso-control/*"],
@@ -43,7 +43,7 @@ function generateAgents(target, profileName) {
     if (!tools || !tier || !profile.models[tier]) throw new Error(`Incomplete Copilot mapping for ${name}.`);
     const { description, body } = parseAgent(path.join(sourceAgents, entry));
     const preamble = name === "pulso"
-      ? `You are running in GitHub Copilot CLI with the ${profile.label} Pulso profile. Pulso tools are provided by the \`pulso-control\` MCP server and may appear with a server prefix. Use Copilot custom agents for specialist delegation. Hooks supply the current project directory and Copilot session ID; include them as \`project_directory\` and \`session_id\` in experience operations, and use the session ID as \`owner_session\` in lease operations.`
+      ? `You are running in GitHub Copilot CLI with the ${profile.label} Pulso profile. Pulso tools are provided by the \`pulso-control\` MCP server and may appear with a server prefix. Use Copilot custom agents for specialist delegation. Hooks supply the current project directory and Copilot session ID; include them as \`project_directory\` and \`session_id\` in experience operations, and use the session ID as \`owner_session\` in lease operations. In interactive mode, finish by returning the response directly and never call \`task_complete\`; that tool is reserved for sessions explicitly running in autopilot mode.`
       : `You are running as a GitHub Copilot CLI custom agent with the ${profile.label} Pulso profile. Follow the delegated Pulso contract and use Copilot tool aliases. Hooks supply the current project directory and Copilot session ID; include them as \`project_directory\` and \`session_id\` in experience operations, and use the session ID as \`owner_session\` in lease operations.`;
     const output = [
       "---",
@@ -62,7 +62,7 @@ function generateAgents(target, profileName) {
   }
 }
 
-generateAgents(targetAgents, "openai");
+fs.rmSync(targetAgents, { recursive: true, force: true });
 for (const profileName of Object.keys(modelProfiles.profiles)) generateAgents(path.join(root, "copilot", "profiles", profileName, "agents"), profileName);
 
 fs.mkdirSync(targetCommands, { recursive: true });
