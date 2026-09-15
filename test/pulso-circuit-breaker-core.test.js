@@ -113,7 +113,7 @@ test("closes legacy token-cap circuits because tokens are observational", () => 
   assert.equal(state.token_usage, 105414);
 });
 
-test("migrates a persisted legacy token-cap circuit when the plugin starts", async () => {
+test("defers legacy circuit migration until a Pulso task session starts", async () => {
   const { PulsoCircuitBreakerPlugin } = await import("../plugins/pulso-circuit-breaker.mjs");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-breaker-"));
   const breakersDirectory = path.join(directory, ".pulso", "circuit-breakers");
@@ -127,8 +127,21 @@ test("migrates a persisted legacy token-cap circuit when the plugin starts", asy
     trip_reason: "token_cap",
   }));
   try {
-    await PulsoCircuitBreakerPlugin({ directory, client: {} });
-    const state = JSON.parse(fs.readFileSync(file, "utf8"));
+    const hooks = await PulsoCircuitBreakerPlugin({ directory, client: {} });
+    let state = JSON.parse(fs.readFileSync(file, "utf8"));
+    assert.equal(state.state, "open");
+    assert.equal(state.limits.maxTokens, 80000);
+    await hooks["chat.message"](
+      { agent: "build", sessionID: "ordinary-session" },
+      { parts: [{ text: "Ordinary work" }] },
+    );
+    state = JSON.parse(fs.readFileSync(file, "utf8"));
+    assert.equal(state.state, "open");
+    await hooks["chat.message"](
+      { agent: "pulso-executor", sessionID: "pulso-session" },
+      { parts: [{ text: "PULSO_TASK_ID=PULSO-001" }] },
+    );
+    state = JSON.parse(fs.readFileSync(file, "utf8"));
     assert.equal(state.state, "closed");
     assert.equal(state.trip_reason, null);
     assert.equal(state.limits.maxTokens, undefined);
@@ -231,6 +244,50 @@ test("requires an owned lease and enforces direct mutation scope", async () => {
         { args: { filePath: "src/app.js" } },
       ),
       /active lease owned by this session/,
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("supports legacy task contracts with mutation scope at the root", async () => {
+  const { PulsoCircuitBreakerPlugin } = await import("../plugins/pulso-circuit-breaker.mjs");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-breaker-legacy-scope-"));
+  try {
+    const taskDirectory = path.join(directory, ".pulso", "tasks");
+    const leaseDirectory = path.join(directory, ".pulso", "leases");
+    fs.mkdirSync(taskDirectory, { recursive: true });
+    fs.mkdirSync(leaseDirectory, { recursive: true });
+    fs.writeFileSync(path.join(taskDirectory, "PULSO-001.json"), JSON.stringify({
+      id: "PULSO-001",
+      status: "ready",
+      allowed_paths: ["PISDR600IMPL/src/main/resources/sql-PISDR600IMPL.properties"],
+      excluded_paths: ["**/*"],
+    }));
+    fs.writeFileSync(path.join(leaseDirectory, "PULSO-001.json"), JSON.stringify({
+      task_id: "PULSO-001", status: "active", owner_session: "session-a", expires_at: "2999-01-01T00:00:00.000Z",
+    }));
+    const hooks = await PulsoCircuitBreakerPlugin({ directory, client: {} });
+    await hooks["chat.message"](
+      { agent: "pulso-executor", sessionID: "session-a" },
+      { parts: [{ text: "PULSO_TASK_ID=PULSO-001" }] },
+    );
+    await assert.rejects(
+      () => hooks["tool.execute.before"](
+        { sessionID: "session-a", tool: "apply_patch" },
+        { args: { patchText: "*** Begin Patch\n*** Update File: PISDR600IMPL/src/main/resources/sql-PISDR600IMPL.properties\n*** End Patch" } },
+      ),
+      /outside PULSO-001 scope/,
+    );
+    fs.writeFileSync(path.join(taskDirectory, "PULSO-001.json"), JSON.stringify({
+      id: "PULSO-001",
+      status: "ready",
+      allowed_paths: ["PISDR600IMPL/src/main/resources/sql-PISDR600IMPL.properties"],
+      excluded_paths: [],
+    }));
+    await hooks["tool.execute.before"](
+      { sessionID: "session-a", tool: "apply_patch" },
+      { args: { patchText: "*** Begin Patch\n*** Update File: PISDR600IMPL/src/main/resources/sql-PISDR600IMPL.properties\n*** End Patch" } },
     );
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });

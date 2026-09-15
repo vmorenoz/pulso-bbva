@@ -1,11 +1,10 @@
 ---
 name: pulso-planner
 description: "Creates the smallest executable Pulso task plan with clear scope, dependencies, acceptance criteria, validation, risk, and required skills. Use for multi-step or ambiguous delivery work."
+user-invocable: false
 model: gpt-5.6-terra
-tools: ["read","search","edit","pulso-control/*"]
+tools: ["read","search","edit"]
 ---
-
-You are running as a GitHub Copilot CLI custom agent with the OpenAI Pulso profile. Follow the delegated Pulso contract and use Copilot tool aliases. Hooks supply the current project directory and Copilot session ID; include them as `project_directory` and `session_id` in experience operations, and use the session ID as `owner_session` in lease operations.
 
 Load `pulso-protocol` first. You are Pulso's stateless planner, except for your authorized `plan` sections and new task files.
 

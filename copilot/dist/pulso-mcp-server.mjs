@@ -49639,6 +49639,7 @@ var SESSION_LOOKUP_TIMEOUT_MS = 350;
 var RECONCILIATION_BUDGET_MS = 900;
 var RECONCILIATION_RUN_LIMIT = 100;
 var RECONCILIATION_LOG_LIMIT = 256 * 1024;
+var ACTIVE_SESSION_LIMIT = 256;
 var SQLiteDatabase;
 function reconciliationLogPath() {
   return path.join(path.dirname(databasePath()), "reconciliation.jsonl");
@@ -49689,11 +49690,12 @@ function sessionPrompt(client, sessionID2, directory, agent, text2) {
   });
 }
 async function loadSQLite() {
-  if (SQLiteDatabase) return;
+  if (SQLiteDatabase) return SQLiteDatabase;
   const specifier = typeof Bun === "undefined" ? "node:sqlite" : "bun:sqlite";
   const sqlite = await import(specifier);
   SQLiteDatabase = sqlite.DatabaseSync || sqlite.Database;
   if (!SQLiteDatabase) throw new Error(`Pulso experience cannot find a SQLite database constructor in ${specifier}.`);
+  return SQLiteDatabase;
 }
 function databasePath() {
   return path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "opencode", "pulso", "experience.sqlite");
@@ -50098,19 +50100,39 @@ function repairCycles(directory, objectiveID) {
 }
 async function PulsoExperienceEnginePlugin(input2) {
   const { tool: tool2 } = await Promise.resolve().then(() => (init_dist(), dist_exports));
-  try {
-    await loadSQLite();
-    setTimeout(() => {
-      void runExperienceMaintenance(input2);
-    }, 0);
-  } catch {
-    logExperienceFinding(input2.directory, "sqlite_bootstrap", "sqlite_unavailable");
+  const activateSQLite = input2.testLoadSQLite || loadSQLite;
+  const scheduleMaintenance = input2.testScheduleMaintenance || ((callback) => setTimeout(callback, 0));
+  let activation;
+  const activeSessions = /* @__PURE__ */ new Set();
+  function trackSession(sessionID2) {
+    if (!sessionID2) return;
+    activeSessions.delete(sessionID2);
+    activeSessions.add(sessionID2);
+    if (activeSessions.size > ACTIVE_SESSION_LIMIT) activeSessions.delete(activeSessions.values().next().value);
   }
-  return {
+  async function activate() {
+    if (!activation) {
+      activation = activateSQLite().then((constructor) => {
+        if (constructor) SQLiteDatabase = constructor;
+        scheduleMaintenance(() => {
+          void runExperienceMaintenance(input2);
+        });
+        return true;
+      }).catch(() => {
+        activation = void 0;
+        logExperienceFinding(input2.directory, "sqlite_bootstrap", "sqlite_unavailable");
+        return false;
+      });
+    }
+    return activation;
+  }
+  const hooks = {
     "chat.message": async (event, output2) => {
       const match = (output2.parts || []).map((part) => part.text || part.prompt || "").join("\n").match(/\bPULSO_TASK_ID=(PULSO-\d+)\b/);
       const pulsoSession = event.agent === "pulso";
       if (!pulsoSession && (!match || !event.agent?.startsWith("pulso-"))) return;
+      if (!await activate()) return;
+      trackSession(event.sessionID);
       const db = database();
       const key = import_pulso_experience_core.default.projectKey(input2.directory);
       const current = db.prepare("SELECT objective_key, objective_id FROM agent_runs WHERE session_id = ?").get(event.sessionID);
@@ -50369,7 +50391,7 @@ async function PulsoExperienceEnginePlugin(input2) {
     event: async ({ event }) => {
       if (event.type === "message.updated") {
         const info = event.properties?.info;
-        if (info?.role === "assistant" && info.sessionID) {
+        if (info?.role === "assistant" && activeSessions.has(info.sessionID)) {
           const db = database();
           const run = db.prepare("SELECT objective_key FROM agent_runs WHERE session_id = ?").get(info.sessionID);
           if (run) {
@@ -50388,8 +50410,21 @@ async function PulsoExperienceEnginePlugin(input2) {
         const info = event.properties?.info;
         if (info?.role === "assistant" && info.time?.completed) await processReporterResult(input2, info.sessionID);
       }
+      if (/(?:session|message)\.(?:deleted|ended|closed)$/.test(event.type || "")) {
+        const sessionID2 = event.properties?.sessionID || event.properties?.session_id || event.properties?.info?.sessionID;
+        if (sessionID2) activeSessions.delete(sessionID2);
+      }
     }
   };
+  for (const definition of Object.values(hooks.tool)) {
+    const execute = definition.execute;
+    definition.execute = async (...args) => {
+      if (!await activate()) throw new Error("Pulso experience is unavailable because SQLite could not be initialized.");
+      if (args[1]?.sessionID) trackSession(args[1].sessionID);
+      return execute(...args);
+    };
+  }
+  return hooks;
 }
 
 // copilot/pulso-mcp-server.mjs
@@ -50466,7 +50501,7 @@ async function resolveDirectory(explicit) {
   }
   if (roots.length === 1) return roots[0];
   if (roots.length > 1) throw new Error("Multiple Copilot workspace roots are active; pass project_directory explicitly.");
-  throw new Error("The MCP client did not expose workspace roots; pass project_directory explicitly.");
+  return startupDirectory;
 }
 function experienceFor(projectDirectory) {
   if (!experienceByDirectory.has(projectDirectory)) {
@@ -50475,9 +50510,9 @@ function experienceFor(projectDirectory) {
   }
   return experienceByDirectory.get(projectDirectory);
 }
-function experienceSessionID(projectDirectory, supplied) {
+function experienceSessionID(projectDirectory) {
   const project = crypto2.createHash("sha256").update(projectDirectory).digest("hex").slice(0, 24);
-  return `copilot:${project}:${supplied || sessionID}`;
+  return `copilot:${project}:${sessionID}`;
 }
 function register(name, description, inputSchema, handler, annotations = {}) {
   server.registerTool(name, { description, inputSchema: { ...inputSchema, project_directory: external_exports.string().min(1).optional() }, annotations }, async ({ project_directory, ...args }) => {
@@ -50498,9 +50533,9 @@ register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable P
   action: external_exports.enum(["acquire", "heartbeat", "release", "status"]),
   task_id: external_exports.string().regex(/^PULSO-\d+$/),
   ttl_minutes: external_exports.number().int().min(5).max(240).default(30),
-  owner_session: external_exports.string().min(1).optional()
+  owner_session: external_exports.string().min(1)
 }, async ({ action, task_id, ttl_minutes = 30, owner_session }, projectDirectory) => {
-  const leaseOwner = owner_session || sessionID;
+  const leaseOwner = owner_session;
   const file3 = path2.join(import_pulso_file_state.default.safeDirectory(projectDirectory, [".pulso", "leases"]), `${task_id}.json`);
   return import_pulso_file_state.default.withFileLock(file3, () => {
     const existing = fs2.existsSync(file3) ? JSON.parse(fs2.readFileSync(file3, "utf8")) : null;
@@ -50524,6 +50559,158 @@ register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable P
     return JSON.stringify(existing);
   });
 });
+register("pulso_lease_diagnostic", "Inspect a lease or safely probe lease recovery for the primary Pulso agent.", {
+  action: external_exports.enum(["status", "probe"]),
+  task_id: external_exports.string().regex(/^PULSO-\d+$/)
+}, async ({ action, task_id }, projectDirectory) => {
+  const file3 = path2.join(import_pulso_file_state.default.safeDirectory(projectDirectory, [".pulso", "leases"]), `${task_id}.json`);
+  return import_pulso_file_state.default.withFileLock(file3, () => {
+    const prior = fs2.existsSync(file3) ? fs2.readFileSync(file3) : null;
+    const existing = prior === null ? null : JSON.parse(prior.toString("utf8"));
+    if (action === "status") return JSON.stringify(existing || { task_id, status: "none" });
+    if (existing?.status === "active" && !import_pulso_control_core.default.isExpired(existing)) throw new Error(`${task_id} has an active lease and cannot be probed.`);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const probe = { schema_version: 1, task_id, status: "released", owner_session: `copilot-probe-${crypto2.randomUUID()}`, acquired_at: now, heartbeat_at: now, expires_at: now, released_at: now };
+    try {
+      import_pulso_file_state.default.writeAtomic(file3, probe);
+      return JSON.stringify({ task_id, status: "healthy", probe: "acquired_and_released" });
+    } finally {
+      if (prior === null) fs2.rmSync(file3, { force: true });
+      else {
+        const temporary = `${file3}.${process.pid}.${crypto2.randomUUID()}.restore`;
+        fs2.writeFileSync(temporary, prior, { mode: 384 });
+        fs2.renameSync(temporary, file3);
+      }
+    }
+  });
+}, { readOnlyHint: false });
+function primaryPath(projectDirectory, relative) {
+  if (typeof relative !== "string" || !relative) throw new Error("path is required.");
+  const resolved = path2.resolve(projectDirectory, relative);
+  const normalized = path2.relative(projectDirectory, resolved).split(path2.sep).join("/");
+  if (normalized !== "PULSO.md" && !normalized.startsWith(".pulso/")) throw new Error("Primary writes are limited to PULSO.md and .pulso/**.");
+  const segments = normalized.split("/");
+  let current = projectDirectory;
+  for (const segment of segments) {
+    current = path2.join(current, segment);
+    if (fs2.existsSync(current) && fs2.lstatSync(current).isSymbolicLink()) throw new Error("Refusing a primary write through a symbolic link.");
+  }
+  return { resolved, normalized };
+}
+function digest(content) {
+  return crypto2.createHash("sha256").update(content).digest("hex");
+}
+function stateConflict() {
+  throw new Error("state_conflict: expected revision, digest, or absence does not match current file.");
+}
+function safeGitMetadataPath(commonDirectory, file3) {
+  const common = fs2.realpathSync(commonDirectory);
+  const relative = path2.relative(common, file3);
+  if (!relative || relative.startsWith("..") || path2.isAbsolute(relative)) throw new Error("Git exclude path is outside the local repository metadata.");
+  let current = common;
+  for (const segment of relative.split(path2.sep)) {
+    current = path2.join(current, segment);
+    if (fs2.existsSync(current) && fs2.lstatSync(current).isSymbolicLink()) throw new Error("Refusing a symbolic Git metadata path.");
+  }
+}
+register("pulso_primary_metadata", "Return a primary-owned file's CAS metadata without exposing its content.", {
+  path: external_exports.string().min(1)
+}, async ({ path: relative }, projectDirectory) => {
+  const { resolved, normalized } = primaryPath(projectDirectory, relative);
+  if (!fs2.existsSync(resolved)) return JSON.stringify({ path: normalized, exists: false });
+  const content = fs2.readFileSync(resolved, "utf8");
+  let revision;
+  if (normalized.startsWith(".pulso/") && path2.extname(resolved) === ".json") {
+    try {
+      const parsed = JSON.parse(content);
+      if (Number.isInteger(parsed.revision)) revision = parsed.revision;
+    } catch {
+    }
+  }
+  return JSON.stringify({ path: normalized, exists: true, digest: digest(content), ...revision === void 0 ? {} : { revision } });
+}, { readOnlyHint: true });
+register("pulso_primary_write", "Write primary-owned Pulso configuration or state without unrestricted filesystem access.", {
+  path: external_exports.string().min(1),
+  content: external_exports.string(),
+  expected_digest: external_exports.string().regex(/^[a-f0-9]{64}$/).optional(),
+  expected_revision: external_exports.number().int().min(0).optional(),
+  expected_absent: external_exports.literal(true).optional()
+}, async ({ path: relative, content, expected_digest, expected_revision, expected_absent }, projectDirectory) => {
+  const { resolved, normalized } = primaryPath(projectDirectory, relative);
+  const parent = normalized === "PULSO.md" ? projectDirectory : import_pulso_file_state.default.safeDirectory(projectDirectory, normalized.split("/").slice(0, -1));
+  const json3 = normalized.startsWith(".pulso/") && path2.extname(resolved) === ".json";
+  if (json3) JSON.parse(content);
+  import_pulso_file_state.default.withFileLock(resolved, () => {
+    const check3 = () => {
+      primaryPath(projectDirectory, relative);
+      const existing = fs2.existsSync(resolved) ? fs2.readFileSync(resolved, "utf8") : null;
+      if (existing === null) {
+        if (!expected_absent) stateConflict();
+        return;
+      }
+      if (expected_absent || expected_digest && digest(existing) !== expected_digest) stateConflict();
+      if (json3) {
+        let parsed;
+        try {
+          parsed = JSON.parse(existing);
+        } catch {
+          stateConflict();
+        }
+        if (Number.isInteger(parsed.revision)) {
+          const next = JSON.parse(content);
+          if (expected_revision === void 0 || parsed.revision !== expected_revision || next.revision !== expected_revision + 1) stateConflict();
+        } else if (!expected_digest) stateConflict();
+      } else if (!expected_digest) stateConflict();
+    };
+    check3();
+    const temporary = path2.join(parent, `.${path2.basename(resolved)}.${process.pid}.${crypto2.randomUUID()}.tmp`);
+    try {
+      fs2.writeFileSync(temporary, content, { mode: 384, flag: "wx" });
+      check3();
+      fs2.renameSync(temporary, resolved);
+    } finally {
+      fs2.rmSync(temporary, { force: true });
+    }
+  });
+  return JSON.stringify({ path: relative, status: "written" });
+});
+register("pulso_primary_artifacts", "Set Pulso artifact tracking without editing versioned ignore files.", {
+  artifacts: external_exports.enum(["tracked", "untracked"])
+}, async ({ artifacts }, projectDirectory) => {
+  const { stdout } = await executeFile("git", ["rev-parse", "--git-path", "info/exclude"], { cwd: projectDirectory });
+  const commonDirectory = (await executeFile("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: projectDirectory })).stdout.trim();
+  const file3 = path2.resolve(projectDirectory, stdout.trim());
+  if (path2.relative(fs2.realpathSync(commonDirectory), file3) !== path2.join("info", "exclude")) throw new Error("Git exclude path is outside the local repository metadata.");
+  safeGitMetadataPath(commonDirectory, file3);
+  if (!fs2.existsSync(file3) && artifacts === "tracked") return JSON.stringify({ artifacts, status: "configured" });
+  fs2.mkdirSync(path2.dirname(file3), { recursive: true, mode: 448 });
+  import_pulso_file_state.default.withFileLock(file3, () => {
+    const previous = fs2.existsSync(file3) ? fs2.readFileSync(file3, "utf8") : "";
+    const lines = previous.split(/\r?\n/).filter((line) => line !== ".pulso/");
+    while (lines.length && lines.at(-1) === "") lines.pop();
+    if (artifacts === "untracked") lines.push(".pulso/");
+    const next = `${lines.filter((line, index) => line || index < lines.length - 1).join("\n")}
+`;
+    if (next === previous) return;
+    const temporary = path2.join(path2.dirname(file3), `.${path2.basename(file3)}.${process.pid}.${crypto2.randomUUID()}.tmp`);
+    try {
+      fs2.writeFileSync(temporary, next, { mode: 384, flag: "wx" });
+      fs2.renameSync(temporary, file3);
+    } finally {
+      fs2.rmSync(temporary, { force: true });
+    }
+  });
+  return JSON.stringify({ artifacts, status: "configured" });
+});
+register("pulso_primary_git", "Read Git status, log, show, or HEAD metadata for primary orchestration.", {
+  action: external_exports.enum(["status", "log", "show", "rev_parse"]),
+  revision: external_exports.string().max(200).optional()
+}, async ({ action, revision }, projectDirectory) => {
+  if (revision && (!/^(?:HEAD|[0-9a-fA-F]{7,64}|[A-Za-z][A-Za-z0-9_.-]{0,63}(?:~[0-9]{1,4}|\^[0-9]?)?)$/.test(revision) || revision.startsWith("-") || /[\s\x00-\x1f:\\/@{}]/.test(revision))) throw new Error("Invalid Git revision.");
+  const args = action === "status" ? ["status", "--short"] : action === "log" ? ["log", "--oneline", "-10"] : action === "show" ? ["show", "--no-ext-diff", "--format=fuller", "--end-of-options", revision || "HEAD"] : ["rev-parse", "--verify", "--end-of-options", revision || "HEAD"];
+  const { stdout } = await executeFile("git", args, { cwd: projectDirectory, maxBuffer: 1024 * 1024 });
+  return JSON.stringify({ action, output: stdout.trim() });
+}, { readOnlyHint: true });
 register("pulso_dashboard", "Start a temporary local read-only Pulso dashboard.", {
   open: external_exports.boolean().default(false),
   timeout_minutes: external_exports.number().int().min(5).max(240).default(30)
@@ -50569,13 +50756,14 @@ register("pulso_doctor", "Run a read-only Copilot Pulso health check.", {}, asyn
     }
   }
   const projectKey = crypto2.createHash("sha256").update(projectDirectory).digest("hex").slice(0, 24);
-  return JSON.stringify({ status: findings.some((item) => item.severity === "error") ? "unhealthy" : findings.length ? "warning" : "healthy", runtime: "copilot", project: { directory: projectDirectory, key: projectKey }, findings });
+  findings.push({ severity: "info", code: "token_tracking_unavailable", detail: "Copilot MCP exposes tools, not stable model token events." });
+  return JSON.stringify({ status: findings.some((item) => item.severity === "error") ? "unhealthy" : findings.some((item) => item.severity === "warning") ? "warning" : "healthy", runtime: "copilot", token_tracking: "unavailable", project: { directory: projectDirectory, key: projectKey }, findings });
 }, { readOnlyHint: true });
 var experienceSchemas = {
   pulso_experience_start: { action: external_exports.enum(["new", "resume"]), title: external_exports.string().min(3), objective_id: external_exports.string().regex(/^PULSO-OBJ-\d+$/).optional(), reason: external_exports.string().min(10) },
   pulso_experience_repair: {},
   pulso_memory_recall: { query: external_exports.string().min(3), tags: external_exports.array(external_exports.string()).optional() },
-  pulso_experience_finalize: { objective_id: external_exports.string().regex(/^(?:PULSO-\d+|PULSO-OBJ-\d+)$/).optional(), title: external_exports.string().min(3), status: external_exports.enum(["implemented", "partially_verified", "verified", "integrated", "blocked", "failed", "cancelled"]), summary: external_exports.string().min(10), evidence: external_exports.array(external_exports.string()).min(1), verification_gaps: external_exports.array(external_exports.string().min(3)).default([]), human_interventions: external_exports.number().int().min(0).default(0) },
+  pulso_experience_finalize: { objective_id: external_exports.string().regex(/^(?:PULSO-\d+|PULSO-OBJ-\d+)$/), title: external_exports.string().min(3), status: external_exports.enum(["implemented", "partially_verified", "verified", "integrated", "blocked", "failed", "cancelled"]), summary: external_exports.string().min(10), evidence: external_exports.array(external_exports.string()).min(1), verification_gaps: external_exports.array(external_exports.string().min(3)).default([]), human_interventions: external_exports.number().int().min(0).default(0) },
   pulso_experience_curate: { objective_id: external_exports.string().regex(/^PULSO-OBJ-\d+$|^PULSO-\d+$/) },
   pulso_experience_resume: { objective_id: external_exports.string().regex(/^PULSO-OBJ-\d+$/) },
   pulso_memory_list: {},
@@ -50584,10 +50772,12 @@ var experienceSchemas = {
   pulso_metrics: { objective_id: external_exports.string().regex(/^(?:PULSO-\d+|PULSO-OBJ-\d+)$/).optional() }
 };
 for (const [name, baseSchema] of Object.entries(experienceSchemas)) {
-  const schema = { ...baseSchema, session_id: external_exports.string().min(1).optional() };
-  register(name, `Pulso experience operation: ${name}.`, schema, async ({ session_id, ...args }, projectDirectory) => {
+  register(name, `Pulso experience operation: ${name}.`, baseSchema, async (args, projectDirectory) => {
     const experience = await experienceFor(projectDirectory);
-    return experience.tool[name].execute(args, { directory: projectDirectory, sessionID: experienceSessionID(projectDirectory, session_id) });
+    const result = await experience.tool[name].execute(args, { directory: projectDirectory, sessionID: experienceSessionID(projectDirectory) });
+    if (name !== "pulso_metrics") return result;
+    const metrics = JSON.parse(result);
+    return JSON.stringify({ ...metrics, token_tracking: "unavailable", objectives: metrics.objectives.map((objective) => ({ ...objective, tokens: null, token_tracking: "unavailable" })), agent_runs: metrics.agent_runs.map((run) => ({ ...run, tokens: null, token_tracking: "unavailable" })) });
   }, ["pulso_memory_recall", "pulso_memory_list", "pulso_profile_recall", "pulso_metrics"].includes(name) ? { readOnlyHint: true } : {});
 }
 await server.connect(new StdioServerTransport());

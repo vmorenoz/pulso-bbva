@@ -28,6 +28,14 @@ test("keeps validation and integration in the existing task lifecycle", () => {
   assert.match(agent("pulso-executor"), /Record commit evidence in `integration` and transition `implemented\|verified -> integrated`/);
 });
 
+test("defines mutation paths inside the nested task scope", () => {
+  const pulso = agent("pulso");
+  const protocol = fs.readFileSync(path.resolve(agentsDirectory, "..", "skills", "pulso-protocol", "SKILL.md"), "utf8");
+  assert.match(pulso, /nested `scope` object containing `allowed_paths` and `excluded_paths`/);
+  assert.match(protocol, /`scope: \{ allowed_paths: \[\.\.\.\], excluded_paths: \[\.\.\.\] \}`/);
+  assert.match(protocol, /never write them at the task root/);
+});
+
 test("uses Explorer only for iterative discovery and keeps it read-only", () => {
   const explorer = agent("pulso-explorer");
   assert.match(explorer, /iterative discovery, a cross-file trace, or parallel research/);

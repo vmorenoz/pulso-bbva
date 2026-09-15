@@ -130,7 +130,11 @@ npm run install:both
 npm run install:both -- --profile claude
 ```
 
-El adaptador OpenCode usa `~/.config/opencode` de forma predeterminada; `OPENCODE_CONFIG_DIR` permite elegir otra instalación. El adaptador Copilot instala el plugin local `pulso`, sus agentes, skill, hooks y servidor MCP. Ambos persisten el perfil seleccionado y asignan explícitamente el modelo correspondiente a cada agente. Inicie una sesión con `copilot --agent pulso`.
+El adaptador OpenCode usa `~/.config/opencode` de forma predeterminada; `OPENCODE_CONFIG_DIR` permite elegir otra instalación. El adaptador Copilot instala el plugin local `pulso`, sus agentes, skill, hooks y servidor MCP. Ambos persisten el perfil seleccionado y asignan explícitamente el modelo correspondiente a cada agente. La instalación deja Pulso disponible, pero no lo selecciona como agente predeterminado. Inicie una sesión Copilot con `copilot --agent pulso`. Para hacer opt-in al agente predeterminado de OpenCode:
+
+```bash
+npm run install:opencode -- --set-default
+```
 
 El instalador no sobrescribe archivos administrados que hayan divergido de este repositorio. Revise primero esas diferencias y use el siguiente comando solo cuando el reemplazo sea intencional:
 
@@ -144,13 +148,15 @@ Para retirar únicamente los archivos gestionados por el proyecto que siguen coi
 npm run uninstall:local
 ```
 
-Reinicie OpenCode o abra una sesión nueva de Copilot CLI después de instalar o desinstalar: ambos runtimes cargan agentes, skills, herramientas y plugins al iniciar la sesión.
+Reinicie OpenCode o abra una sesión nueva de Copilot CLI después de instalar o desinstalar: ambos runtimes descubren agentes, skills, herramientas y plugins al iniciar la sesión, pero Pulso difiere su trabajo de estado hasta una activación explícita.
 
 ## Adaptadores de runtime
 
-OpenCode conserva su distribución actual: la instalación sincroniza los archivos listados en `pulso.manifest.json`, registra circuit breaker y experiencia, y puede configurar `pulso` como agente predeterminado.
+OpenCode sincroniza los archivos listados en `pulso.manifest.json` y registra circuit breaker y experiencia. Ambos plugins permanecen inertes en sesiones ajenas: SQLite, mantenimiento y migraciones se activan con el primer mensaje de un agente Pulso o con una operación Pulso explícita. `--set-default` permite configurar `pulso` como agente predeterminado de forma voluntaria.
 
-Copilot CLI consume este repositorio como un plugin Agent Plugins 1.0. Los perfiles en `copilot/profiles/<profile>/agents/` se generan desde los agentes canónicos de `agents/` y el instalador coloca únicamente el perfil elegido en `~/.copilot/agents`; el plugin no aporta una segunda copia. `skills/pulso-protocol/` se comparte sin duplicación y `pulso-control` expone routing, leases, doctor, dashboard, métricas, memoria y experiencia mediante MCP. Los hooks cargan `PULSO.md`, restringen mutaciones al alcance de una tarea con lease y mantienen el circuit breaker.
+Copilot CLI consume este repositorio como un plugin Agent Plugins 1.0. Los perfiles en `copilot/profiles/<profile>/agents/` se generan desde los agentes canónicos de `agents/` y el instalador coloca únicamente el perfil elegido en `~/.copilot/agents`; el plugin no aporta una segunda copia. `skills/pulso-protocol/` se comparte sin duplicación. Los perfiles `pulso` y `pulso-executor` registran `pulso-control` como MCP propio del agente; el servidor no se aporta globalmente. Solo `pulso` es invocable por el usuario. No se inyecta contexto Pulso al iniciar ni en cada prompt. El MCP permite al primario escribir solo `PULSO.md` y `.pulso/**`, consultar metadatos Git de solo lectura y diagnosticar leases sin identidad de executor. Los hooks activan exclusivamente Planner y Executor en un cache temporal del sistema: Planner solo puede editar `.pulso/**`; Executor no puede editar ni ejecutar comandos antes de adquirir un lease con su `owner_session`, y después se aplican alcance y circuito. Las sesiones ordinarias no reciben contexto ni MCP.
+
+Los runtimes deben descubrir al inicio el catálogo de agentes y skills para poder seleccionarlos. Pulso evita trabajo activo fuera de sus sesiones: OpenCode no abre SQLite ni migra estado, y Copilot no añade instrucciones globales ni inicia `pulso-control`. En Copilot, Planner no recibe MCP y Executor recibe únicamente `pulso_lease`.
 
 Flujo recomendado:
 
@@ -160,7 +166,7 @@ npm test
 npm run install:both
 ```
 
-Tras reiniciar OpenCode, Pulso quedará disponible como agente predeterminado según la configuración de ejemplo. En Copilot CLI se selecciona con `copilot --agent pulso` o `/agent`.
+Tras reiniciar OpenCode, Pulso quedará disponible para selección; solo será el agente predeterminado si se instaló con `--set-default`. En Copilot CLI se selecciona con `copilot --agent pulso` o `/agent`.
 
 ## Dashboard y Doctor
 
@@ -176,7 +182,7 @@ o, desde este repositorio:
 npm run dashboard
 ```
 
-El dashboard muestra estado y duración de objetivos, tokens y ejecuciones, actividad por agente, intervenciones humanas, ciclos de reparación, memorias verificadas y preferencias de perfil. Permite inspeccionar el desglose temporal y de agentes de cada objetivo.
+El dashboard muestra estado y duración de objetivos, tokens y ejecuciones, actividad por agente, intervenciones humanas, ciclos de reparación, memorias verificadas y preferencias de perfil. OpenCode registra tokens mediante sus eventos de modelo; Copilot MCP no ofrece un contrato estable de esos eventos, por lo que sus objetivos se marcan con seguimiento de tokens no disponible, nunca como consumo cero. El doctor de Copilot informa la misma limitación.
 
 El servidor se enlaza exclusivamente a `127.0.0.1`, usa un token temporal de acceso, lee SQLite sin modificarlo y se detiene tras 30 minutos de inactividad o al pulsar **Stop server**.
 
@@ -204,7 +210,6 @@ lib/                      Implementación del plano de control
 plugins/                  Circuit breaker y motor de experiencia
 scripts/                  Instalación y sincronización del runtime
 skills/pulso-protocol/    Protocolo compartido de coordinación y estado
-mcp.json                  Servidor MCP portable del plugin Copilot
 plugin.json               Manifiesto Agent Plugins 1.0
 pulso.manifest.json       Archivos sincronizados por el instalador
 opencode.example.jsonc    Configuración de referencia para OpenCode

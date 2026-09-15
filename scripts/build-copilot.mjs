@@ -10,10 +10,10 @@ const targetCommands = path.join(root, "com.github.copilot", "commands");
 const modelProfiles = JSON.parse(fs.readFileSync(path.join(root, "model-profiles.json"), "utf8"));
 
 const toolsets = {
-  pulso: ["read", "search", "edit", "execute", "agent", "ask_user", "web", "todo", "pulso-control/*"],
-  "pulso-planner": ["read", "search", "edit", "pulso-control/*"],
+  pulso: ["read", "search", "agent", "ask_user", "web", "todo", "pulso-control/pulso_route", "pulso-control/pulso_skill_digest", "pulso-control/pulso_dashboard", "pulso-control/pulso_doctor", "pulso-control/pulso_experience_start", "pulso-control/pulso_experience_repair", "pulso-control/pulso_memory_recall", "pulso-control/pulso_experience_finalize", "pulso-control/pulso_experience_curate", "pulso-control/pulso_experience_resume", "pulso-control/pulso_memory_list", "pulso-control/pulso_memory_review", "pulso-control/pulso_profile_recall", "pulso-control/pulso_metrics", "pulso-control/pulso_lease_diagnostic", "pulso-control/pulso_primary_metadata", "pulso-control/pulso_primary_write", "pulso-control/pulso_primary_artifacts", "pulso-control/pulso_primary_git"],
+  "pulso-planner": ["read", "search", "edit"],
   "pulso-challenger": ["read", "search"],
-  "pulso-executor": ["read", "search", "edit", "execute", "web", "pulso-control/*"],
+  "pulso-executor": ["read", "search", "edit", "execute", "web", "pulso-control/pulso_lease"],
   "pulso-explorer": ["read", "search", "web"],
   "pulso-verifier": ["read", "search", "execute", "web"],
   "pulso-integration-auditor": ["read", "search", "execute", "web"],
@@ -42,20 +42,38 @@ function generateAgents(target, profileName) {
     const tier = modelProfiles.agent_tiers[name];
     if (!tools || !tier || !profile.models[tier]) throw new Error(`Incomplete Copilot mapping for ${name}.`);
     const { description, body } = parseAgent(path.join(sourceAgents, entry));
+    const runtimeBody = name === "pulso"
+      ? body.replace("omit `objective_id`", "pass the `objective_id` returned by `pulso_experience_start`")
+        .replace(/Run repository and Git commands directly through `bash`\./g, "Use `pulso_primary_git` for repository and Git metadata.")
+        .replace(/Reading `git status`, `git log`, `git show`, and `git rev-parse` for orchestration metadata is allowed directly and is not delegated discovery\./g, "Use `pulso_primary_git` for `git status`, `git log`, `git show`, and `git rev-parse` orchestration metadata.")
+        .replace(/For `untracked`, add `\.pulso\/` only to the repository's local Git exclude resolved by `git rev-parse --git-path info\/exclude`; for `tracked`, remove only that Pulso-managed local exclude entry/g, "Use `pulso_primary_artifacts` to add or remove only Pulso's local `.pulso/` exclude entry")
+        .replace(/If a task was blocked solely by unavailable or invalid lease infrastructure, first verify `pulso_lease\(action="status"\)` and a disposable acquire\/release probe\./g, "If a task was blocked solely by unavailable or invalid lease infrastructure, use `pulso_lease_diagnostic(action=\"status\")` and `pulso_lease_diagnostic(action=\"probe\")`.")
+      : body;
     const preamble = name === "pulso"
-      ? `You are running in GitHub Copilot CLI with the ${profile.label} Pulso profile. Pulso tools are provided by the \`pulso-control\` MCP server and may appear with a server prefix. Use Copilot custom agents for specialist delegation. Hooks supply the current project directory and Copilot session ID; include them as \`project_directory\` and \`session_id\` in experience operations, and use the session ID as \`owner_session\` in lease operations. In interactive mode, finish by returning the response directly and never call \`task_complete\`; that tool is reserved for sessions explicitly running in autopilot mode.`
-      : `You are running as a GitHub Copilot CLI custom agent with the ${profile.label} Pulso profile. Follow the delegated Pulso contract and use Copilot tool aliases. Hooks supply the current project directory and Copilot session ID; include them as \`project_directory\` and \`session_id\` in experience operations, and use the session ID as \`owner_session\` in lease operations.`;
+      ? `GitHub Copilot CLI uses the ${profile.label} Pulso profile. Delegate through Copilot custom agents. Let \`pulso-control\` resolve runtime context; it uses its startup workspace when roots are unavailable, and requires \`project_directory\` only for multiple roots. Use \`pulso_primary_write\` only for \`.pulso/**\` and \`PULSO.md\`, \`pulso_primary_artifacts\` for artifact preference, and \`pulso_primary_git\` for read-only Git metadata. Before a CAS write, read then call \`pulso_primary_metadata\` for its digest or revision. Do not use bash or edit: these tools are unavailable to the primary. Use \`pulso_lease_diagnostic\` for primary lease status or a disposable recovery probe; only Executor uses \`pulso_lease\` with its startup-supplied \`owner_session\`. Retain the ID from \`pulso_experience_start\` and pass it as \`objective_id\` when finalizing. In interactive mode, respond directly and never call \`task_complete\`; that tool is only for autopilot.`
+      : name === "pulso-executor"
+        ? "In GitHub Copilot CLI, use the `pulso-control` lease tool and pass the session ID supplied at startup as `owner_session`."
+        : "";
+    const mcpServer = ["pulso", "pulso-executor"].includes(name) ? [
+      "mcp-servers:",
+      "  pulso-control:",
+      "    type: stdio",
+      "    command: node",
+      "    args: [\"__PULSO_MCP_SERVER__\"]",
+      "    tools: [\"*\"]",
+    ] : [];
     const output = [
       "---",
       `name: ${name}`,
       `description: ${JSON.stringify(description)}`,
+      `user-invocable: ${name === "pulso" ? "true" : "false"}`,
       `model: ${profile.models[tier]}`,
       `tools: ${JSON.stringify(tools)}`,
+      ...mcpServer,
       "---",
       "",
-      preamble,
-      "",
-      body,
+      ...(preamble ? [preamble, ""] : []),
+      runtimeBody,
       "",
     ].join("\n");
     fs.writeFileSync(path.join(target, `${name}.agent.md`), output);

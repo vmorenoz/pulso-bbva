@@ -69,7 +69,6 @@
     "test/pulso-install.test.js",
     "test/pulso-file-state.test.js",
     "plugin.json",
-    "mcp.json",
     "model-profiles.json",
     ".github/plugin/marketplace.json",
     "scripts/build-copilot.mjs",

@@ -85,7 +85,7 @@ async function resolveDirectory(explicit) {
   }
   if (roots.length === 1) return roots[0];
   if (roots.length > 1) throw new Error("Multiple Copilot workspace roots are active; pass project_directory explicitly.");
-  throw new Error("The MCP client did not expose workspace roots; pass project_directory explicitly.");
+  return startupDirectory;
 }
 
 function experienceFor(projectDirectory) {
@@ -96,9 +96,9 @@ function experienceFor(projectDirectory) {
   return experienceByDirectory.get(projectDirectory);
 }
 
-function experienceSessionID(projectDirectory, supplied) {
+function experienceSessionID(projectDirectory) {
   const project = crypto.createHash("sha256").update(projectDirectory).digest("hex").slice(0, 24);
-  return `copilot:${project}:${supplied || sessionID}`;
+  return `copilot:${project}:${sessionID}`;
 }
 
 function register(name, description, inputSchema, handler, annotations = {}) {
@@ -123,9 +123,9 @@ register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable P
   action: z.enum(["acquire", "heartbeat", "release", "status"]),
   task_id: z.string().regex(/^PULSO-\d+$/),
   ttl_minutes: z.number().int().min(5).max(240).default(30),
-  owner_session: z.string().min(1).optional(),
+  owner_session: z.string().min(1),
 }, async ({ action, task_id, ttl_minutes = 30, owner_session }, projectDirectory) => {
-  const leaseOwner = owner_session || sessionID;
+  const leaseOwner = owner_session;
   const file = path.join(stateFiles.safeDirectory(projectDirectory, [".pulso", "leases"]), `${task_id}.json`);
   return stateFiles.withFileLock(file, () => {
     const existing = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
@@ -149,6 +149,160 @@ register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable P
     return JSON.stringify(existing);
   });
 });
+
+register("pulso_lease_diagnostic", "Inspect a lease or safely probe lease recovery for the primary Pulso agent.", {
+  action: z.enum(["status", "probe"]),
+  task_id: z.string().regex(/^PULSO-\d+$/),
+}, async ({ action, task_id }, projectDirectory) => {
+  const file = path.join(stateFiles.safeDirectory(projectDirectory, [".pulso", "leases"]), `${task_id}.json`);
+  return stateFiles.withFileLock(file, () => {
+    const prior = fs.existsSync(file) ? fs.readFileSync(file) : null;
+    const existing = prior === null ? null : JSON.parse(prior.toString("utf8"));
+    if (action === "status") return JSON.stringify(existing || { task_id, status: "none" });
+    if (existing?.status === "active" && !control.isExpired(existing)) throw new Error(`${task_id} has an active lease and cannot be probed.`);
+    const now = new Date().toISOString();
+    const probe = { schema_version: 1, task_id, status: "released", owner_session: `copilot-probe-${crypto.randomUUID()}`, acquired_at: now, heartbeat_at: now, expires_at: now, released_at: now };
+    try {
+      stateFiles.writeAtomic(file, probe);
+      return JSON.stringify({ task_id, status: "healthy", probe: "acquired_and_released" });
+    } finally {
+      if (prior === null) fs.rmSync(file, { force: true });
+      else {
+        const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.restore`;
+        fs.writeFileSync(temporary, prior, { mode: 0o600 });
+        fs.renameSync(temporary, file);
+      }
+    }
+  });
+}, { readOnlyHint: false });
+
+function primaryPath(projectDirectory, relative) {
+  if (typeof relative !== "string" || !relative) throw new Error("path is required.");
+  const resolved = path.resolve(projectDirectory, relative);
+  const normalized = path.relative(projectDirectory, resolved).split(path.sep).join("/");
+  if (normalized !== "PULSO.md" && !normalized.startsWith(".pulso/")) throw new Error("Primary writes are limited to PULSO.md and .pulso/**.");
+  const segments = normalized.split("/");
+  let current = projectDirectory;
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) throw new Error("Refusing a primary write through a symbolic link.");
+  }
+  return { resolved, normalized };
+}
+
+function digest(content) { return crypto.createHash("sha256").update(content).digest("hex"); }
+
+function stateConflict() { throw new Error("state_conflict: expected revision, digest, or absence does not match current file."); }
+
+function safeGitMetadataPath(commonDirectory, file) {
+  const common = fs.realpathSync(commonDirectory);
+  const relative = path.relative(common, file);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Git exclude path is outside the local repository metadata.");
+  let current = common;
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment);
+    if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) throw new Error("Refusing a symbolic Git metadata path.");
+  }
+}
+
+register("pulso_primary_metadata", "Return a primary-owned file's CAS metadata without exposing its content.", {
+  path: z.string().min(1),
+}, async ({ path: relative }, projectDirectory) => {
+  const { resolved, normalized } = primaryPath(projectDirectory, relative);
+  if (!fs.existsSync(resolved)) return JSON.stringify({ path: normalized, exists: false });
+  const content = fs.readFileSync(resolved, "utf8");
+  let revision;
+  if (normalized.startsWith(".pulso/") && path.extname(resolved) === ".json") {
+    try {
+      const parsed = JSON.parse(content);
+      if (Number.isInteger(parsed.revision)) revision = parsed.revision;
+    } catch {}
+  }
+  return JSON.stringify({ path: normalized, exists: true, digest: digest(content), ...(revision === undefined ? {} : { revision }) });
+}, { readOnlyHint: true });
+
+register("pulso_primary_write", "Write primary-owned Pulso configuration or state without unrestricted filesystem access.", {
+  path: z.string().min(1),
+  content: z.string(),
+  expected_digest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  expected_revision: z.number().int().min(0).optional(),
+  expected_absent: z.literal(true).optional(),
+}, async ({ path: relative, content, expected_digest, expected_revision, expected_absent }, projectDirectory) => {
+  const { resolved, normalized } = primaryPath(projectDirectory, relative);
+  const parent = normalized === "PULSO.md" ? projectDirectory : stateFiles.safeDirectory(projectDirectory, normalized.split("/").slice(0, -1));
+  const json = normalized.startsWith(".pulso/") && path.extname(resolved) === ".json";
+  if (json) JSON.parse(content);
+  stateFiles.withFileLock(resolved, () => {
+    const check = () => {
+      primaryPath(projectDirectory, relative);
+      const existing = fs.existsSync(resolved) ? fs.readFileSync(resolved, "utf8") : null;
+      if (existing === null) {
+        if (!expected_absent) stateConflict();
+        return;
+      }
+      if (expected_absent || (expected_digest && digest(existing) !== expected_digest)) stateConflict();
+      if (json) {
+        let parsed;
+        try { parsed = JSON.parse(existing); } catch { stateConflict(); }
+        if (Number.isInteger(parsed.revision)) {
+          const next = JSON.parse(content);
+          if (expected_revision === undefined || parsed.revision !== expected_revision || next.revision !== expected_revision + 1) stateConflict();
+        } else if (!expected_digest) stateConflict();
+      } else if (!expected_digest) stateConflict();
+    };
+    check();
+    const temporary = path.join(parent, `.${path.basename(resolved)}.${process.pid}.${crypto.randomUUID()}.tmp`);
+    try {
+      fs.writeFileSync(temporary, content, { mode: 0o600, flag: "wx" });
+      check();
+      fs.renameSync(temporary, resolved);
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
+  });
+  return JSON.stringify({ path: relative, status: "written" });
+});
+
+register("pulso_primary_artifacts", "Set Pulso artifact tracking without editing versioned ignore files.", {
+  artifacts: z.enum(["tracked", "untracked"]),
+}, async ({ artifacts }, projectDirectory) => {
+  const { stdout } = await executeFile("git", ["rev-parse", "--git-path", "info/exclude"], { cwd: projectDirectory });
+  const commonDirectory = (await executeFile("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: projectDirectory })).stdout.trim();
+  const file = path.resolve(projectDirectory, stdout.trim());
+  if (path.relative(fs.realpathSync(commonDirectory), file) !== path.join("info", "exclude")) throw new Error("Git exclude path is outside the local repository metadata.");
+  safeGitMetadataPath(commonDirectory, file);
+  if (!fs.existsSync(file) && artifacts === "tracked") return JSON.stringify({ artifacts, status: "configured" });
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  stateFiles.withFileLock(file, () => {
+    const previous = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+    const lines = previous.split(/\r?\n/).filter((line) => line !== ".pulso/");
+    while (lines.length && lines.at(-1) === "") lines.pop();
+    if (artifacts === "untracked") lines.push(".pulso/");
+    const next = `${lines.filter((line, index) => line || index < lines.length - 1).join("\n")}\n`;
+    if (next === previous) return;
+    const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${crypto.randomUUID()}.tmp`);
+    try {
+      fs.writeFileSync(temporary, next, { mode: 0o600, flag: "wx" });
+      fs.renameSync(temporary, file);
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
+  });
+  return JSON.stringify({ artifacts, status: "configured" });
+});
+
+register("pulso_primary_git", "Read Git status, log, show, or HEAD metadata for primary orchestration.", {
+  action: z.enum(["status", "log", "show", "rev_parse"]),
+  revision: z.string().max(200).optional(),
+}, async ({ action, revision }, projectDirectory) => {
+  if (revision && (!/^(?:HEAD|[0-9a-fA-F]{7,64}|[A-Za-z][A-Za-z0-9_.-]{0,63}(?:~[0-9]{1,4}|\^[0-9]?)?)$/.test(revision) || revision.startsWith("-") || /[\s\x00-\x1f:\\/@{}]/.test(revision))) throw new Error("Invalid Git revision.");
+  const args = action === "status" ? ["status", "--short"]
+    : action === "log" ? ["log", "--oneline", "-10"]
+      : action === "show" ? ["show", "--no-ext-diff", "--format=fuller", "--end-of-options", revision || "HEAD"]
+        : ["rev-parse", "--verify", "--end-of-options", revision || "HEAD"];
+  const { stdout } = await executeFile("git", args, { cwd: projectDirectory, maxBuffer: 1024 * 1024 });
+  return JSON.stringify({ action, output: stdout.trim() });
+}, { readOnlyHint: true });
 
 register("pulso_dashboard", "Start a temporary local read-only Pulso dashboard.", {
   open: z.boolean().default(false),
@@ -187,14 +341,15 @@ register("pulso_doctor", "Run a read-only Copilot Pulso health check.", {}, asyn
     }
   }
   const projectKey = crypto.createHash("sha256").update(projectDirectory).digest("hex").slice(0, 24);
-  return JSON.stringify({ status: findings.some((item) => item.severity === "error") ? "unhealthy" : findings.length ? "warning" : "healthy", runtime: "copilot", project: { directory: projectDirectory, key: projectKey }, findings });
+  findings.push({ severity: "info", code: "token_tracking_unavailable", detail: "Copilot MCP exposes tools, not stable model token events." });
+  return JSON.stringify({ status: findings.some((item) => item.severity === "error") ? "unhealthy" : findings.some((item) => item.severity === "warning") ? "warning" : "healthy", runtime: "copilot", token_tracking: "unavailable", project: { directory: projectDirectory, key: projectKey }, findings });
 }, { readOnlyHint: true });
 
 const experienceSchemas = {
     pulso_experience_start: { action: z.enum(["new", "resume"]), title: z.string().min(3), objective_id: z.string().regex(/^PULSO-OBJ-\d+$/).optional(), reason: z.string().min(10) },
     pulso_experience_repair: {},
     pulso_memory_recall: { query: z.string().min(3), tags: z.array(z.string()).optional() },
-    pulso_experience_finalize: { objective_id: z.string().regex(/^(?:PULSO-\d+|PULSO-OBJ-\d+)$/).optional(), title: z.string().min(3), status: z.enum(["implemented", "partially_verified", "verified", "integrated", "blocked", "failed", "cancelled"]), summary: z.string().min(10), evidence: z.array(z.string()).min(1), verification_gaps: z.array(z.string().min(3)).default([]), human_interventions: z.number().int().min(0).default(0) },
+    pulso_experience_finalize: { objective_id: z.string().regex(/^(?:PULSO-\d+|PULSO-OBJ-\d+)$/), title: z.string().min(3), status: z.enum(["implemented", "partially_verified", "verified", "integrated", "blocked", "failed", "cancelled"]), summary: z.string().min(10), evidence: z.array(z.string()).min(1), verification_gaps: z.array(z.string().min(3)).default([]), human_interventions: z.number().int().min(0).default(0) },
     pulso_experience_curate: { objective_id: z.string().regex(/^PULSO-OBJ-\d+$|^PULSO-\d+$/) },
     pulso_experience_resume: { objective_id: z.string().regex(/^PULSO-OBJ-\d+$/) },
     pulso_memory_list: {},
@@ -204,10 +359,12 @@ const experienceSchemas = {
 };
 
 for (const [name, baseSchema] of Object.entries(experienceSchemas)) {
-  const schema = { ...baseSchema, session_id: z.string().min(1).optional() };
-  register(name, `Pulso experience operation: ${name}.`, schema, async ({ session_id, ...args }, projectDirectory) => {
+  register(name, `Pulso experience operation: ${name}.`, baseSchema, async (args, projectDirectory) => {
     const experience = await experienceFor(projectDirectory);
-    return experience.tool[name].execute(args, { directory: projectDirectory, sessionID: experienceSessionID(projectDirectory, session_id) });
+    const result = await experience.tool[name].execute(args, { directory: projectDirectory, sessionID: experienceSessionID(projectDirectory) });
+    if (name !== "pulso_metrics") return result;
+    const metrics = JSON.parse(result);
+    return JSON.stringify({ ...metrics, token_tracking: "unavailable", objectives: metrics.objectives.map((objective) => ({ ...objective, tokens: null, token_tracking: "unavailable" })), agent_runs: metrics.agent_runs.map((run) => ({ ...run, tokens: null, token_tracking: "unavailable" })) });
   }, ["pulso_memory_recall", "pulso_memory_list", "pulso_profile_recall", "pulso_metrics"].includes(name) ? { readOnlyHint: true } : {});
 }
 

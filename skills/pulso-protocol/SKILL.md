@@ -33,7 +33,7 @@ store secrets, customer data, credentials, raw payloads, or verbose logs.
 
 Task status: `draft`, `ready`, `in_progress`, `blocked`, `implemented`, `verified`, `integrated`, `failed`, `cancelled`.
 
-Required task contract: `id`, title/objective, status, dependencies, allowed/excluded paths, acceptance criteria, validation, audits, skills, and `plan`/`execution`/`integration` sections.
+Required task contract: `id`, title/objective, status, dependencies, `scope: { allowed_paths: [...], excluded_paths: [...] }`, acceptance criteria, validation, audits, skills, and `plan`/`execution`/`integration` sections. Always nest both path lists under `scope`; never write them at the task root.
 
 Before writing state: read revision/status, verify ownership, make the smallest edit, increment revision once, update the owned timestamp, validate JSON, and re-read changed fields. Return `state_conflict` instead of overwriting changed state.
 

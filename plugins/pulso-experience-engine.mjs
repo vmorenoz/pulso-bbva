@@ -14,6 +14,7 @@ const SESSION_LOOKUP_TIMEOUT_MS = 350;
 const RECONCILIATION_BUDGET_MS = 900;
 const RECONCILIATION_RUN_LIMIT = 100;
 const RECONCILIATION_LOG_LIMIT = 256 * 1024;
+const ACTIVE_SESSION_LIMIT = 256;
 let SQLiteDatabase;
 
 function reconciliationLogPath() {
@@ -68,11 +69,12 @@ function sessionPrompt(client, sessionID, directory, agent, text) {
 }
 
 async function loadSQLite() {
-  if (SQLiteDatabase) return;
+  if (SQLiteDatabase) return SQLiteDatabase;
   const specifier = typeof Bun === "undefined" ? "node:sqlite" : "bun:sqlite";
   const sqlite = await import(specifier);
   SQLiteDatabase = sqlite.DatabaseSync || sqlite.Database;
   if (!SQLiteDatabase) throw new Error(`Pulso experience cannot find a SQLite database constructor in ${specifier}.`);
+  return SQLiteDatabase;
 }
 
 function databasePath() {
@@ -519,17 +521,37 @@ function repairCycles(directory, objectiveID) {
 
 export async function PulsoExperienceEnginePlugin(input) {
   const { tool } = await import("@opencode-ai/plugin");
-  try {
-    await loadSQLite();
-    setTimeout(() => { void runExperienceMaintenance(input); }, 0);
-  } catch {
-    logExperienceFinding(input.directory, "sqlite_bootstrap", "sqlite_unavailable");
+  const activateSQLite = input.testLoadSQLite || loadSQLite;
+  const scheduleMaintenance = input.testScheduleMaintenance || ((callback) => setTimeout(callback, 0));
+  let activation;
+  const activeSessions = new Set();
+  function trackSession(sessionID) {
+    if (!sessionID) return;
+    activeSessions.delete(sessionID);
+    activeSessions.add(sessionID);
+    if (activeSessions.size > ACTIVE_SESSION_LIMIT) activeSessions.delete(activeSessions.values().next().value);
   }
-  return {
+  async function activate() {
+    if (!activation) {
+      activation = activateSQLite().then((constructor) => {
+        if (constructor) SQLiteDatabase = constructor;
+        scheduleMaintenance(() => { void runExperienceMaintenance(input); });
+        return true;
+      }).catch(() => {
+        activation = undefined;
+        logExperienceFinding(input.directory, "sqlite_bootstrap", "sqlite_unavailable");
+        return false;
+      });
+    }
+    return activation;
+  }
+  const hooks = {
     "chat.message": async (event, output) => {
       const match = (output.parts || []).map((part) => part.text || part.prompt || "").join("\n").match(/\bPULSO_TASK_ID=(PULSO-\d+)\b/);
       const pulsoSession = event.agent === "pulso";
       if (!pulsoSession && (!match || !event.agent?.startsWith("pulso-"))) return;
+      if (!(await activate())) return;
+      trackSession(event.sessionID);
       const db = database();
       const key = core.projectKey(input.directory);
       const current = db.prepare("SELECT objective_key, objective_id FROM agent_runs WHERE session_id = ?").get(event.sessionID);
@@ -800,13 +822,13 @@ export async function PulsoExperienceEnginePlugin(input) {
     event: async ({ event }) => {
       if (event.type === "message.updated") {
         const info = event.properties?.info;
-        if (info?.role === "assistant" && info.sessionID) {
+        if (info?.role === "assistant" && activeSessions.has(info.sessionID)) {
           const db = database();
-            const run = db.prepare("SELECT objective_key FROM agent_runs WHERE session_id = ?").get(info.sessionID);
+          const run = db.prepare("SELECT objective_key FROM agent_runs WHERE session_id = ?").get(info.sessionID);
           if (run) {
             const tokens = Number(info.tokens?.total) || Number(info.tokens?.input || 0) + Number(info.tokens?.output || 0) + Number(info.tokens?.reasoning || 0);
-              db.prepare("UPDATE agent_runs SET tokens = MAX(tokens, ?), finished_at = CASE WHEN ? THEN ? ELSE finished_at END WHERE session_id = ?").run(tokens, info.time?.completed ? 1 : 0, new Date().toISOString(), info.sessionID);
-              db.prepare("UPDATE objectives SET tokens = (SELECT COALESCE(SUM(tokens), 0) FROM agent_runs WHERE objective_key = ?) WHERE objective_key = ?").run(run.objective_key, run.objective_key);
+            db.prepare("UPDATE agent_runs SET tokens = MAX(tokens, ?), finished_at = CASE WHEN ? THEN ? ELSE finished_at END WHERE session_id = ?").run(tokens, info.time?.completed ? 1 : 0, new Date().toISOString(), info.sessionID);
+            db.prepare("UPDATE objectives SET tokens = (SELECT COALESCE(SUM(tokens), 0) FROM agent_runs WHERE objective_key = ?) WHERE objective_key = ?").run(run.objective_key, run.objective_key);
           }
           db.close();
         }
@@ -819,6 +841,19 @@ export async function PulsoExperienceEnginePlugin(input) {
         const info = event.properties?.info;
         if (info?.role === "assistant" && info.time?.completed) await processReporterResult(input, info.sessionID);
       }
+      if (/(?:session|message)\.(?:deleted|ended|closed)$/.test(event.type || "")) {
+        const sessionID = event.properties?.sessionID || event.properties?.session_id || event.properties?.info?.sessionID;
+        if (sessionID) activeSessions.delete(sessionID);
+      }
     },
   };
+  for (const definition of Object.values(hooks.tool)) {
+    const execute = definition.execute;
+    definition.execute = async (...args) => {
+      if (!(await activate())) throw new Error("Pulso experience is unavailable because SQLite could not be initialized.");
+      if (args[1]?.sessionID) trackSession(args[1].sessionID);
+      return execute(...args);
+    };
+  }
+  return hooks;
 }

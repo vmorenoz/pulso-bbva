@@ -18,6 +18,7 @@ const profileName = profileIndex >= 0 ? process.argv[profileIndex + 1] : "openai
 const modelProfiles = JSON.parse(fs.readFileSync(path.join(projectRoot, "model-profiles.json"), "utf8"));
 const selectedProfile = modelProfiles.profiles[profileName];
 const managedModels = new Set(Object.values(modelProfiles.profiles).flatMap((profile) => Object.values(profile.models)).map((model) => `github-copilot/${model}`));
+const legacyManagedAgents = ["pulso-code-auditor"];
 const pluginPaths = [
   "./plugins/pulso-circuit-breaker.mjs",
   "./plugins/pulso-experience-engine.mjs",
@@ -50,6 +51,12 @@ function updatedConfigText(storedProfile, managedProfile) {
     ? [...currentPlugins, ...pluginPaths.filter(plugin => !currentPlugins.includes(plugin))]
     : currentPlugins.filter(plugin => !pluginPaths.includes(plugin));
   text = applyEdits(text, modify(text, ["plugin"], nextPlugins, { formattingOptions }));
+
+  for (const agent of legacyManagedAgents) {
+    if (managedModels.has(config.agent?.[agent]?.model)) {
+      text = applyEdits(text, modify(text, ["agent", agent], undefined, { formattingOptions }));
+    }
+  }
 
   if (operation === "install" && setDefault) {
     text = applyEdits(text, modify(text, ["default_agent"], "pulso", { formattingOptions }));

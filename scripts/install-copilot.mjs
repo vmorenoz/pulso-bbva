@@ -15,6 +15,7 @@ const profiles = JSON.parse(fs.readFileSync(path.join(root, "model-profiles.json
 const copilotHome = path.resolve(process.env.COPILOT_HOME || path.join(os.homedir(), ".copilot"));
 const agentsDirectory = path.join(copilotHome, "agents");
 const profileFile = path.join(copilotHome, "pulso-profile.json");
+const mcpServer = path.join(root, "copilot", "dist", "pulso-mcp-server.mjs");
 if (!["install", "uninstall"].includes(operation)) throw new Error("Usage: node scripts/install-copilot.mjs <install|uninstall>");
 if (operation === "install" && !profiles[profileName]) throw new Error(`Unknown model profile: ${profileName}.`);
 
@@ -29,6 +30,15 @@ function digest(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
+function renderedAgent(directory, name) {
+  return fs.readFileSync(path.join(directory, name), "utf8")
+    .replace(JSON.stringify("__PULSO_MCP_SERVER__"), JSON.stringify(mcpServer));
+}
+
+function renderedDigest(directory, name) {
+  return crypto.createHash("sha256").update(renderedAgent(directory, name)).digest("hex");
+}
+
 const profileDirectories = Object.keys(profiles).map((name) => path.join(root, "copilot", "profiles", name, "agents"));
 const agentNames = fs.readdirSync(profileDirectories[0]).filter((name) => name.endsWith(".agent.md"));
 
@@ -36,17 +46,18 @@ function syncAgents() {
   const sourceDirectory = path.join(root, "copilot", "profiles", profileName, "agents");
   fs.mkdirSync(agentsDirectory, { recursive: true, mode: 0o700 });
   for (const name of agentNames) {
-    const source = path.join(sourceDirectory, name);
     const target = path.join(agentsDirectory, name);
-    if (fs.existsSync(target) && digest(target) === digest(source)) continue;
-    fs.copyFileSync(source, `${target}.${process.pid}.tmp`);
+    const content = renderedAgent(sourceDirectory, name);
+    const desired = crypto.createHash("sha256").update(content).digest("hex");
+    if (fs.existsSync(target) && digest(target) === desired) continue;
+    fs.writeFileSync(`${target}.${process.pid}.tmp`, content, { mode: 0o600 });
     fs.renameSync(`${target}.${process.pid}.tmp`, target);
   }
   let storedProfile = null;
   try { storedProfile = JSON.parse(fs.readFileSync(profileFile, "utf8")); } catch {}
   const preserveProfile = storedProfile?.schema_version === 1 && Object.hasOwn(profiles, storedProfile.profile) && storedProfile.managed_by !== "pulso" && storedProfile.profile === profileName && !force;
   if (!preserveProfile) {
-    const files = Object.fromEntries(agentNames.map((name) => [name, digest(path.join(sourceDirectory, name))]));
+    const files = Object.fromEntries(agentNames.map((name) => [name, renderedDigest(sourceDirectory, name)]));
     fs.writeFileSync(profileFile, `${JSON.stringify({ schema_version: 1, managed_by: "pulso", profile: profileName, files }, null, 2)}\n`, { mode: 0o600 });
   }
 }
@@ -58,8 +69,8 @@ function preflightAgents() {
   try { storedProfile = JSON.parse(fs.readFileSync(profileFile, "utf8")); } catch {}
   for (const name of agentNames) {
     const target = path.join(agentsDirectory, name);
-    if (!fs.existsSync(target) || digest(target) === digest(path.join(sourceDirectory, name))) continue;
-    const managed = profileDirectories.some((directory) => digest(target) === digest(path.join(directory, name))) || storedProfile?.files?.[name] === digest(target);
+    if (!fs.existsSync(target) || digest(target) === renderedDigest(sourceDirectory, name)) continue;
+    const managed = profileDirectories.some((directory) => digest(target) === renderedDigest(directory, name)) || storedProfile?.files?.[name] === digest(target);
     if (!managed && !force) conflicts.push(name);
   }
   const validProfile = storedProfile?.schema_version === 1 && Object.hasOwn(profiles, storedProfile.profile);
@@ -75,7 +86,7 @@ function removeAgents() {
   for (const name of agentNames) {
     const target = path.join(agentsDirectory, name);
     if (!fs.existsSync(target)) continue;
-    const managed = profileDirectories.some((directory) => digest(target) === digest(path.join(directory, name))) || storedProfile?.files?.[name] === digest(target);
+    const managed = profileDirectories.some((directory) => digest(target) === renderedDigest(directory, name)) || storedProfile?.files?.[name] === digest(target);
     if (managed) fs.rmSync(target, { force: true });
   }
   if (storedProfile?.schema_version === 1 && storedProfile.managed_by === "pulso" && Object.hasOwn(profiles, storedProfile.profile)) fs.rmSync(profileFile, { force: true });
