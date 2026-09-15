@@ -8,12 +8,12 @@ const dashboardScript = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 export default tool({
   description: "Start a temporary local read-only Pulso dashboard for the current project's metrics, memories, and preferences.",
   args: {
-    open: tool.schema.boolean().default(true),
+    open: tool.schema.boolean().default(false),
     timeout_minutes: tool.schema.number().int().min(5).max(240).default(30),
   },
   async execute({ open, timeout_minutes }, context) {
     const args = [dashboardScript, "--project", context.directory, "--port", "0", "--timeout", String(timeout_minutes ?? 30)]
-    if (open ?? true) args.push("--open")
+    if (open === true) args.push("--open")
     const child = spawn(process.env.PULSO_NODE_BINARY || "node", args, { detached: true, stdio: ["ignore", "pipe", "pipe"] })
     const url = await new Promise<string>((resolve, reject) => {
       let settled = false

@@ -9,7 +9,14 @@ Pulso is a lightweight task workflow. Do not create phases, roadmaps, narrative 
 
 ## State
 
-Repository-local state is untracked under `.pulso/`:
+Before delivery work, read root `PULSO.md`. Its frontmatter stores the one-time
+repository choice `artifacts: tracked|untracked`; its `## Project Rules`
+section contains user-defined repository instructions that Pulso must include
+in every relevant specialist contract. If the setting is absent, ask once and
+persist the answer in `PULSO.md` before creating state. Never ask again while
+the value is valid.
+
+Repository-local state lives under `.pulso/`:
 
 ```text
 state.json
@@ -18,7 +25,11 @@ circuit-breakers/PULSO-001.json
 leases/PULSO-001.json
 ```
 
-Add `.pulso/` only to the repository's local Git exclude. Never store secrets, customer data, credentials, raw payloads, or verbose logs.
+When artifacts are `untracked`, add `.pulso/` only to the repository's local
+Git exclude resolved by `git rev-parse --git-path info/exclude`. When they are
+`tracked`, remove only Pulso's local exclude entry and report any remaining
+ignore rule. Never edit the versioned `.gitignore` for this preference. Never
+store secrets, customer data, credentials, raw payloads, or verbose logs.
 
 Task status: `draft`, `ready`, `in_progress`, `blocked`, `implemented`, `verified`, `integrated`, `failed`, `cancelled`.
 

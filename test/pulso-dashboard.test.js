@@ -199,6 +199,14 @@ test("dashboard tool returns a live ephemeral URL", async () => {
   }
 });
 
+test("dashboard tool requires an explicit request to open the browser", () => {
+  const source = fs.readFileSync(path.resolve(__dirname, "..", "tools", "pulso_dashboard.ts"), "utf8");
+  const command = fs.readFileSync(path.resolve(__dirname, "..", "commands", "pulso-dashboard.md"), "utf8");
+  assert.match(source, /open: tool\.schema\.boolean\(\)\.default\(false\)/);
+  assert.match(source, /if \(open === true\) args\.push\("--open"\)/);
+  assert.match(command, /pulso_dashboard\(open=true\)/);
+});
+
 test("dashboard tool reports a missing Node launcher clearly", async () => {
   const previous = process.env.PULSO_NODE_BINARY;
   process.env.PULSO_NODE_BINARY = path.join(os.tmpdir(), "missing-pulso-node");

@@ -84,3 +84,12 @@ test("ships direct dashboard and doctor commands for Pulso", () => {
     assert.match(command, /Do not delegate this operation/);
   }
 });
+
+test("loads one-time project configuration without treating preferences as a dashboard request", () => {
+  const pulso = agent("pulso");
+  assert.match(pulso, /Read root `PULSO\.md` before starting delivery work/);
+  assert.match(pulso, /ask exactly once whether `\.pulso\/\*\*` should be `tracked` or `untracked`/);
+  assert.match(pulso, /include the compact digest plus the applicable `PULSO\.md` project rules/);
+  assert.match(pulso, /Mentions of metrics, memories, preferences, configuration, or `PULSO\.md` are not dashboard requests/);
+  assert.match(pulso, /"PULSO\.md": allow/);
+});

@@ -52,7 +52,9 @@ Para editar, Executor adquiere un *lease* de 30 minutos sobre la tarea. Los camb
 | Experiencia y observabilidad | `plugins/pulso-experience-engine.mjs`, dashboard y reporter | Conserva métricas y memorias verificadas en SQLite, y presenta el estado operativo de forma local. |
 | Operación e instalación | `scripts/`, `bin/`, `tools/`, `pulso.manifest.json` | Sincroniza la distribución, instala el runtime y ofrece diagnóstico y operación local. |
 
-El estado de coordinación vive en `.pulso/` y no se versiona. Incluye el estado compartido, contratos de tarea, estados de circuit breaker y *leases*. El motor de experiencia utiliza un almacén SQLite externo al estado de tareas; la memoria técnica se curará únicamente tras cierres `verified` o `integrated`.
+La configuración local vive en `PULSO.md`: guarda una sola vez si `.pulso/**` se versiona y ofrece una sección `Project Rules` para instrucciones definidas por el usuario. Cuando se elige `untracked`, Pulso usa exclusivamente el exclude local de Git y no modifica `.gitignore`; cuando se elige `tracked`, elimina su propia exclusión local. El estado de coordinación incluye estado compartido, contratos de tarea, circuit breakers y *leases*. El motor de experiencia utiliza un almacén SQLite externo al estado de tareas; la memoria técnica se curará únicamente tras cierres `verified` o `integrated`.
+
+El dashboard web es opt-in. Solo se inicia y abre cuando el usuario pide explícitamente ver el dashboard o ejecuta `/pulso-dashboard`; consultar métricas, memorias, preferencias o configuración no abre el navegador.
 
 ## Integración con el ecosistema BBVA
 
