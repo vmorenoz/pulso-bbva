@@ -1,8 +1,8 @@
 {
   "name": "pulso-opencode",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Adaptive delivery orchestration for OpenCode",
+  "description": "Adaptive delivery orchestration for OpenCode and GitHub Copilot CLI",
   "license": "UNLICENSED",
   "bin": {
     "pulso-breaker": "bin/pulso-breaker.js",
@@ -12,6 +12,9 @@
     "agents/",
     "bin/",
     "commands/",
+    "com.github.copilot/",
+    "copilot/",
+    ".github/plugin/marketplace.json",
     "lib/",
     "plugins/",
     "scripts/",
@@ -19,23 +22,34 @@
     "test/",
     "tools/",
     "README.md",
+    "mcp.json",
     "opencode.example.jsonc",
+    "plugin.json",
     "pulso.manifest.json"
   ],
   "scripts": {
     "bootstrap": "node scripts/sync.mjs export --force",
-    "install:local": "node scripts/install.mjs install --set-default",
-    "install:local:force": "node scripts/install.mjs install --set-default --force",
-    "uninstall:local": "node scripts/install.mjs uninstall",
+    "build:copilot": "node scripts/build-copilot.mjs",
+    "prepack": "npm run build:copilot",
+    "install:local": "node scripts/setup.mjs install --set-default",
+    "install:local:force": "node scripts/setup.mjs install --set-default --force",
+    "install:opencode": "node scripts/setup.mjs install --target opencode --set-default",
+    "install:copilot": "node scripts/setup.mjs install --target copilot",
+    "install:both": "node scripts/setup.mjs install --target both --set-default",
+    "uninstall:local": "node scripts/setup.mjs uninstall",
     "dashboard": "node bin/pulso-dashboard.js --open",
-    "test": "node --test test/*.test.js"
+    "test": "npm run build:copilot && node --test test/*.test.js"
   },
   "engines": {
     "node": ">=22.5.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@opencode-ai/plugin": "1.18.2",
     "jsonc-parser": "^3.3.1",
     "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
   }
 }

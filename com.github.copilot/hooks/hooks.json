@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "exec": "node",
+        "args": ["${PLUGIN_ROOT}/copilot/pulso-hook.mjs", "sessionStart"],
+        "timeoutSec": 5
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "exec": "node",
+        "args": ["${PLUGIN_ROOT}/copilot/pulso-hook.mjs", "preToolUse"],
+        "timeoutSec": 5
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "exec": "node",
+        "args": ["${PLUGIN_ROOT}/copilot/pulso-hook.mjs", "postToolUse"],
+        "timeoutSec": 5
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "type": "command",
+        "exec": "node",
+        "args": ["${PLUGIN_ROOT}/copilot/pulso-hook.mjs", "postToolUseFailure"],
+        "timeoutSec": 5
+      }
+    ],
+    "subagentStart": [
+      {
+        "type": "command",
+        "exec": "node",
+        "args": ["${PLUGIN_ROOT}/copilot/pulso-hook.mjs", "subagentStart"],
+        "timeoutSec": 5
+      }
+    ]
+  }
+}
