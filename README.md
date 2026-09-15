@@ -110,7 +110,12 @@ npm install
 npm test
 ```
 
-Edite Pulso en este repositorio. El instalador interactivo pregunta si debe configurar OpenCode, GitHub Copilot CLI o ambos:
+Edite Pulso en este repositorio. El instalador interactivo pregunta si debe configurar OpenCode, GitHub Copilot CLI o ambos y después permite elegir uno de dos perfiles de modelos:
+
+- **OpenAI:** Terra para orquestación, planificación y ejecución; Luna para exploración y tareas ligeras.
+- **Claude:** Sonnet para orquestación, planificación y ejecución; Haiku para exploración y tareas ligeras.
+
+Sol y Opus no se asignan por defecto debido a su mayor coste; siguen disponibles mediante personalización manual.
 
 ```bash
 npm run install:local
@@ -122,9 +127,10 @@ En ejecución no interactiva se conserva OpenCode como destino predeterminado po
 npm run install:opencode
 npm run install:copilot
 npm run install:both
+npm run install:both -- --profile claude
 ```
 
-El adaptador OpenCode usa `~/.config/opencode` de forma predeterminada; `OPENCODE_CONFIG_DIR` permite elegir otra instalación. El adaptador Copilot instala el plugin local `pulso`, sus agentes, skill, hooks y servidor MCP. Inicie una sesión con `copilot --agent pulso`.
+El adaptador OpenCode usa `~/.config/opencode` de forma predeterminada; `OPENCODE_CONFIG_DIR` permite elegir otra instalación. El adaptador Copilot instala el plugin local `pulso`, sus agentes, skill, hooks y servidor MCP. Ambos persisten el perfil seleccionado y asignan explícitamente el modelo correspondiente a cada agente. Inicie una sesión con `copilot --agent pulso`.
 
 El instalador no sobrescribe archivos administrados que hayan divergido de este repositorio. Revise primero esas diferencias y use el siguiente comando solo cuando el reemplazo sea intencional:
 

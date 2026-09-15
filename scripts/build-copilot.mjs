@@ -7,6 +7,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceAgents = path.join(root, "agents");
 const targetAgents = path.join(root, "com.github.copilot", "agents");
 const targetCommands = path.join(root, "com.github.copilot", "commands");
+const modelProfiles = JSON.parse(fs.readFileSync(path.join(root, "model-profiles.json"), "utf8"));
 
 const toolsets = {
   pulso: ["read", "search", "edit", "execute", "agent", "web", "todo", "pulso-control/*"],
@@ -31,29 +32,38 @@ function parseAgent(file) {
   return { description, body: match[2].trim() };
 }
 
-fs.mkdirSync(targetAgents, { recursive: true });
-for (const entry of fs.readdirSync(sourceAgents).filter((name) => name.endsWith(".md"))) {
-  const name = entry.slice(0, -3);
-  const tools = toolsets[name];
-  if (!tools) throw new Error(`Missing Copilot tool mapping for ${name}.`);
-  const { description, body } = parseAgent(path.join(sourceAgents, entry));
-  const preamble = name === "pulso"
-    ? "You are running in GitHub Copilot CLI. Pulso tools are provided by the `pulso-control` MCP server and may appear with a server prefix. Use Copilot custom agents for specialist delegation. The session-start hook supplies the Copilot session ID; include it as `session_id` in experience operations and as `owner_session` in lease operations."
-    : "You are running as a GitHub Copilot CLI custom agent. Follow the delegated Pulso contract and use Copilot tool aliases. Use the Copilot session ID supplied by hooks as `session_id` in experience operations and as `owner_session` in lease operations.";
-  const output = [
-    "---",
-    `name: ${name}`,
-    `description: ${JSON.stringify(description)}`,
-    `tools: ${JSON.stringify(tools)}`,
-    "---",
-    "",
-    preamble,
-    "",
-    body,
-    "",
-  ].join("\n");
-  fs.writeFileSync(path.join(targetAgents, `${name}.agent.md`), output);
+function generateAgents(target, profileName) {
+  const profile = modelProfiles.profiles[profileName];
+  if (!profile) throw new Error(`Unknown model profile ${profileName}.`);
+  fs.mkdirSync(target, { recursive: true });
+  for (const entry of fs.readdirSync(sourceAgents).filter((name) => name.endsWith(".md"))) {
+    const name = entry.slice(0, -3);
+    const tools = toolsets[name];
+    const tier = modelProfiles.agent_tiers[name];
+    if (!tools || !tier || !profile.models[tier]) throw new Error(`Incomplete Copilot mapping for ${name}.`);
+    const { description, body } = parseAgent(path.join(sourceAgents, entry));
+    const preamble = name === "pulso"
+      ? `You are running in GitHub Copilot CLI with the ${profile.label} Pulso profile. Pulso tools are provided by the \`pulso-control\` MCP server and may appear with a server prefix. Use Copilot custom agents for specialist delegation. The session-start hook supplies the Copilot session ID; include it as \`session_id\` in experience operations and as \`owner_session\` in lease operations.`
+      : `You are running as a GitHub Copilot CLI custom agent with the ${profile.label} Pulso profile. Follow the delegated Pulso contract and use Copilot tool aliases. Use the Copilot session ID supplied by hooks as \`session_id\` in experience operations and as \`owner_session\` in lease operations.`;
+    const output = [
+      "---",
+      `name: ${name}`,
+      `description: ${JSON.stringify(description)}`,
+      `model: ${profile.models[tier]}`,
+      `tools: ${JSON.stringify(tools)}`,
+      "---",
+      "",
+      preamble,
+      "",
+      body,
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(target, `${name}.agent.md`), output);
+  }
 }
+
+generateAgents(targetAgents, "openai");
+for (const profileName of Object.keys(modelProfiles.profiles)) generateAgents(path.join(root, "copilot", "profiles", profileName, "agents"), profileName);
 
 fs.mkdirSync(targetCommands, { recursive: true });
 for (const name of ["pulso-dashboard", "pulso-doctor"]) {

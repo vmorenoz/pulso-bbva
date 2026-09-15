@@ -18,6 +18,17 @@ test("ships a valid Copilot plugin with every Pulso agent", () => {
   const sources = fs.readdirSync(path.join(root, "agents")).filter((name) => name.endsWith(".md")).sort();
   const generated = fs.readdirSync(path.join(root, "com.github.copilot", "agents")).filter((name) => name.endsWith(".agent.md")).map((name) => name.replace(".agent.md", ".md")).sort();
   assert.deepEqual(generated, sources);
+  assert.match(fs.readFileSync(path.join(root, "com.github.copilot", "agents", "pulso-planner.agent.md"), "utf8"), /model: gpt-5\.6-terra/);
+  assert.match(fs.readFileSync(path.join(root, "copilot", "profiles", "claude", "agents", "pulso-planner.agent.md"), "utf8"), /model: claude-sonnet-5/);
+  assert.match(fs.readFileSync(path.join(root, "copilot", "profiles", "claude", "agents", "pulso.agent.md"), "utf8"), /model: claude-sonnet-5/);
+  assert.match(fs.readFileSync(path.join(root, "copilot", "profiles", "claude", "agents", "pulso-explorer.agent.md"), "utf8"), /model: claude-haiku-4\.5/);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, "com.github.copilot", "agents", "pulso-planner.agent.md"), "utf8"), /gpt-5\.6-sol|claude-opus/);
+  for (const profile of ["openai", "claude"]) {
+    for (const name of fs.readdirSync(path.join(root, "copilot", "profiles", profile, "agents"))) {
+      assert.doesNotMatch(fs.readFileSync(path.join(root, "copilot", "profiles", profile, "agents", name), "utf8"), /gpt-5\.6-sol|claude-opus/);
+    }
+  }
+  assert.doesNotMatch(fs.readFileSync(path.join(root, "opencode.example.jsonc"), "utf8"), /gpt-5\.6-sol|claude-opus/);
 });
 
 test("Copilot MCP exposes and executes the shared control plane", async () => {
@@ -115,7 +126,7 @@ test("dual installer routes the Copilot target through its plugin marketplace", 
     fs.chmodSync(binary, 0o700);
     const result = spawnSync(process.execPath, [path.join(root, "scripts", "setup.mjs"), "install", "--target", "copilot"], {
       cwd: root,
-      env: { ...process.env, COPILOT_BINARY: binary, COPILOT_FIXTURE_LOG: log },
+      env: { ...process.env, COPILOT_BINARY: binary, COPILOT_FIXTURE_LOG: log, COPILOT_HOME: path.join(directory, "home") },
       encoding: "utf8",
     });
     assert.equal(result.status, 0, result.stderr);
@@ -123,7 +134,96 @@ test("dual installer routes the Copilot target through its plugin marketplace", 
     assert.ok(calls.some((args) => args.join(" ") === "plugin marketplace add " + root));
     assert.ok(calls.some((args) => args.join(" ") === "plugin install pulso@pulso"));
     assert.doesNotMatch(fs.readFileSync(path.join(root, "scripts", "install-copilot.mjs"), "utf8"), /build-copilot/);
+    assert.match(fs.readFileSync(path.join(directory, "home", "agents", "pulso.agent.md"), "utf8"), /model: gpt-5\.6-terra/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(directory, "home", "pulso-profile.json"), "utf8")).profile, "openai");
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("OpenCode installer applies the selected Claude profile", () => {
+  const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-opencode-profile-"));
+  try {
+    const result = spawnSync(process.execPath, [path.join(root, "scripts", "install.mjs"), "install", "--profile", "claude", "--set-default"], {
+      cwd: root,
+      env: { ...process.env, OPENCODE_CONFIG_DIR: configRoot },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const config = JSON.parse(fs.readFileSync(path.join(configRoot, "opencode.jsonc"), "utf8"));
+    assert.equal(config.agent.pulso.model, "github-copilot/claude-sonnet-5");
+    assert.equal(config.agent["pulso-planner"].model, "github-copilot/claude-sonnet-5");
+    assert.equal(config.agent["pulso-explorer"].model, "github-copilot/claude-haiku-4.5");
+    assert.equal(JSON.parse(fs.readFileSync(path.join(configRoot, "pulso-profile.json"), "utf8")).profile, "claude");
+  } finally {
+    fs.rmSync(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("installer reuses a persisted Copilot profile and protects customized agents", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-copilot-persisted-"));
+  const home = path.join(directory, "home");
+  const binary = path.join(directory, "copilot-fixture");
+  const log = path.join(directory, "calls.jsonl");
+  try {
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, "pulso-profile.json"), JSON.stringify({ schema_version: 1, profile: "claude", note: "user-owned" }));
+    fs.writeFileSync(binary, `#!/usr/bin/env node\nconst fs=require('fs');fs.appendFileSync(process.env.COPILOT_FIXTURE_LOG,JSON.stringify(process.argv.slice(2))+'\\n');const a=process.argv.slice(2).join(' ');if(a==='--version')console.log('GitHub Copilot CLI 1.0.83');else if(a==='plugin marketplace list')console.log('Registered marketplaces:\\n  • pulso');\n`);
+    fs.chmodSync(binary, 0o700);
+    let result = spawnSync(process.execPath, [path.join(root, "scripts", "setup.mjs"), "install", "--target", "copilot"], {
+      cwd: root,
+      env: { ...process.env, COPILOT_BINARY: binary, COPILOT_FIXTURE_LOG: log, COPILOT_HOME: home },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(fs.readFileSync(path.join(home, "agents", "pulso.agent.md"), "utf8"), /model: claude-sonnet-5/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(home, "pulso-profile.json"), "utf8")).note, "user-owned");
+
+    fs.writeFileSync(path.join(home, "agents", "pulso.agent.md"), "customized\n");
+    fs.writeFileSync(log, "");
+    result = spawnSync(process.execPath, [path.join(root, "scripts", "setup.mjs"), "install", "--target", "copilot", "--profile", "openai"], {
+      cwd: root,
+      env: { ...process.env, COPILOT_BINARY: binary, COPILOT_FIXTURE_LOG: log, COPILOT_HOME: home },
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.equal(fs.readFileSync(path.join(home, "agents", "pulso.agent.md"), "utf8"), "customized\n");
+    const calls = fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    assert.deepEqual(calls, [["--version"]]);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("OpenCode installer protects customized Pulso model selections", () => {
+  const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-opencode-custom-model-"));
+  try {
+    fs.writeFileSync(path.join(configRoot, "opencode.jsonc"), JSON.stringify({ agent: { pulso: { model: "custom/provider-model" } } }));
+    const result = spawnSync(process.execPath, [path.join(root, "scripts", "install.mjs"), "install", "--profile", "openai"], {
+      cwd: root,
+      env: { ...process.env, OPENCODE_CONFIG_DIR: configRoot },
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(configRoot, "opencode.jsonc"), "utf8")).agent.pulso.model, "custom/provider-model");
+    assert.equal(fs.existsSync(path.join(configRoot, "agents", "pulso.md")), false);
+  } finally {
+    fs.rmSync(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("OpenCode uninstall preserves models it does not own", () => {
+  const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-opencode-user-model-"));
+  try {
+    fs.writeFileSync(path.join(configRoot, "opencode.jsonc"), JSON.stringify({ agent: { pulso: { model: "github-copilot/gpt-5.6-terra" } } }));
+    const result = spawnSync(process.execPath, [path.join(root, "scripts", "install.mjs"), "uninstall"], {
+      cwd: root,
+      env: { ...process.env, OPENCODE_CONFIG_DIR: configRoot },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(configRoot, "opencode.jsonc"), "utf8")).agent.pulso.model, "github-copilot/gpt-5.6-terra");
+  } finally {
+    fs.rmSync(configRoot, { recursive: true, force: true });
   }
 });

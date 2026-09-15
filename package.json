@@ -23,6 +23,7 @@
     "tools/",
     "README.md",
     "mcp.json",
+    "model-profiles.json",
     "opencode.example.jsonc",
     "plugin.json",
     "pulso.manifest.json"
