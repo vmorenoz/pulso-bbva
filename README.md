@@ -89,7 +89,7 @@ Los especialistas entregan evidencia estructurada y no pueden modificar la inten
 
 ## Concurrencia y resiliencia con circuit breaker
 
-La concurrencia se protege mediante *leases* por tarea. Un Executor debe poseer un *lease* activo para editar y solo pueden recuperarse *leases* vencidos; nunca se desplaza a un propietario activo. El plugin valida además que las mutaciones se mantengan dentro de las rutas autorizadas por el contrato de tarea.
+La concurrencia se protege mediante *leases* por tarea. Un Executor debe poseer un *lease* activo para editar. Durante la ejecución ordinaria se respetan los *leases* activos; ante sesiones abortadas, canceladas o caídas por límites del proveedor, el orquestador recupera el *lease* huérfano (`pulso_lease(action='recover')`) o el operador puede liberarlo mediante la CLI `pulso-lease` sin esperar los 30 minutos de expiración. El plugin valida además que las mutaciones se mantengan dentro de las rutas autorizadas por el contrato de tarea.
 
 El circuit breaker observa validaciones y ciclos de reparación para evitar insistir sobre el mismo error. Por defecto abre el circuito ante dos errores de validación repetidos o tres ciclos de reparación sin progreso. Cuando está abierto, bloquea las herramientas mutantes, pero conserva la investigación de solo lectura y la validación diagnóstica. El reinicio del circuito requiere intervención humana mediante `pulso-breaker`.
 
@@ -129,6 +129,38 @@ npm run install:copilot
 npm run install:both
 npm run install:both -- --profile claude
 ```
+
+### Perfiles de modelos y selección de proveedor en OpenCode
+
+Pulso organiza los modelos en dos perfiles seleccionables:
+- **`openai` (Versátil):** Asigna modelos según la criticidad del agente (`deep`: `gpt-5.6-sol`, `standard`: `gpt-5.6-terra`, `light`: `gpt-5.6-luna`). En OpenCode este perfil es versátil y permite operar tanto con el proveedor `openai` directo como con `github-copilot`. Si no se especifica, el instalador detecta automáticamente el proveedor predominante en su configuración.
+- **`claude`:** Asigna modelos Claude (`sonnet-5`, `haiku-4.5`, `opus-4.8`) y queda restringido exclusivamente al proveedor `github-copilot`.
+
+Comandos de instalación por proveedor:
+```bash
+# Instalar con OpenAI directo (openai/):
+npm run install:opencode -- --profile openai --provider openai
+
+# Instalar con OpenAI vía GitHub Copilot (github-copilot/):
+npm run install:opencode -- --profile openai --provider github-copilot
+
+# Instalar con Claude (exclusivo para GitHub Copilot):
+npm run install:opencode -- --profile claude
+```
+
+### Cambio de proveedor entre sesiones (`switch:provider`)
+
+Si dispone de ambos proveedores configurados en OpenCode y desea alternar entre ellos (por ejemplo, si se agota la cuota en GitHub Copilot y desea continuar con su clave directa de OpenAI):
+
+```bash
+# Alternar a OpenAI directo:
+npm run switch:provider -- --provider openai
+
+# Alternar a GitHub Copilot:
+npm run switch:provider -- --provider github-copilot
+```
+
+> **Nota sobre el ciclo de vida de OpenCode:** OpenCode carga la configuración de modelos de los agentes en memoria al arrancar el proceso (`opencode.json` / `opencode.jsonc`) y no la recarga en caliente durante una sesión activa. Por ello, tras ejecutar `switch:provider` es necesario cerrar y reiniciar OpenCode para que los agentes comiencen a operar bajo el nuevo proveedor.
 
 El adaptador OpenCode usa `~/.config/opencode` de forma predeterminada; `OPENCODE_CONFIG_DIR` permite elegir otra instalación. El adaptador Copilot instala el plugin local `pulso`, sus agentes, skill, hooks y servidor MCP. Ambos persisten el perfil seleccionado y asignan explícitamente el modelo correspondiente a cada agente. La instalación deja Pulso disponible, pero no lo selecciona como agente predeterminado. Inicie una sesión Copilot con `copilot --agent pulso`. Para hacer opt-in al agente predeterminado de OpenCode:
 

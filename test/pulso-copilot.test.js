@@ -481,3 +481,48 @@ test("OpenCode migrates only managed legacy Pulso agent models", () => {
     fs.rmSync(configRoot, { recursive: true, force: true });
   }
 });
+
+test("OpenCode installer uses versatile openai provider and enforces copilot provider for claude", () => {
+  const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-opencode-provider-"));
+  try {
+    // 1. Explicit --provider openai
+    let result = spawnSync(process.execPath, [path.join(root, "scripts", "install.mjs"), "install", "--profile", "openai", "--provider", "openai"], {
+      cwd: root, env: { ...process.env, OPENCODE_CONFIG_DIR: configRoot }, encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    let config = JSON.parse(fs.readFileSync(path.join(configRoot, "opencode.jsonc"), "utf8"));
+    assert.equal(config.agent.pulso.model, "openai/gpt-5.6-terra");
+    assert.equal(config.agent["pulso-explorer"].model, "openai/gpt-5.6-luna");
+    assert.equal(JSON.parse(fs.readFileSync(path.join(configRoot, "pulso-profile.json"), "utf8")).provider, "openai");
+
+    // 2. Auto-detection when existing config uses openai/ models
+    result = spawnSync(process.execPath, [path.join(root, "scripts", "install.mjs"), "install", "--profile", "openai"], {
+      cwd: root, env: { ...process.env, OPENCODE_CONFIG_DIR: configRoot }, encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    config = JSON.parse(fs.readFileSync(path.join(configRoot, "opencode.jsonc"), "utf8"));
+    assert.equal(config.agent.pulso.model, "openai/gpt-5.6-terra");
+
+    // 3. Claude profile always enforces github-copilot provider
+    result = spawnSync(process.execPath, [path.join(root, "scripts", "install.mjs"), "install", "--profile", "claude", "--provider", "openai"], {
+      cwd: root, env: { ...process.env, OPENCODE_CONFIG_DIR: configRoot }, encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    config = JSON.parse(fs.readFileSync(path.join(configRoot, "opencode.jsonc"), "utf8"));
+    assert.equal(config.agent.pulso.model, "github-copilot/claude-sonnet-5");
+    assert.equal(config.agent["pulso-explorer"].model, "github-copilot/claude-haiku-4.5");
+    assert.equal(JSON.parse(fs.readFileSync(path.join(configRoot, "pulso-profile.json"), "utf8")).provider, "github-copilot");
+
+    // 4. Dynamic mode unpins agent models so they inherit whichever session model is active
+    result = spawnSync(process.execPath, [path.join(root, "scripts", "install.mjs"), "install", "--dynamic", "--force"], {
+      cwd: root, env: { ...process.env, OPENCODE_CONFIG_DIR: configRoot }, encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    config = JSON.parse(fs.readFileSync(path.join(configRoot, "opencode.jsonc"), "utf8"));
+    assert.equal(config.agent.pulso?.model, undefined);
+    assert.equal(config.agent["pulso-executor"]?.model, undefined);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(configRoot, "pulso-profile.json"), "utf8")).dynamic, true);
+  } finally {
+    fs.rmSync(configRoot, { recursive: true, force: true });
+  }
+});
