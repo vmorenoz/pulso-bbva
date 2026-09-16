@@ -10122,8 +10122,8 @@ var init_schemas = __esm({
             path: iss.path ? [${k}, ...iss.path] : [${k}]
           })));
         }
-        
-        
+
+
         if (${id}.value === undefined) {
           if (${k} in input) {
             newResult[${k}] = undefined;
@@ -10131,7 +10131,7 @@ var init_schemas = __esm({
         } else {
           newResult[${k}] = ${id}.value;
         }
-        
+
       `);
         }
         doc.write(`payload.value = newResult;`);
@@ -27593,7 +27593,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
         doc.write(`
         if (${id}.issues.length) {${prefixStr(id, k)}
         }
-        
+
         if (${id}.value === undefined) {
           if (${isPresent}) {
             newResult[${k}] = undefined;
@@ -50552,11 +50552,13 @@ register("pulso_skill_digest", "Resolve compact Pulso skill constraints once per
 }, async ({ skills }) => JSON.stringify(import_pulso_control_core.default.skillDigest([...new Set(skills)])), { readOnlyHint: true });
 register("pulso_identity", "Resolve Pulso's integrity-checked canonical identity.", {}, async () => JSON.stringify(import_pulso_identity.default.resolveIdentity()), { readOnlyHint: true });
 register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable Pulso task lease.", {
-  action: external_exports.enum(["acquire", "heartbeat", "release", "status"]),
+  action: external_exports.enum(["acquire", "heartbeat", "release", "status", "recover"]),
   task_id: external_exports.string().regex(/^PULSO-\d+$/),
   ttl_minutes: external_exports.number().int().min(5).max(240).default(30),
-  owner_session: external_exports.string().min(1)
-}, async ({ action, task_id, ttl_minutes = 30, owner_session }, projectDirectory) => {
+  owner_session: external_exports.string().min(1),
+  force: external_exports.boolean().optional(),
+  reason: external_exports.string().optional()
+}, async ({ action, task_id, ttl_minutes = 30, owner_session, force, reason }, projectDirectory) => {
   const leaseOwner = owner_session;
   const file3 = path2.join(import_pulso_file_state.default.safeDirectory(projectDirectory, [".pulso", "leases"]), `${task_id}.json`);
   return import_pulso_file_state.default.withFileLock(file3, () => {
@@ -50568,6 +50570,20 @@ register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable P
       const lease = { schema_version: 1, task_id, status: "active", owner_session: leaseOwner, acquired_at: now.toISOString(), heartbeat_at: now.toISOString(), expires_at: new Date(now.getTime() + ttl_minutes * 6e4).toISOString(), recovered_from: import_pulso_control_core.default.isExpired(existing) ? existing.owner_session : null };
       import_pulso_file_state.default.writeAtomic(file3, lease);
       return JSON.stringify(lease);
+    }
+    if (action === "recover") {
+      const lease = { schema_version: 1, task_id, status: "active", owner_session: leaseOwner, acquired_at: now.toISOString(), heartbeat_at: now.toISOString(), expires_at: new Date(now.getTime() + ttl_minutes * 6e4).toISOString(), recovered_from: existing?.status === "active" ? existing.owner_session : import_pulso_control_core.default.isExpired(existing) ? existing.owner_session : null, recovery_reason: reason || "manual recovery" };
+      import_pulso_file_state.default.writeAtomic(file3, lease);
+      return JSON.stringify(lease);
+    }
+    if (action === "release" && force) {
+      if (!existing || existing.status !== "active") return JSON.stringify(existing || { task_id, status: "none" });
+      existing.status = "released";
+      existing.released_at = now.toISOString();
+      existing.released_by = leaseOwner;
+      if (reason) existing.release_reason = reason;
+      import_pulso_file_state.default.writeAtomic(file3, existing);
+      return JSON.stringify(existing);
     }
     if (!existing || existing.owner_session !== leaseOwner || existing.status !== "active") throw new Error(`${task_id} has no active lease owned by this session.`);
     if (action === "heartbeat") {
@@ -50582,14 +50598,24 @@ register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable P
   });
 });
 register("pulso_lease_diagnostic", "Inspect a lease or safely probe lease recovery for the primary Pulso agent.", {
-  action: external_exports.enum(["status", "probe"]),
-  task_id: external_exports.string().regex(/^PULSO-\d+$/)
-}, async ({ action, task_id }, projectDirectory) => {
+  action: external_exports.enum(["status", "probe", "release"]),
+  task_id: external_exports.string().regex(/^PULSO-\d+$/),
+  reason: external_exports.string().optional()
+}, async ({ action, task_id, reason }, projectDirectory) => {
   const file3 = path2.join(import_pulso_file_state.default.safeDirectory(projectDirectory, [".pulso", "leases"]), `${task_id}.json`);
   return import_pulso_file_state.default.withFileLock(file3, () => {
     const prior = fs2.existsSync(file3) ? fs2.readFileSync(file3) : null;
     const existing = prior === null ? null : JSON.parse(prior.toString("utf8"));
     if (action === "status") return JSON.stringify(existing || { task_id, status: "none" });
+    if (action === "release") {
+      if (!existing || existing.status !== "active") return JSON.stringify(existing || { task_id, status: "none" });
+      existing.status = "released";
+      existing.released_at = (/* @__PURE__ */ new Date()).toISOString();
+      existing.released_by = "primary";
+      if (reason) existing.release_reason = reason;
+      import_pulso_file_state.default.writeAtomic(file3, existing);
+      return JSON.stringify(existing);
+    }
     if (existing?.status === "active" && !import_pulso_control_core.default.isExpired(existing)) throw new Error(`${task_id} has an active lease and cannot be probed.`);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const probe = { schema_version: 1, task_id, status: "released", owner_session: `copilot-probe-${crypto2.randomUUID()}`, acquired_at: now, heartbeat_at: now, expires_at: now, released_at: now };

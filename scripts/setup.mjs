@@ -58,6 +58,7 @@ function persistedProfile(target) {
 const target = await selectTarget();
 if (!["opencode", "copilot", "both"].includes(target)) throw new Error(`Invalid target: ${target || "empty"}. Use opencode, copilot, or both.`);
 let profile = option("--profile");
+let provider = option("--provider");
 if (operation === "install" && !profile) {
   profile = persistedProfile(target);
   if (profile) {
@@ -76,9 +77,22 @@ if (operation === "install" && !profile) {
   }
 }
 if (operation === "install" && !["openai", "claude"].includes(profile)) throw new Error(`Invalid profile: ${profile || "empty"}. Use openai or claude.`);
+if (operation === "install" && profile === "openai" && !provider && (target === "opencode" || target === "both") && process.stdin.isTTY && process.stdout.isTTY) {
+  const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await prompt.question("OpenCode provider for OpenAI profile: [1] GitHub Copilot (github-copilot/), [2] OpenAI (openai/)? ");
+    const mapped = ({ "1": "github-copilot", "2": "openai", copilot: "github-copilot", "github-copilot": "github-copilot", openai: "openai" })[answer.trim().toLowerCase()];
+    if (mapped) provider = mapped;
+  } finally {
+    prompt.close();
+  }
+}
 const raw = process.argv.slice(3);
-const passthrough = raw.filter((arg, index, args) => !arg.startsWith("--target=") && !arg.startsWith("--profile=") && !["--target", "--profile"].includes(arg) && !["--target", "--profile"].includes(args[index - 1]));
-if (operation === "install") passthrough.push("--profile", profile);
+const passthrough = raw.filter((arg, index, args) => !arg.startsWith("--target=") && !arg.startsWith("--profile=") && !arg.startsWith("--provider=") && !["--target", "--profile", "--provider"].includes(arg) && !["--target", "--profile", "--provider"].includes(args[index - 1]));
+if (operation === "install") {
+  passthrough.push("--profile", profile);
+  if (provider) passthrough.push("--provider", provider);
+}
 
 function run(script) {
   const result = spawnSync(process.execPath, [path.join(root, "scripts", script), operation, ...passthrough], { cwd: root, stdio: "inherit", env: process.env });

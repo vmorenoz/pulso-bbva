@@ -139,10 +139,15 @@ test("ships direct dashboard and doctor commands for Pulso", () => {
 test("loads one-time project configuration without treating preferences as a dashboard request", () => {
   const pulso = agent("pulso");
   assert.match(pulso, /Read root `PULSO\.md` before starting delivery work/);
-  assert.match(pulso, /ask exactly once whether `\.pulso\/\*\*` should be `tracked` or `untracked`/);
+  assert.match(pulso, /native `question` tool/);
+  assert.match(pulso, /Solo locales \(Recomendado\)/);
+  assert.match(pulso, /Versionados en Git/);
+  assert.match(pulso, /persist it with `pulso_artifacts`/);
   assert.match(pulso, /include the compact digest plus the applicable `PULSO\.md` project rules/);
   assert.match(pulso, /Mentions of metrics, memories, preferences, configuration, or `PULSO\.md` are not dashboard requests/);
   assert.match(pulso, /"PULSO\.md": allow/);
+  assert.match(pulso, /question: allow/);
+  assert.match(pulso, /pulso_artifacts: allow/);
 });
 
 test("allows Pulso to use MCP tools only for necessary evidence", () => {

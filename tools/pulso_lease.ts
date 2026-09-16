@@ -8,15 +8,18 @@ import contacts from "../lib/pulso-agent-contacts.js"
 export default tool({
   description: "Acquire, heartbeat, release, or inspect a recoverable Pulso task lease.",
   args: {
-    action: tool.schema.enum(["acquire", "heartbeat", "release", "status"]),
+    action: tool.schema.enum(["acquire", "heartbeat", "release", "status", "recover"]),
     task_id: tool.schema.string().regex(/^PULSO-\d+$/),
     ttl_minutes: tool.schema.number().int().min(5).max(240).default(30),
+    force: tool.schema.boolean().optional(),
+    reason: tool.schema.string().optional(),
   },
-  async execute({ action, task_id, ttl_minutes }, context) {
+  async execute({ action, task_id, ttl_minutes, force, reason }, context) {
     const canOwnLease = context.agent === "pulso-executor"
       || contacts.registeredContact(context.directory, context.agent)?.mutation === "scoped"
-    if (action !== "status" && !canOwnLease) {
-      throw new Error(`Only pulso-executor or an approved scoped contact can ${action} a task lease.`)
+    const canRecoverLease = context.agent === "pulso" && (action === "recover" || (action === "release" && force))
+    if (action !== "status" && !canOwnLease && !canRecoverLease) {
+      throw new Error(`Agent ${context.agent} cannot ${action} a task lease.`)
     }
     const ttlMinutes = ttl_minutes ?? 30
     const file = path.join(stateFiles.safeDirectory(context.directory, [".pulso", "leases"]), `${task_id}.json`)
@@ -41,6 +44,32 @@ export default tool({
         }
         stateFiles.writeAtomic(file, lease)
         return JSON.stringify(lease)
+      }
+
+      if (action === "recover") {
+        const lease = {
+          schema_version: 1,
+          task_id,
+          status: "active",
+          owner_session: context.sessionID,
+          acquired_at: now.toISOString(),
+          heartbeat_at: now.toISOString(),
+          expires_at: new Date(now.getTime() + ttlMinutes * 60000).toISOString(),
+          recovered_from: existing?.status === "active" ? existing.owner_session : (core.isExpired(existing) ? existing.owner_session : null),
+          recovery_reason: reason || "manual recovery",
+        }
+        stateFiles.writeAtomic(file, lease)
+        return JSON.stringify(lease)
+      }
+
+      if (action === "release" && force) {
+        if (!existing || existing.status !== "active") return JSON.stringify(existing || { task_id, status: "none" })
+        existing.status = "released"
+        existing.released_at = now.toISOString()
+        existing.released_by = context.sessionID
+        if (reason) existing.release_reason = reason
+        stateFiles.writeAtomic(file, existing)
+        return JSON.stringify(existing)
       }
 
       if (!existing || existing.owner_session !== context.sessionID || existing.status !== "active") {

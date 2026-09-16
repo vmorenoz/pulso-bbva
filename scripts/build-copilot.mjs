@@ -44,11 +44,13 @@ function generateAgents(target, profileName) {
     const { description, body } = parseAgent(path.join(sourceAgents, entry));
     const runtimeBody = name === "pulso"
       ? body.replace("omit `objective_id`", "pass the `objective_id` returned by `pulso_experience_start`")
+        .replace(/native `question` tool/g, "native `ask_user` tool")
         .replace(/^- If you need a specialist not covered by your built-in agents, query `pulso_agent_contacts`.*\n/m, "")
         .replace(/^- Do not overuse `task`:.*`pulso_agent_contacts`.*\n/m, "")
         .replace(/Run repository and Git commands directly through `bash`\./g, "Use `pulso_primary_git` for repository and Git metadata.")
         .replace(/Reading `git status`, `git log`, `git show`, and `git rev-parse` for orchestration metadata is allowed directly and is not delegated discovery\./g, "Use `pulso_primary_git` for `git status`, `git log`, `git show`, and `git rev-parse` orchestration metadata.")
         .replace(/For `untracked`, add `\.pulso\/` only to the repository's local Git exclude resolved by `git rev-parse --git-path info\/exclude`; for `tracked`, remove only that Pulso-managed local exclude entry/g, "Use `pulso_primary_artifacts` to add or remove only Pulso's local `.pulso/` exclude entry")
+        .replace(/persist it with `pulso_artifacts`/g, "persist `PULSO.md` with `pulso_primary_write` and apply the choice with `pulso_primary_artifacts`")
         .replace(/If a task was blocked solely by unavailable or invalid lease infrastructure, first verify `pulso_lease\(action="status"\)` and a disposable acquire\/release probe\./g, "If a task was blocked solely by unavailable or invalid lease infrastructure, use `pulso_lease_diagnostic(action=\"status\")` and `pulso_lease_diagnostic(action=\"probe\")`.")
       : body;
     const preamble = name === "pulso"
@@ -93,14 +95,16 @@ for (const name of ["pulso-dashboard", "pulso-doctor"]) {
 }
 
 fs.mkdirSync(path.join(root, "copilot", "dist"), { recursive: true });
+const mcpBundle = path.join(root, "copilot", "dist", "pulso-mcp-server.mjs");
 await build({
   entryPoints: [path.join(root, "copilot", "pulso-mcp-server.mjs")],
-  outfile: path.join(root, "copilot", "dist", "pulso-mcp-server.mjs"),
+  outfile: mcpBundle,
   bundle: true,
   platform: "node",
   format: "esm",
   target: "node22",
   banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" },
 });
+fs.writeFileSync(mcpBundle, fs.readFileSync(mcpBundle, "utf8").replace(/[ \t]+$/gm, ""));
 
 console.log("build: Copilot plugin artifacts updated");

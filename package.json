@@ -6,7 +6,8 @@
   "license": "UNLICENSED",
   "bin": {
     "pulso-breaker": "bin/pulso-breaker.js",
-    "pulso-dashboard": "bin/pulso-dashboard.js"
+    "pulso-dashboard": "bin/pulso-dashboard.js",
+    "pulso-lease": "bin/pulso-lease.js"
   },
   "files": [
     "agents/",
@@ -37,6 +38,7 @@
     "install:copilot": "node scripts/setup.mjs install --target copilot",
     "install:both": "node scripts/setup.mjs install --target both",
     "uninstall:local": "node scripts/setup.mjs uninstall",
+    "switch:provider": "node scripts/install.mjs install --set-default --force",
     "dashboard": "node bin/pulso-dashboard.js --open",
     "test": "npm run build:copilot && node --test test/*.test.js"
   },
