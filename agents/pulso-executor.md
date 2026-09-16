@@ -18,6 +18,7 @@ permission:
   pulso_metrics: deny
   pulso_dashboard: deny
   pulso_agent_contacts: deny
+  pulso_identity: deny
   edit: allow
   task: deny
   skill:

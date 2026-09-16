@@ -56,7 +56,7 @@ test("doctor reports a healthy configured control plane", async () => {
       fs.mkdirSync(path.join(configRoot, "plugins"), { recursive: true });
       fs.writeFileSync(path.join(configRoot, "plugins", `${plugin}.mjs`), "export default () => ({})\n");
     }
-    for (const customTool of ["pulso_lease", "pulso_route", "pulso_skill_digest", "pulso_doctor", "pulso_dashboard", "pulso_agent_contacts"]) {
+    for (const customTool of ["pulso_lease", "pulso_route", "pulso_skill_digest", "pulso_doctor", "pulso_dashboard", "pulso_agent_contacts", "pulso_identity"]) {
       fs.mkdirSync(path.join(configRoot, "tools"), { recursive: true });
       fs.writeFileSync(path.join(configRoot, "tools", `${customTool}.ts`), "export default {}\n");
     }
@@ -93,7 +93,7 @@ test("doctor reports skipped experience reconciliation rows", async () => {
     fs.mkdirSync(path.join(configRoot, "plugins"), { recursive: true });
     for (const name of ["pulso-circuit-breaker", "pulso-experience-engine"]) fs.writeFileSync(path.join(configRoot, "plugins", `${name}.mjs`), "export default () => ({})\n");
     fs.mkdirSync(path.join(configRoot, "tools"), { recursive: true });
-    for (const name of ["pulso_lease", "pulso_route", "pulso_skill_digest", "pulso_doctor", "pulso_dashboard", "pulso_agent_contacts"]) fs.writeFileSync(path.join(configRoot, "tools", `${name}.ts`), "export default {}\n");
+    for (const name of ["pulso_lease", "pulso_route", "pulso_skill_digest", "pulso_doctor", "pulso_dashboard", "pulso_agent_contacts", "pulso_identity"]) fs.writeFileSync(path.join(configRoot, "tools", `${name}.ts`), "export default {}\n");
     fs.writeFileSync(path.join(configRoot, "opencode.jsonc"), JSON.stringify({ plugin: ["./plugins/pulso-circuit-breaker.mjs", "./plugins/pulso-experience-engine.mjs"] }));
     const experienceDirectory = path.join(dataHome, "opencode", "pulso");
     fs.mkdirSync(experienceDirectory, { recursive: true });

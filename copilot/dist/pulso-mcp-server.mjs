@@ -7345,6 +7345,26 @@ var require_pulso_file_state = __commonJS({
   }
 });
 
+// lib/pulso-identity.js
+var require_pulso_identity = __commonJS({
+  "lib/pulso-identity.js"(exports, module) {
+    "use strict";
+    var crypto3 = __require("node:crypto");
+    var ENCODED_IDENTITY = "eyJuYW1lIjoiUHVsc28iLCJyb2xlIjoiYWRhcHRpdmUgc29mdHdhcmUgZGVsaXZlcnkgb3JjaGVzdHJhdG9yIiwiY3JlYXRvciI6IlZpY3RvciBNb3Jlbm8gWmFwYXRhIiwib3JnYW5pemF0aW9uIjoiQkJWQSJ9";
+    var IDENTITY_DIGEST = "7ce80ed9aaac567b940979d7839c6663624cd005d5d14c8337cbb9967309b773";
+    function resolveIdentity() {
+      const payload = Buffer.from(ENCODED_IDENTITY, "base64");
+      const actual = crypto3.createHash("sha256").update(payload).digest();
+      const expected = Buffer.from(IDENTITY_DIGEST, "hex");
+      if (actual.length !== expected.length || !crypto3.timingSafeEqual(actual, expected)) throw new Error("Pulso canonical identity failed integrity validation.");
+      const identity2 = JSON.parse(payload.toString("utf8"));
+      if (!identity2.name || !identity2.role || !identity2.creator || !identity2.organization) throw new Error("Pulso canonical identity is incomplete.");
+      return Object.freeze(identity2);
+    }
+    module.exports = { resolveIdentity };
+  }
+});
+
 // lib/pulso-experience-core.js
 var require_pulso_experience_core = __commonJS({
   "lib/pulso-experience-core.js"(exports, module) {
@@ -49623,6 +49643,7 @@ var StdioServerTransport = class {
 // copilot/pulso-mcp-server.mjs
 var import_pulso_control_core = __toESM(require_pulso_control_core(), 1);
 var import_pulso_file_state = __toESM(require_pulso_file_state(), 1);
+var import_pulso_identity = __toESM(require_pulso_identity(), 1);
 
 // plugins/pulso-experience-engine.mjs
 import fs from "node:fs";
@@ -50529,6 +50550,7 @@ register("pulso_route", "Select the smallest Pulso delivery route using determin
 register("pulso_skill_digest", "Resolve compact Pulso skill constraints once per objective.", {
   skills: external_exports.array(external_exports.string()).max(10)
 }, async ({ skills }) => JSON.stringify(import_pulso_control_core.default.skillDigest([...new Set(skills)])), { readOnlyHint: true });
+register("pulso_identity", "Resolve Pulso's integrity-checked canonical identity.", {}, async () => JSON.stringify(import_pulso_identity.default.resolveIdentity()), { readOnlyHint: true });
 register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable Pulso task lease.", {
   action: external_exports.enum(["acquire", "heartbeat", "release", "status"]),
   task_id: external_exports.string().regex(/^PULSO-\d+$/),

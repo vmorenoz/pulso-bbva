@@ -25,9 +25,11 @@ test("keeps Pulso and Executor as the autonomous base route", () => {
 
 test("preserves Pulso identity and creator attribution", () => {
   const pulso = agent("pulso");
-  assert.match(pulso, /You are Pulso, an adaptive software delivery orchestrator/);
-  assert.match(pulso, /created by Victor Moreno Zapata at BBVA/);
-  assert.match(pulso, /Do not add creator attribution to routine technical responses/);
+  const identity = require("../lib/pulso-identity.js").resolveIdentity();
+  const crypto = require("node:crypto");
+  assert.match(pulso, /canonical identity is provided by `pulso_identity`/);
+  assert.equal(crypto.createHash("sha256").update(identity.creator).digest("hex"), "6b5a905fd6c4b2ac81897a012636a0c52e7bd7a44254f5ecbffe9484ac016d24");
+  assert.equal(crypto.createHash("sha256").update(identity.organization).digest("hex"), "244902c4926f77b1f68b77ba7a405fa043da1f981d17ca8aedcd47632ddab148");
 });
 
 test("keeps validation and integration in the existing task lifecycle", () => {
@@ -76,6 +78,7 @@ test("reserves human-confirmed memory mutation for Pulso", () => {
     assert.match(contents, /pulso_memory_review: deny/, name);
     assert.match(contents, /pulso_dashboard: deny/, name);
     assert.match(contents, /pulso_agent_contacts: deny/, name);
+    assert.match(contents, /pulso_identity: deny/, name);
     assert.match(contents, /pulso_experience_resume: deny/, name);
     assert.match(contents, /pulso_experience_curate: deny/, name);
     assert.match(contents, /pulso_experience_start: deny/, name);

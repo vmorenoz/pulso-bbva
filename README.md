@@ -2,8 +2,6 @@
 
 **Pulso** convierte una solicitud de ingeniería en un cambio implementado, validado y trazable. Es un framework local de orquestación adaptativa para [OpenCode](https://opencode.ai) y GitHub Copilot CLI que coordina especialistas, protege el alcance y exige evidencia antes de declarar una entrega completa.
 
-Creado por **Victor Moreno Zapata en BBVA**.
-
 Su principio es sencillo: **usar el menor proceso que permita entregar con confianza**. Una corrección acotada va directamente a Executor; planificación, exploración, verificación y auditorías aparecen solo cuando aportan valor real.
 
 ## Capacidades

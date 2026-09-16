@@ -31,7 +31,7 @@ export default tool({
         if (!configText.includes(plugin)) findings.push({ severity: "error", code: "unregistered_plugin", detail: plugin })
       }
     }
-    for (const customTool of ["pulso_lease", "pulso_route", "pulso_skill_digest", "pulso_doctor", "pulso_dashboard", "pulso_agent_contacts"]) {
+    for (const customTool of ["pulso_lease", "pulso_route", "pulso_skill_digest", "pulso_doctor", "pulso_dashboard", "pulso_agent_contacts", "pulso_identity"]) {
       if (!fs.existsSync(path.join(configRoot, "tools", `${customTool}.ts`))) findings.push({ severity: "error", code: "missing_tool", detail: customTool })
     }
     const taskDir = path.join(context.directory, ".pulso", "tasks")
