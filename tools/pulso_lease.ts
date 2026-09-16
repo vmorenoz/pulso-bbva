@@ -3,6 +3,7 @@ import path from "node:path"
 import { tool } from "@opencode-ai/plugin"
 import core from "../lib/pulso-control-core.js"
 import stateFiles from "../lib/pulso-file-state.js"
+import contacts from "../lib/pulso-agent-contacts.js"
 
 export default tool({
   description: "Acquire, heartbeat, release, or inspect a recoverable Pulso task lease.",
@@ -12,6 +13,11 @@ export default tool({
     ttl_minutes: tool.schema.number().int().min(5).max(240).default(30),
   },
   async execute({ action, task_id, ttl_minutes }, context) {
+    const canOwnLease = context.agent === "pulso-executor"
+      || contacts.registeredContact(context.directory, context.agent)?.mutation === "scoped"
+    if (action !== "status" && !canOwnLease) {
+      throw new Error(`Only pulso-executor or an approved scoped contact can ${action} a task lease.`)
+    }
     const ttlMinutes = ttl_minutes ?? 30
     const file = path.join(stateFiles.safeDirectory(context.directory, [".pulso", "leases"]), `${task_id}.json`)
     return stateFiles.withFileLock(file, () => {

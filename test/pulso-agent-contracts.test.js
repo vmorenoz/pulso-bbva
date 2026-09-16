@@ -64,6 +64,24 @@ test("uses Explorer only for iterative discovery and keeps it read-only", () => 
   assert.match(explorer, /never call one as a no-op, progress marker, or unnecessary substitute/);
   assert.match(explorer, /bash: deny/);
   assert.match(explorer, /edit: deny/);
+  assert.match(explorer, /pulso_lease: deny/);
+});
+
+test("reserves task lease ownership for Executor", () => {
+  assert.match(agent("pulso-executor"), /pulso_lease: allow/);
+  for (const name of [
+    "pulso-planner",
+    "pulso-challenger",
+    "pulso-explorer",
+    "pulso-verifier",
+    "pulso-integration-auditor",
+    "pulso-security-auditor",
+    "pulso-ui-auditor",
+    "pulso-experience-curator",
+    "pulso-delivery-reporter",
+  ]) {
+    assert.match(agent(name), /pulso_lease: deny/, name);
+  }
 });
 
 test("reserves human-confirmed memory mutation for Pulso", () => {

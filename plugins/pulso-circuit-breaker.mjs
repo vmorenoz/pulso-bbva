@@ -130,6 +130,24 @@ function writeState(directory, state) {
   stateFiles.writeAtomic(file, state);
 }
 
+function releaseSessionLeases(directory, sessionID) {
+  const leasesDirectory = path.join(directory, ".pulso", "leases");
+  if (!fs.existsSync(leasesDirectory)) return;
+  const safeLeasesDirectory = stateFiles.safeDirectory(directory, [".pulso", "leases"]);
+  for (const name of fs.readdirSync(safeLeasesDirectory)) {
+    if (!/^PULSO-\d+\.json$/.test(name)) continue;
+    const file = path.join(safeLeasesDirectory, name);
+    stateFiles.withFileLock(file, () => {
+      const lease = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (lease.status !== "active" || lease.owner_session !== sessionID) return;
+      lease.status = "released";
+      lease.released_at = new Date().toISOString();
+      lease.release_reason = "session_terminal";
+      stateFiles.writeAtomic(file, lease);
+    });
+  }
+}
+
 function commandFailed(output) {
   const metadata = output.metadata || {};
   if (typeof metadata.exitCode === "number") return metadata.exitCode !== 0;
@@ -245,9 +263,11 @@ export async function PulsoCircuitBreakerPlugin(input) {
       await update(input.directory, taskID, (state) => core.recordValidation(state, command, output.output, commandFailed(output)), input.client);
     },
     event: async ({ event }) => {
-      if (/^session\.(?:deleted|ended|closed)$/.test(event.type || "")) {
+      const terminalStatus = event.type === "session.status" && event.properties?.status?.type === "idle";
+      if (/^session\.(?:deleted|ended|closed|idle|error)$/.test(event.type || "") || terminalStatus) {
         const sessionID = event.properties?.info?.id || event.properties?.sessionID || event.properties?.session_id;
         if (sessionID) {
+          releaseSessionLeases(input.directory, sessionID);
           sessionTasks.delete(sessionID);
           primarySessions.delete(sessionID);
         }

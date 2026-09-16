@@ -9,13 +9,13 @@ test("lease rejects another session and allows expired recovery", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-lease-"));
   try {
     const lease = (await import("../tools/pulso_lease.ts")).default;
-    await lease.execute({ action: "acquire", task_id: "PULSO-001", ttl_minutes: 30 }, { directory, sessionID: "session-a" });
-    await assert.rejects(() => lease.execute({ action: "acquire", task_id: "PULSO-001", ttl_minutes: 30 }, { directory, sessionID: "session-b" }), /leased by another/);
+    await lease.execute({ action: "acquire", task_id: "PULSO-001", ttl_minutes: 30 }, { directory, sessionID: "session-a", agent: "pulso-executor" });
+    await assert.rejects(() => lease.execute({ action: "acquire", task_id: "PULSO-001", ttl_minutes: 30 }, { directory, sessionID: "session-b", agent: "pulso-executor" }), /leased by another/);
     const file = path.join(directory, ".pulso", "leases", "PULSO-001.json");
     const state = JSON.parse(fs.readFileSync(file, "utf8"));
     state.expires_at = "2020-01-01T00:00:00.000Z";
     fs.writeFileSync(file, JSON.stringify(state));
-    const recovered = JSON.parse(await lease.execute({ action: "acquire", task_id: "PULSO-001", ttl_minutes: 30 }, { directory, sessionID: "session-b" }));
+    const recovered = JSON.parse(await lease.execute({ action: "acquire", task_id: "PULSO-001", ttl_minutes: 30 }, { directory, sessionID: "session-b", agent: "pulso-executor" }));
     assert.equal(recovered.recovered_from, "session-a");
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -27,11 +27,32 @@ test("lease applies its 30-minute TTL when the caller omits ttl_minutes", async 
   try {
     const lease = (await import("../tools/pulso_lease.ts")).default;
     const before = Date.now();
-    const acquired = JSON.parse(await lease.execute({ action: "acquire", task_id: "PULSO-001" }, { directory, sessionID: "session-a" }));
+    const acquired = JSON.parse(await lease.execute({ action: "acquire", task_id: "PULSO-001" }, { directory, sessionID: "session-a", agent: "pulso-executor" }));
     const duration = new Date(acquired.expires_at).getTime() - before;
     assert.ok(duration >= 29 * 60 * 1000 && duration <= 31 * 60 * 1000);
-    const heartbeat = JSON.parse(await lease.execute({ action: "heartbeat", task_id: "PULSO-001" }, { directory, sessionID: "session-a" }));
+    const heartbeat = JSON.parse(await lease.execute({ action: "heartbeat", task_id: "PULSO-001" }, { directory, sessionID: "session-a", agent: "pulso-executor" }));
     assert.equal(Number.isNaN(new Date(heartbeat.expires_at).getTime()), false);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("lease prevents read-only Pulso specialists from acquiring task ownership", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-lease-role-"));
+  try {
+    const lease = (await import("../tools/pulso_lease.ts")).default;
+    await assert.rejects(
+      () => lease.execute(
+        { action: "acquire", task_id: "PULSO-001", ttl_minutes: 30 },
+        { directory, sessionID: "explorer-session", agent: "pulso-explorer" },
+      ),
+      /Only pulso-executor or an approved scoped contact can acquire/,
+    );
+    const status = JSON.parse(await lease.execute(
+      { action: "status", task_id: "PULSO-001", ttl_minutes: 30 },
+      { directory, sessionID: "explorer-session", agent: "pulso-explorer" },
+    ));
+    assert.equal(status.status, "none");
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

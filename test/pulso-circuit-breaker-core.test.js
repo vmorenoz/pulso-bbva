@@ -151,6 +151,36 @@ test("defers legacy circuit migration until a Pulso task session starts", async 
   }
 });
 
+test("releases active leases when their owner session becomes idle", async () => {
+  const { PulsoCircuitBreakerPlugin } = await import("../plugins/pulso-circuit-breaker.mjs");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-session-lease-"));
+  const leasesDirectory = path.join(directory, ".pulso", "leases");
+  fs.mkdirSync(leasesDirectory, { recursive: true });
+  const file = path.join(leasesDirectory, "PULSO-009.json");
+  fs.writeFileSync(file, JSON.stringify({
+    schema_version: 1,
+    task_id: "PULSO-009",
+    status: "active",
+    owner_session: "failed-explorer-session",
+    expires_at: "2999-01-01T00:00:00.000Z",
+  }));
+  try {
+    const hooks = await PulsoCircuitBreakerPlugin({ directory, client: {} });
+    await hooks.event({
+      event: {
+        type: "session.idle",
+        properties: { sessionID: "failed-explorer-session" },
+      },
+    });
+    const lease = JSON.parse(fs.readFileSync(file, "utf8"));
+    assert.equal(lease.status, "released");
+    assert.equal(lease.release_reason, "session_terminal");
+    assert.equal(typeof lease.released_at, "string");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("keeps an open-breaker session available for read-only diagnosis", async () => {
   const { PulsoCircuitBreakerPlugin } = await import("../plugins/pulso-circuit-breaker.mjs");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-breaker-diagnosis-"));

@@ -6,6 +6,7 @@ color: "#71717A"
 temperature: 0.05
 steps: 6
 permission:
+  pulso_lease: deny
   pulso_memory_review: deny
   pulso_memory_list: deny
   pulso_memory_recall: deny

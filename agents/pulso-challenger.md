@@ -5,6 +5,7 @@ color: "#DC2626"
 temperature: 0.05
 steps: 12
 permission:
+  pulso_lease: deny
   pulso_memory_review: deny
   pulso_memory_list: deny
   pulso_memory_recall: deny
