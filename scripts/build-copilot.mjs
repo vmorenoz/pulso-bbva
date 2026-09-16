@@ -8,6 +8,7 @@ const sourceAgents = path.join(root, "agents");
 const targetAgents = path.join(root, "com.github.copilot", "agents");
 const targetCommands = path.join(root, "com.github.copilot", "commands");
 const modelProfiles = JSON.parse(fs.readFileSync(path.join(root, "model-profiles.json"), "utf8"));
+const openCodeOnlyAgents = new Set(["pulso-contact-manager"]);
 
 const toolsets = {
   pulso: ["read", "search", "agent", "ask_user", "web", "todo", "pulso-control/pulso_route", "pulso-control/pulso_skill_digest", "pulso-control/pulso_identity", "pulso-control/pulso_dashboard", "pulso-control/pulso_doctor", "pulso-control/pulso_experience_start", "pulso-control/pulso_experience_repair", "pulso-control/pulso_memory_recall", "pulso-control/pulso_experience_finalize", "pulso-control/pulso_experience_curate", "pulso-control/pulso_experience_resume", "pulso-control/pulso_memory_list", "pulso-control/pulso_memory_review", "pulso-control/pulso_profile_recall", "pulso-control/pulso_metrics", "pulso-control/pulso_lease_diagnostic", "pulso-control/pulso_primary_metadata", "pulso-control/pulso_primary_write", "pulso-control/pulso_primary_artifacts", "pulso-control/pulso_primary_git"],
@@ -38,6 +39,7 @@ function generateAgents(target, profileName) {
   fs.mkdirSync(target, { recursive: true });
   for (const entry of fs.readdirSync(sourceAgents).filter((name) => name.endsWith(".md"))) {
     const name = entry.slice(0, -3);
+    if (openCodeOnlyAgents.has(name)) continue;
     const tools = toolsets[name];
     const tier = modelProfiles.agent_tiers[name];
     if (!tools || !tier || !profile.models[tier]) throw new Error(`Incomplete Copilot mapping for ${name}.`);
@@ -47,7 +49,6 @@ function generateAgents(target, profileName) {
         .replace(/native `question` tool/g, "native `ask_user` tool")
         .replace(/^- If you need a specialist not covered by your built-in agents, query `pulso_agent_contacts`.*\n/m, "")
         .replace(/^- Do not overuse `task`:.*`pulso_agent_contacts`.*\n/m, "")
-        .replace(/\n## Agent Contact Integration\n[\s\S]*$/, "")
         .replace(/Run repository and Git commands directly through `bash`\./g, "Use `pulso_primary_git` for repository and Git metadata.")
         .replace(/Reading `git status`, `git log`, `git show`, and `git rev-parse` for orchestration metadata is allowed directly and is not delegated discovery\./g, "Use `pulso_primary_git` for `git status`, `git log`, `git show`, and `git rev-parse` orchestration metadata.")
         .replace(/For `untracked`, add `\.pulso\/` only to the repository's local Git exclude resolved by `git rev-parse --git-path info\/exclude`; for `tracked`, remove only that Pulso-managed local exclude entry/g, "Use `pulso_primary_artifacts` to add or remove only Pulso's local `.pulso/` exclude entry")

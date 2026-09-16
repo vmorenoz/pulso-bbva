@@ -145,7 +145,7 @@ test("doctor reports a healthy configured control plane", async () => {
     process.env.OPENCODE_CONFIG_DIR = configRoot;
     process.env.XDG_DATA_HOME = path.join(directory, "data");
     for (const agent of [
-      "pulso", "pulso-planner", "pulso-challenger", "pulso-executor", "pulso-explorer", "pulso-verifier",
+      "pulso", "pulso-planner", "pulso-challenger", "pulso-contact-manager", "pulso-executor", "pulso-explorer", "pulso-verifier",
       "pulso-integration-auditor", "pulso-security-auditor", "pulso-ui-auditor", "pulso-experience-curator", "pulso-delivery-reporter",
     ]) {
       fs.mkdirSync(path.join(configRoot, "agents"), { recursive: true });
@@ -186,7 +186,7 @@ test("doctor reports skipped experience reconciliation rows", async () => {
   try {
     process.env.OPENCODE_CONFIG_DIR = configRoot;
     process.env.XDG_DATA_HOME = dataHome;
-    const agentNames = ["pulso", "pulso-planner", "pulso-challenger", "pulso-executor", "pulso-explorer", "pulso-verifier", "pulso-integration-auditor", "pulso-security-auditor", "pulso-ui-auditor", "pulso-experience-curator", "pulso-delivery-reporter"];
+    const agentNames = ["pulso", "pulso-planner", "pulso-challenger", "pulso-contact-manager", "pulso-executor", "pulso-explorer", "pulso-verifier", "pulso-integration-auditor", "pulso-security-auditor", "pulso-ui-auditor", "pulso-experience-curator", "pulso-delivery-reporter"];
     fs.mkdirSync(path.join(configRoot, "agents"), { recursive: true });
     for (const name of agentNames) fs.writeFileSync(path.join(configRoot, "agents", `${name}.md`), "---\n---\n");
     fs.mkdirSync(path.join(configRoot, "plugins"), { recursive: true });

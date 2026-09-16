@@ -30,9 +30,10 @@ test("ships a valid Copilot plugin with every Pulso agent", () => {
     assert.match(entries[0].matcher, /bash/);
   }
   assert.equal(hooks.hooks.subagentStart[0].matcher, "pulso-planner|pulso-executor");
-  const sources = fs.readdirSync(path.join(root, "agents")).filter((name) => name.endsWith(".md")).sort();
+  const sources = fs.readdirSync(path.join(root, "agents")).filter((name) => name.endsWith(".md") && name !== "pulso-contact-manager.md").sort();
   const generated = fs.readdirSync(path.join(root, "copilot", "profiles", "openai", "agents")).filter((name) => name.endsWith(".agent.md")).map((name) => name.replace(".agent.md", ".md")).sort();
   assert.deepEqual(generated, sources);
+  assert.equal(generated.includes("pulso-contact-manager.md"), false);
   assert.equal(fs.existsSync(path.join(root, "com.github.copilot", "agents")), false);
   assert.match(fs.readFileSync(path.join(root, "copilot", "profiles", "openai", "agents", "pulso-planner.agent.md"), "utf8"), /model: gpt-5\.6-terra/);
   assert.match(fs.readFileSync(path.join(root, "copilot", "profiles", "claude", "agents", "pulso-planner.agent.md"), "utf8"), /model: claude-sonnet-5/);

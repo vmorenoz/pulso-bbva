@@ -185,7 +185,7 @@ export async function PulsoCircuitBreakerPlugin(input) {
   let migrated = false;
   return {
     "chat.message": async (event, output) => {
-      if (event.agent === "pulso") {
+      if (["pulso", "pulso-contact-manager"].includes(event.agent)) {
         primarySessions.add(event.sessionID);
         return;
       }

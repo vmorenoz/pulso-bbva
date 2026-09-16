@@ -3,6 +3,7 @@
     "pulso": "standard",
     "pulso-planner": "standard",
     "pulso-challenger": "standard",
+    "pulso-contact-manager": "standard",
     "pulso-executor": "standard",
     "pulso-explorer": "light",
     "pulso-verifier": "standard",

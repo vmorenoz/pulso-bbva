@@ -6,7 +6,7 @@ import { tool } from "@opencode-ai/plugin"
 import core from "../lib/pulso-control-core.js"
 
 const requiredAgents = [
-  "pulso", "pulso-planner", "pulso-challenger", "pulso-executor", "pulso-explorer", "pulso-verifier",
+  "pulso", "pulso-planner", "pulso-challenger", "pulso-contact-manager", "pulso-executor", "pulso-explorer", "pulso-verifier",
   "pulso-integration-auditor", "pulso-security-auditor", "pulso-ui-auditor", "pulso-experience-curator", "pulso-delivery-reporter",
 ]
 
