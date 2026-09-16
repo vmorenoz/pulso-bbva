@@ -43,10 +43,13 @@ test("limits open task delegation to Pulso agents and approved contacts", () => 
   assert.match(pulso, /Do not overuse `task`/);
   assert.match(pulso, /built-in `pulso-\*` agents or user-approved contacts/);
   assert.match(pulso, /PULSO_CONTACT_ID/);
+  assert.match(pulso, /PULSO_CONTACT_PROBE/);
+  assert.match(pulso, /native question tool/);
+  assert.match(pulso, /Never register an agent silently/);
   const command = fs.readFileSync(path.resolve(agentsDirectory, "..", "commands", "pulso-autointegrate.md"), "utf8");
   assert.match(command, /agent: pulso/);
-  assert.match(command, /PULSO_CONTACT_PROBE/);
-  assert.match(command, /herramienta nativa de preguntas/);
+  const commandBody = command.replace(/^---\n[\s\S]*?\n---\n/, "").trim();
+  assert.equal(commandBody, "Inicia la gestión interactiva de contactos de agentes de Pulso.");
 });
 
 test("defines mutation paths inside the nested task scope", () => {

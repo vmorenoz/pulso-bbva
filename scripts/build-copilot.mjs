@@ -47,10 +47,12 @@ function generateAgents(target, profileName) {
         .replace(/native `question` tool/g, "native `ask_user` tool")
         .replace(/^- If you need a specialist not covered by your built-in agents, query `pulso_agent_contacts`.*\n/m, "")
         .replace(/^- Do not overuse `task`:.*`pulso_agent_contacts`.*\n/m, "")
+        .replace(/\n## Agent Contact Integration\n[\s\S]*$/, "")
         .replace(/Run repository and Git commands directly through `bash`\./g, "Use `pulso_primary_git` for repository and Git metadata.")
         .replace(/Reading `git status`, `git log`, `git show`, and `git rev-parse` for orchestration metadata is allowed directly and is not delegated discovery\./g, "Use `pulso_primary_git` for `git status`, `git log`, `git show`, and `git rev-parse` orchestration metadata.")
         .replace(/For `untracked`, add `\.pulso\/` only to the repository's local Git exclude resolved by `git rev-parse --git-path info\/exclude`; for `tracked`, remove only that Pulso-managed local exclude entry/g, "Use `pulso_primary_artifacts` to add or remove only Pulso's local `.pulso/` exclude entry")
         .replace(/persist it with `pulso_artifacts`/g, "persist `PULSO.md` with `pulso_primary_write` and apply the choice with `pulso_primary_artifacts`")
+        .trim()
         .replace(/If a task was blocked solely by unavailable or invalid lease infrastructure, first verify `pulso_lease\(action="status"\)` and a disposable acquire\/release probe\./g, "If a task was blocked solely by unavailable or invalid lease infrastructure, use `pulso_lease_diagnostic(action=\"status\")` and `pulso_lease_diagnostic(action=\"probe\")`.")
       : body;
     const preamble = name === "pulso"
