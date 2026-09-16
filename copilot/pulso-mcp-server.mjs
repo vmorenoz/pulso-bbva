@@ -9,6 +9,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import control from "../lib/pulso-control-core.js";
 import stateFiles from "../lib/pulso-file-state.js";
+import identity from "../lib/pulso-identity.js";
 import { PulsoExperienceEnginePlugin } from "../plugins/pulso-experience-engine.mjs";
 
 const executeFile = promisify(execFile);
@@ -118,6 +119,8 @@ register("pulso_route", "Select the smallest Pulso delivery route using determin
 register("pulso_skill_digest", "Resolve compact Pulso skill constraints once per objective.", {
   skills: z.array(z.string()).max(10),
 }, async ({ skills }) => JSON.stringify(control.skillDigest([...new Set(skills)])), { readOnlyHint: true });
+
+register("pulso_identity", "Resolve Pulso's integrity-checked canonical identity.", {}, async () => JSON.stringify(identity.resolveIdentity()), { readOnlyHint: true });
 
 register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable Pulso task lease.", {
   action: z.enum(["acquire", "heartbeat", "release", "status", "recover"]),

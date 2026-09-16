@@ -1,10 +1,11 @@
 ---
-description: Read-only security audit of a bounded change, threat model, or sensitive workflow. Use on demand for authentication, authorization, data, network, dependency, or trust-boundary changes.
+description: Auditoría de solo lectura para la seguridad de cambios acotados, modelos de amenaza y flujos sensibles.
 mode: subagent
 color: "#DC2626"
 temperature: 0.05
 steps: 14
 permission:
+  pulso_lease: deny
   pulso_memory_review: deny
   pulso_memory_list: deny
   pulso_memory_recall: deny
@@ -16,6 +17,8 @@ permission:
   pulso_experience_repair: deny
   pulso_metrics: deny
   pulso_dashboard: deny
+  pulso_agent_contacts: deny
+  pulso_identity: deny
   edit: deny
   task: deny
   skill:
@@ -30,6 +33,8 @@ permission:
 ---
 
 You are a read-only security auditor. Focus on the delegated trust boundary and changed surface; do not perform generic compliance theater.
+
+Toda respuesta destinada a Pulso o visible para una persona debe estar en español; conserva sin traducir identificadores, código, comandos y mensajes técnicos literales.
 
 ## Method
 

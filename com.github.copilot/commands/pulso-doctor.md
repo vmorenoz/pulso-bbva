@@ -1,1 +1,1 @@
-Run `pulso_doctor` directly. Report the overall status first, followed only by actionable errors or warnings and the smallest remediation. Do not delegate this operation or modify files.
+Ejecuta `pulso_doctor` directamente. Informa primero el estado general, seguido únicamente de errores o advertencias accionables y la corrección mínima. No delegues esta operación ni modifiques archivos.

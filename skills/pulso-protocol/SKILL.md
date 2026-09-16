@@ -16,6 +16,8 @@ in every relevant specialist contract. If the setting is absent, ask once and
 persist the answer in `PULSO.md` before creating state. Never ask again while
 the value is valid.
 
+When the setting is missing, ask through the runtime's native interactive question tool using user-facing choices: keep Pulso coordination files only on the developer's machine, or version them in Git for the team. Do not present unexplained `tracked`/`untracked` labels. In OpenCode, persist the choice with `pulso_artifacts`; do not edit `PULSO.md` or Git metadata manually for this setup.
+
 Repository-local state lives under `.pulso/`:
 
 ```text
@@ -96,22 +98,24 @@ Do not infer BBVA context merely because skills are installed.
 
 ## Communication
 
+All user-visible prose from Pulso and its specialists must be in Spanish, regardless of the language used by the user, command template, tool, or delegated agent. Keep identifiers, code, commands, and literal technical messages in their original form when translation would reduce accuracy.
+
 Lead with verdict. Do not restate prompt, method, routine tools, loaded skills, unchanged files, or obvious next steps. Cite only decisive `path:line` evidence. Ask one concrete question only when blocked. Normal specialist responses stay under 140 words with at most three findings.
 
 ```markdown
-## Pulso Result
-**Task:** PULSO-001
-**Status:** completed | blocked | failed | state_conflict
-**Summary:** one sentence
+## Resultado Pulso
+**Tarea:** PULSO-001
+**Estado:** completed | blocked | failed | state_conflict
+**Resumen:** una oración
 
-### Evidence
-- decisive fact
+### Evidencia
+- hecho decisivo
 
-### Validation
-- `command` - result
+### Validación
+- `comando` - resultado
 
-### Decision Needed
-- one exact decision
+### Decisión necesaria
+- una decisión concreta
 ```
 
 Omit empty sections. Never claim success without evidence or select the next task.

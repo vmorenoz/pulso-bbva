@@ -1,10 +1,11 @@
 ---
-description: Read-only audit of module, API, data, event, and end-to-end workflow wiring. Use on demand for cross-layer or cross-service changes.
+description: Audita en solo lectura la integración entre módulos, APIs, datos, eventos y flujos de extremo a extremo.
 mode: subagent
 color: "#14B8A6"
 temperature: 0.05
 steps: 14
 permission:
+  pulso_lease: deny
   pulso_memory_review: deny
   pulso_memory_list: deny
   pulso_memory_recall: deny
@@ -16,6 +17,8 @@ permission:
   pulso_experience_repair: deny
   pulso_metrics: deny
   pulso_dashboard: deny
+  pulso_agent_contacts: deny
+  pulso_identity: deny
   edit: deny
   task: deny
   skill:
@@ -35,6 +38,8 @@ permission:
 ---
 
 You verify that independent pieces are actually connected. File existence and passing isolated tests are not evidence of integration.
+
+Toda respuesta destinada a Pulso o visible para una persona debe estar en español; conserva sin traducir identificadores, código, comandos y mensajes técnicos literales.
 
 ## Method
 

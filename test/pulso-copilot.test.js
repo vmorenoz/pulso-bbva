@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -29,9 +30,10 @@ test("ships a valid Copilot plugin with every Pulso agent", () => {
     assert.match(entries[0].matcher, /bash/);
   }
   assert.equal(hooks.hooks.subagentStart[0].matcher, "pulso-planner|pulso-executor");
-  const sources = fs.readdirSync(path.join(root, "agents")).filter((name) => name.endsWith(".md")).sort();
+  const sources = fs.readdirSync(path.join(root, "agents")).filter((name) => name.endsWith(".md") && name !== "pulso-contact-manager.md").sort();
   const generated = fs.readdirSync(path.join(root, "copilot", "profiles", "openai", "agents")).filter((name) => name.endsWith(".agent.md")).map((name) => name.replace(".agent.md", ".md")).sort();
   assert.deepEqual(generated, sources);
+  assert.equal(generated.includes("pulso-contact-manager.md"), false);
   assert.equal(fs.existsSync(path.join(root, "com.github.copilot", "agents")), false);
   assert.match(fs.readFileSync(path.join(root, "copilot", "profiles", "openai", "agents", "pulso-planner.agent.md"), "utf8"), /model: gpt-5\.6-terra/);
   assert.match(fs.readFileSync(path.join(root, "copilot", "profiles", "claude", "agents", "pulso-planner.agent.md"), "utf8"), /model: claude-sonnet-5/);
@@ -41,12 +43,15 @@ test("ships a valid Copilot plugin with every Pulso agent", () => {
   assert.doesNotMatch(copilotPulso, /gpt-5\.6-sol|claude-opus/);
   assert.match(copilotPulso, /"ask_user"/);
   assert.match(copilotPulso, /never call `task_complete`/);
+  assert.match(copilotPulso, /canonical identity is provided by `pulso_identity`/);
+  assert.equal(copilotPulso.includes(require("../lib/pulso-identity.js").resolveIdentity().creator), false);
+  assert.doesNotMatch(copilotPulso, /pulso_agent_contacts|PULSO_CONTACT_ID/);
   assert.doesNotMatch(copilotPulso, /omit `objective_id`/);
   assert.doesNotMatch(copilotPulso, /Hooks supply/);
   const tools = (name) => JSON.parse(fs.readFileSync(path.join(root, "copilot", "profiles", "openai", "agents", `${name}.agent.md`), "utf8").match(/^tools: (.+)$/m)[1]);
   assert.equal(tools("pulso").includes("pulso-control/pulso_lease"), false);
   assert.equal(tools("pulso").includes("pulso-control/pulso_lease_diagnostic"), true);
-  assert.equal(tools("pulso").filter((name) => name.startsWith("pulso-control/")).length, 19);
+  assert.equal(tools("pulso").filter((name) => name.startsWith("pulso-control/")).length, 20);
   assert.equal(tools("pulso-planner").some((name) => name.startsWith("pulso-control/")), false);
   assert.deepEqual(tools("pulso-executor").filter((name) => name.startsWith("pulso-control/")), ["pulso-control/pulso_lease"]);
   assert.match(copilotPulso, /mcp-servers:\n  pulso-control:/);
@@ -110,7 +115,7 @@ test("Copilot MCP exposes and executes the shared control plane", async () => {
     });
     await client.connect(transport);
     const tools = await client.listTools();
-    for (const name of ["pulso_route", "pulso_lease", "pulso_lease_diagnostic", "pulso_primary_metadata", "pulso_primary_write", "pulso_primary_artifacts", "pulso_primary_git", "pulso_dashboard", "pulso_doctor", "pulso_experience_start", "pulso_experience_finalize", "pulso_memory_recall", "pulso_metrics"]) {
+    for (const name of ["pulso_route", "pulso_lease", "pulso_lease_diagnostic", "pulso_identity", "pulso_primary_metadata", "pulso_primary_write", "pulso_primary_artifacts", "pulso_primary_git", "pulso_dashboard", "pulso_doctor", "pulso_experience_start", "pulso_experience_finalize", "pulso_memory_recall", "pulso_metrics"]) {
       assert.ok(tools.tools.some((item) => item.name === name), name);
     }
     for (const item of tools.tools.filter((tool) => tool.name.startsWith("pulso_experience_") || tool.name.startsWith("pulso_memory_") || tool.name === "pulso_profile_recall" || tool.name === "pulso_metrics")) {
@@ -119,6 +124,8 @@ test("Copilot MCP exposes and executes the shared control plane", async () => {
     assert.ok(tools.tools.find((item) => item.name === "pulso_experience_finalize").inputSchema.required.includes("objective_id"));
     const routed = await client.callTool({ name: "pulso_route", arguments: { objective: "Fix a bounded display defect" } });
     assert.equal(JSON.parse(routed.content[0].text).route, "fast");
+    const canonicalIdentity = JSON.parse((await client.callTool({ name: "pulso_identity", arguments: {} })).content[0].text);
+    assert.equal(crypto.createHash("sha256").update(canonicalIdentity.creator).digest("hex"), "6b5a905fd6c4b2ac81897a012636a0c52e7bd7a44254f5ecbffe9484ac016d24");
     const firstDoctor = JSON.parse((await client.callTool({ name: "pulso_doctor", arguments: {} })).content[0].text);
     assert.equal(firstDoctor.project.directory, fs.realpathSync(directory));
     assert.equal(firstDoctor.token_tracking, "unavailable");

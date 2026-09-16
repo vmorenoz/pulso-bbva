@@ -23,9 +23,40 @@ test("keeps Pulso and Executor as the autonomous base route", () => {
   assert.match(pulso, /Record commit and push in that task's `integration` section/);
 });
 
+test("preserves Pulso identity and creator attribution", () => {
+  const pulso = agent("pulso");
+  const identity = require("../lib/pulso-identity.js").resolveIdentity();
+  const crypto = require("node:crypto");
+  assert.match(pulso, /canonical identity is provided by `pulso_identity`/);
+  assert.equal(crypto.createHash("sha256").update(identity.creator).digest("hex"), "6b5a905fd6c4b2ac81897a012636a0c52e7bd7a44254f5ecbffe9484ac016d24");
+  assert.equal(crypto.createHash("sha256").update(identity.organization).digest("hex"), "244902c4926f77b1f68b77ba7a405fa043da1f981d17ca8aedcd47632ddab148");
+});
+
 test("keeps validation and integration in the existing task lifecycle", () => {
   assert.match(agent("pulso-planner"), /Never create a task solely for validation, audit, repair, commit, push, or integration/);
   assert.match(agent("pulso-executor"), /Record commit evidence in `integration` and transition `implemented\|verified -> integrated`/);
+});
+
+test("limits open task delegation to Pulso agents and approved contacts", () => {
+  const pulso = agent("pulso");
+  assert.match(pulso, /task:\n\s+"\*": allow/);
+  assert.match(pulso, /Do not overuse `task`/);
+  assert.match(pulso, /built-in `pulso-\*` agents or user-approved contacts/);
+  assert.match(pulso, /PULSO_CONTACT_ID/);
+  assert.doesNotMatch(pulso, /Agent Contact Integration|PULSO_CONTACT_PROBE/);
+  const manager = agent("pulso-contact-manager");
+  assert.match(manager, /PULSO_CONTACT_PROBE/);
+  assert.match(manager, /herramienta nativa de preguntas/);
+  assert.match(manager, /Nunca registres silenciosamente/);
+  assert.match(manager, /pulso_agent_contacts: allow/);
+  assert.match(manager, /task:\n\s+"\*": allow/);
+  assert.match(manager, /edit: deny/);
+  assert.match(manager, /bash: deny/);
+  const command = fs.readFileSync(path.resolve(agentsDirectory, "..", "commands", "pulso-autointegrate.md"), "utf8");
+  assert.match(command, /agent: pulso-contact-manager/);
+  assert.match(command, /subtask: true/);
+  const commandBody = command.replace(/^---\n[\s\S]*?\n---\n/, "").trim();
+  assert.equal(commandBody, "Inicia la gestión interactiva de contactos de agentes de Pulso.");
 });
 
 test("defines mutation paths inside the nested task scope", () => {
@@ -43,6 +74,24 @@ test("uses Explorer only for iterative discovery and keeps it read-only", () => 
   assert.match(explorer, /never call one as a no-op, progress marker, or unnecessary substitute/);
   assert.match(explorer, /bash: deny/);
   assert.match(explorer, /edit: deny/);
+  assert.match(explorer, /pulso_lease: deny/);
+});
+
+test("reserves task lease ownership for Executor", () => {
+  assert.match(agent("pulso-executor"), /pulso_lease: allow/);
+  for (const name of [
+    "pulso-planner",
+    "pulso-challenger",
+    "pulso-explorer",
+    "pulso-verifier",
+    "pulso-integration-auditor",
+    "pulso-security-auditor",
+    "pulso-ui-auditor",
+    "pulso-experience-curator",
+    "pulso-delivery-reporter",
+  ]) {
+    assert.match(agent(name), /pulso_lease: deny/, name);
+  }
 });
 
 test("reserves human-confirmed memory mutation for Pulso", () => {
@@ -56,6 +105,8 @@ test("reserves human-confirmed memory mutation for Pulso", () => {
     const contents = fs.readFileSync(path.join(agentsDirectory, name), "utf8");
     assert.match(contents, /pulso_memory_review: deny/, name);
     assert.match(contents, /pulso_dashboard: deny/, name);
+    assert.match(contents, name === "pulso-contact-manager.md" ? /pulso_agent_contacts: allow/ : /pulso_agent_contacts: deny/, name);
+    assert.match(contents, /pulso_identity: deny/, name);
     assert.match(contents, /pulso_experience_resume: deny/, name);
     assert.match(contents, /pulso_experience_curate: deny/, name);
     assert.match(contents, /pulso_experience_start: deny/, name);
@@ -91,17 +142,22 @@ test("ships direct dashboard and doctor commands for Pulso", () => {
   for (const name of ["pulso-dashboard", "pulso-doctor"]) {
     const command = fs.readFileSync(path.resolve(agentsDirectory, "..", "commands", `${name}.md`), "utf8");
     assert.match(command, /agent: pulso/);
-    assert.match(command, /Do not delegate this operation/);
+    assert.match(command, /No delegues esta operación/);
   }
 });
 
 test("loads one-time project configuration without treating preferences as a dashboard request", () => {
   const pulso = agent("pulso");
   assert.match(pulso, /Read root `PULSO\.md` before starting delivery work/);
-  assert.match(pulso, /ask exactly once whether `\.pulso\/\*\*` should be `tracked` or `untracked`/);
+  assert.match(pulso, /native `question` tool/);
+  assert.match(pulso, /Solo locales \(Recomendado\)/);
+  assert.match(pulso, /Versionados en Git/);
+  assert.match(pulso, /persist it with `pulso_artifacts`/);
   assert.match(pulso, /include the compact digest plus the applicable `PULSO\.md` project rules/);
   assert.match(pulso, /Mentions of metrics, memories, preferences, configuration, or `PULSO\.md` are not dashboard requests/);
   assert.match(pulso, /"PULSO\.md": allow/);
+  assert.match(pulso, /question: allow/);
+  assert.match(pulso, /pulso_artifacts: allow/);
 });
 
 test("allows Pulso to use MCP tools only for necessary evidence", () => {
@@ -115,4 +171,21 @@ test("uses native interactive tools for every user question", () => {
   const pulso = agent("pulso");
   assert.match(pulso, /Whenever asking the user a question, use the runtime's interactive question tool instead of plain prose/);
   assert.match(pulso, /`question` in OpenCode or `ask_user` in GitHub Copilot CLI/);
+});
+
+test("requires all human-facing Pulso communication to be in Spanish", () => {
+  const pulso = agent("pulso");
+  const protocol = fs.readFileSync(path.resolve(agentsDirectory, "..", "skills", "pulso-protocol", "SKILL.md"), "utf8");
+  assert.match(pulso, /siempre con el usuario en español/);
+  assert.match(protocol, /user-visible prose[\s\S]*must be in Spanish/);
+  for (const name of fs.readdirSync(agentsDirectory).filter((entry) => entry.endsWith(".md"))) {
+    const contents = fs.readFileSync(path.join(agentsDirectory, name), "utf8");
+    assert.match(contents, /(?:debe estar|siempre con).*en español/, name);
+    const description = contents.match(/^description: (.+)$/m)?.[1] || "";
+    assert.match(description, /[áéíóúñ]/i, name);
+  }
+  for (const name of ["pulso-autointegrate", "pulso-dashboard", "pulso-doctor"]) {
+    const command = fs.readFileSync(path.resolve(agentsDirectory, "..", "commands", `${name}.md`), "utf8");
+    assert.match(command, /[áéíóúñ]/i, name);
+  }
 });

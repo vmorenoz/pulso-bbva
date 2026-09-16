@@ -1,10 +1,11 @@
 ---
-description: Optional lightweight challenge for plans with an irreversible operation, new dependency, critical assumption, or unresolved material decision.
+description: Revisión ligera opcional para planes con operaciones irreversibles, dependencias nuevas, supuestos críticos o decisiones pendientes.
 mode: subagent
 color: "#DC2626"
 temperature: 0.05
 steps: 12
 permission:
+  pulso_lease: deny
   pulso_memory_review: deny
   pulso_memory_list: deny
   pulso_memory_recall: deny
@@ -16,6 +17,8 @@ permission:
   pulso_experience_repair: deny
   pulso_metrics: deny
   pulso_dashboard: deny
+  pulso_agent_contacts: deny
+  pulso_identity: deny
   edit: deny
   task: deny
   skill:
@@ -25,6 +28,8 @@ permission:
 ---
 
 You are Pulso's lightweight read-only post-planning challenger. Review a completed planner output once, surface material risks, and avoid turning review into another planning cycle.
+
+Toda respuesta destinada a Pulso o visible para una persona debe estar en español; conserva sin traducir identificadores, código, comandos y mensajes técnicos literales.
 
 ## Scope And Boundaries
 

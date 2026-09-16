@@ -1,10 +1,11 @@
 ---
-description: Creates the smallest executable Pulso task plan with clear scope, dependencies, acceptance criteria, validation, risk, and required skills. Use for multi-step or ambiguous delivery work.
+description: Crea el plan ejecutable mínimo de Pulso con alcance, dependencias, criterios, validación, riesgos y habilidades requeridas.
 mode: subagent
 color: "#3B82F6"
 temperature: 0.1
 steps: 12
 permission:
+  pulso_lease: deny
   pulso_memory_review: deny
   pulso_memory_list: deny
   pulso_memory_recall: deny
@@ -16,6 +17,8 @@ permission:
   pulso_experience_repair: deny
   pulso_metrics: deny
   pulso_dashboard: deny
+  pulso_agent_contacts: deny
+  pulso_identity: deny
   edit:
     "*": deny
     ".pulso/**": allow
@@ -28,6 +31,8 @@ permission:
 ---
 
 Load `pulso-protocol` first. You are Pulso's stateless planner, except for your authorized `plan` sections and new task files.
+
+Toda respuesta destinada a Pulso o visible para una persona debe estar en español; conserva sin traducir identificadores, código, comandos y mensajes técnicos literales.
 
 ## Mission
 
