@@ -120,11 +120,13 @@ register("pulso_skill_digest", "Resolve compact Pulso skill constraints once per
 }, async ({ skills }) => JSON.stringify(control.skillDigest([...new Set(skills)])), { readOnlyHint: true });
 
 register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable Pulso task lease.", {
-  action: z.enum(["acquire", "heartbeat", "release", "status"]),
+  action: z.enum(["acquire", "heartbeat", "release", "status", "recover"]),
   task_id: z.string().regex(/^PULSO-\d+$/),
   ttl_minutes: z.number().int().min(5).max(240).default(30),
   owner_session: z.string().min(1),
-}, async ({ action, task_id, ttl_minutes = 30, owner_session }, projectDirectory) => {
+  force: z.boolean().optional(),
+  reason: z.string().optional(),
+}, async ({ action, task_id, ttl_minutes = 30, owner_session, force, reason }, projectDirectory) => {
   const leaseOwner = owner_session;
   const file = path.join(stateFiles.safeDirectory(projectDirectory, [".pulso", "leases"]), `${task_id}.json`);
   return stateFiles.withFileLock(file, () => {
@@ -136,6 +138,20 @@ register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable P
       const lease = { schema_version: 1, task_id, status: "active", owner_session: leaseOwner, acquired_at: now.toISOString(), heartbeat_at: now.toISOString(), expires_at: new Date(now.getTime() + ttl_minutes * 60000).toISOString(), recovered_from: control.isExpired(existing) ? existing.owner_session : null };
       stateFiles.writeAtomic(file, lease);
       return JSON.stringify(lease);
+    }
+    if (action === "recover") {
+      const lease = { schema_version: 1, task_id, status: "active", owner_session: leaseOwner, acquired_at: now.toISOString(), heartbeat_at: now.toISOString(), expires_at: new Date(now.getTime() + ttl_minutes * 60000).toISOString(), recovered_from: existing?.status === "active" ? existing.owner_session : (control.isExpired(existing) ? existing.owner_session : null), recovery_reason: reason || "manual recovery" };
+      stateFiles.writeAtomic(file, lease);
+      return JSON.stringify(lease);
+    }
+    if (action === "release" && force) {
+      if (!existing || existing.status !== "active") return JSON.stringify(existing || { task_id, status: "none" });
+      existing.status = "released";
+      existing.released_at = now.toISOString();
+      existing.released_by = leaseOwner;
+      if (reason) existing.release_reason = reason;
+      stateFiles.writeAtomic(file, existing);
+      return JSON.stringify(existing);
     }
     if (!existing || existing.owner_session !== leaseOwner || existing.status !== "active") throw new Error(`${task_id} has no active lease owned by this session.`);
     if (action === "heartbeat") {
@@ -151,14 +167,24 @@ register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable P
 });
 
 register("pulso_lease_diagnostic", "Inspect a lease or safely probe lease recovery for the primary Pulso agent.", {
-  action: z.enum(["status", "probe"]),
+  action: z.enum(["status", "probe", "release"]),
   task_id: z.string().regex(/^PULSO-\d+$/),
-}, async ({ action, task_id }, projectDirectory) => {
+  reason: z.string().optional(),
+}, async ({ action, task_id, reason }, projectDirectory) => {
   const file = path.join(stateFiles.safeDirectory(projectDirectory, [".pulso", "leases"]), `${task_id}.json`);
   return stateFiles.withFileLock(file, () => {
     const prior = fs.existsSync(file) ? fs.readFileSync(file) : null;
     const existing = prior === null ? null : JSON.parse(prior.toString("utf8"));
     if (action === "status") return JSON.stringify(existing || { task_id, status: "none" });
+    if (action === "release") {
+      if (!existing || existing.status !== "active") return JSON.stringify(existing || { task_id, status: "none" });
+      existing.status = "released";
+      existing.released_at = new Date().toISOString();
+      existing.released_by = "primary";
+      if (reason) existing.release_reason = reason;
+      stateFiles.writeAtomic(file, existing);
+      return JSON.stringify(existing);
+    }
     if (existing?.status === "active" && !control.isExpired(existing)) throw new Error(`${task_id} has an active lease and cannot be probed.`);
     const now = new Date().toISOString();
     const probe = { schema_version: 1, task_id, status: "released", owner_session: `copilot-probe-${crypto.randomUUID()}`, acquired_at: now, heartbeat_at: now, expires_at: now, released_at: now };

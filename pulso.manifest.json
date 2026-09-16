@@ -27,7 +27,8 @@
     "lib/pulso-experience-core.js",
     "lib/pulso-file-state.js",
     "bin/pulso-breaker.js",
-    "bin/pulso-dashboard.js"
+    "bin/pulso-dashboard.js",
+    "bin/pulso-lease.js"
   ],
   "files": [
     "agents/pulso.md",
@@ -58,6 +59,7 @@
     "lib/pulso-file-state.js",
     "bin/pulso-breaker.js",
     "bin/pulso-dashboard.js",
+    "bin/pulso-lease.js",
     "test/pulso-circuit-breaker-core.test.js",
     "test/pulso-agent-contracts.test.js",
     "test/pulso-control-core.test.js",

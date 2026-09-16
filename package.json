@@ -6,7 +6,8 @@
   "license": "UNLICENSED",
   "bin": {
     "pulso-breaker": "bin/pulso-breaker.js",
-    "pulso-dashboard": "bin/pulso-dashboard.js"
+    "pulso-dashboard": "bin/pulso-dashboard.js",
+    "pulso-lease": "bin/pulso-lease.js"
   },
   "files": [
     "agents/",

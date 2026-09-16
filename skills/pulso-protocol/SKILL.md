@@ -68,7 +68,7 @@ Explorer is only for a concrete iterative/cross-file fact. Challenger is one opt
 
 ## Execution Safety
 
-Executor acquires a 30-minute lease before editing, heartbeats before long validation/integration, and releases on every terminal return. Never override a live lease.
+Executor acquires a 30-minute lease before editing, heartbeats before long validation/integration, and releases on every terminal return. Never override a live lease during normal execution. If an executor session was cancelled, aborted, or crashed (e.g. provider quota limit), recover or release the orphaned lease using `pulso_lease(action="recover", reason="...")` or CLI `pulso-lease release PULSO-xxx`.
 
 Repeated zero-progress behavioral failures may open the circuit for mutations; token usage and runner-infrastructure failures are observational. Read-only diagnosis remains available. Only a human resets an open circuit.
 

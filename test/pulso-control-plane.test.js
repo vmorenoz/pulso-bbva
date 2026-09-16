@@ -37,6 +37,60 @@ test("lease applies its 30-minute TTL when the caller omits ttl_minutes", async 
   }
 });
 
+test("lease recovery allows taking over an active lease from an aborted session", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-lease-recover-"));
+  try {
+    const lease = (await import("../tools/pulso_lease.ts")).default;
+    await lease.execute({ action: "acquire", task_id: "PULSO-001", ttl_minutes: 30 }, { directory, sessionID: "crashed-session" });
+    const recovered = JSON.parse(await lease.execute({ action: "recover", task_id: "PULSO-001", ttl_minutes: 30, reason: "crashed/quota" }, { directory, sessionID: "new-session" }));
+    assert.equal(recovered.status, "active");
+    assert.equal(recovered.owner_session, "new-session");
+    assert.equal(recovered.recovered_from, "crashed-session");
+    assert.equal(recovered.recovery_reason, "crashed/quota");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("force release allows clearing an active lease from another session", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-lease-force-release-"));
+  try {
+    const lease = (await import("../tools/pulso_lease.ts")).default;
+    await lease.execute({ action: "acquire", task_id: "PULSO-001", ttl_minutes: 30 }, { directory, sessionID: "session-a" });
+    const released = JSON.parse(await lease.execute({ action: "release", task_id: "PULSO-001", force: true, reason: "operator rescue" }, { directory, sessionID: "session-b" }));
+    assert.equal(released.status, "released");
+    assert.equal(released.released_by, "session-b");
+    assert.equal(released.release_reason, "operator rescue");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("pulso-lease CLI inspects and releases an active lease", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-lease-cli-"));
+  try {
+    const { execFileSync } = require("node:child_process");
+    const cli = path.resolve(__dirname, "..", "bin", "pulso-lease.js");
+    const lease = (await import("../tools/pulso_lease.ts")).default;
+    await lease.execute({ action: "acquire", task_id: "PULSO-001", ttl_minutes: 30 }, { directory, sessionID: "session-a" });
+
+    const statusOutput = execFileSync("node", [cli, "status", "PULSO-001"], { cwd: directory, encoding: "utf8" });
+    const status = JSON.parse(statusOutput);
+    assert.equal(status.status, "active");
+    assert.equal(status.owner_session, "session-a");
+
+    const releaseOutput = execFileSync("node", [cli, "release", "PULSO-001", "--reason", "manual recovery"], { cwd: directory, encoding: "utf8" });
+    assert.match(releaseOutput, /Task lease released for PULSO-001/);
+
+    const after = JSON.parse(execFileSync("node", [cli, "status", "PULSO-001"], { cwd: directory, encoding: "utf8" }));
+    assert.equal(after.status, "released");
+    assert.equal(after.released_by, "operator");
+    assert.equal(after.release_reason, "manual recovery");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("doctor reports a healthy configured control plane", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-doctor-"));
   const configRoot = path.join(directory, "config");

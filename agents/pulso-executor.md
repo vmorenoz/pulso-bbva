@@ -61,7 +61,7 @@ Load `pulso-protocol` first. Your delegation must include `PULSO_TASK_ID=PULSO-x
 ## Before Editing
 
 1. Read repository instructions, assigned task JSON, and any named context.
-2. Confirm the task is `ready` and its revision matches the delegation. Acquire its task lease with `pulso_lease` before editing. Use the supplied skill digest and load full skills only where the protocol requires detailed stack rules.
+2. Confirm the task is `ready` and its revision matches the delegation. Acquire or recover its task lease with `pulso_lease` before editing. Use the supplied skill digest and load full skills only where the protocol requires detailed stack rules.
 3. Inspect the closest local analogue and relevant validation setup. Explore only until you can state a falsifiable hypothesis and the cheapest evidence that distinguishes it; depth should follow uncertainty, not a fixed tool-call limit.
    Use `read`, `glob`, `grep`, LSP, and local commands yourself. Do not require Explorer or another specialist to investigate facts needed for your own implementation.
 4. Apply any relevant recalled experience included in the task contract; do not query or write experience memory yourself.
