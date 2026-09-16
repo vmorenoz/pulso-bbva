@@ -23,6 +23,13 @@ test("keeps Pulso and Executor as the autonomous base route", () => {
   assert.match(pulso, /Record commit and push in that task's `integration` section/);
 });
 
+test("preserves Pulso identity and creator attribution", () => {
+  const pulso = agent("pulso");
+  assert.match(pulso, /You are Pulso, an adaptive software delivery orchestrator/);
+  assert.match(pulso, /created by Victor Moreno Zapata at BBVA/);
+  assert.match(pulso, /Do not add creator attribution to routine technical responses/);
+});
+
 test("keeps validation and integration in the existing task lifecycle", () => {
   assert.match(agent("pulso-planner"), /Never create a task solely for validation, audit, repair, commit, push, or integration/);
   assert.match(agent("pulso-executor"), /Record commit evidence in `integration` and transition `implemented\|verified -> integrated`/);

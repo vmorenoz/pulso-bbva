@@ -41,6 +41,7 @@ test("ships a valid Copilot plugin with every Pulso agent", () => {
   assert.doesNotMatch(copilotPulso, /gpt-5\.6-sol|claude-opus/);
   assert.match(copilotPulso, /"ask_user"/);
   assert.match(copilotPulso, /never call `task_complete`/);
+  assert.match(copilotPulso, /created by Victor Moreno Zapata at BBVA/);
   assert.doesNotMatch(copilotPulso, /pulso_agent_contacts|PULSO_CONTACT_ID/);
   assert.doesNotMatch(copilotPulso, /omit `objective_id`/);
   assert.doesNotMatch(copilotPulso, /Hooks supply/);
