@@ -1,15 +1,15 @@
 ---
-description: Discover, interview, and connect external OpenCode agents to Pulso's global address book.
+description: Descubre, entrevista y conecta agentes externos de OpenCode con la agenda global de Pulso.
 agent: pulso
 ---
 
-Manage Pulso agent contacts interactively. This is configuration work: do not create an objective, task state, metrics, or experience closure.
+Gestiona interactivamente los contactos de agentes de Pulso. Este es un trabajo de configuración: no crees un objetivo, estado de tarea, métricas ni cierre de experiencia.
 
-1. Call `pulso_agent_contacts` with `action: scan` and compare candidates by their `registration` state.
-2. Use the native question tool to let the user select one or more compatible new or changed agents. Explain why primary-only agents cannot be delegated. Also offer listing or removing existing contacts when relevant.
-3. For every selected candidate, delegate a visible native task to that exact agent with `PULSO_CONTACT_PROBE=<agent-name>`. Ask it only to describe its purpose, use cases, non-use cases, capabilities, and whether it needs mutation. It must not use tools, edit files, execute commands, or delegate.
-4. Reconcile the interview with the scanned description and mutation hint. Present a concise proposed contact card and ask the user to approve it or choose read-only versus scoped mutation when unclear. Explain that contacts cannot use shell or delegate other agents; implementation requiring those capabilities remains with Pulso Executor.
-5. Register only approved cards using the exact digest returned by scan.
-6. Report what was connected, when Pulso will use it, and one realistic example. Mention that changed agent definitions require running this command again.
+1. Llama a `pulso_agent_contacts` con `action: scan` y compara los candidatos por su estado `registration`.
+2. Usa la herramienta nativa de preguntas para que el usuario seleccione uno o más agentes compatibles nuevos o modificados. Explica por qué los agentes exclusivos de modo primario no pueden delegarse. Cuando corresponda, ofrece también listar o eliminar contactos existentes.
+3. Para cada candidato seleccionado, delega una tarea nativa visible a ese agente exacto con `PULSO_CONTACT_PROBE=<agent-name>`. Pídele únicamente que describa su propósito, casos de uso y no uso, capacidades y si necesita mutación. No debe usar herramientas, editar archivos, ejecutar comandos ni delegar.
+4. Concilia la entrevista con la descripción detectada y la sugerencia de mutación. Presenta una ficha de contacto concisa y pide al usuario aprobarla o elegir entre solo lectura y mutación acotada cuando no esté claro. Explica que los contactos no pueden usar shell ni delegar otros agentes; la implementación que requiera esas capacidades permanece en Pulso Executor.
+5. Registra únicamente las fichas aprobadas usando el digest exacto devuelto por el escaneo.
+6. Informa qué se conectó, cuándo lo utilizará Pulso y un ejemplo realista. Indica que una definición de agente modificada requiere ejecutar nuevamente este comando.
 
-Never register an agent silently, infer approval, expose full prompts, or use an external agent that is not present in the scan results.
+Nunca registres un agente silenciosamente, infieras aprobación, expongas prompts completos ni uses un agente externo ausente de los resultados del escaneo.

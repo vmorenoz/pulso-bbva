@@ -46,7 +46,7 @@ test("limits open task delegation to Pulso agents and approved contacts", () => 
   const command = fs.readFileSync(path.resolve(agentsDirectory, "..", "commands", "pulso-autointegrate.md"), "utf8");
   assert.match(command, /agent: pulso/);
   assert.match(command, /PULSO_CONTACT_PROBE/);
-  assert.match(command, /native question tool/);
+  assert.match(command, /herramienta nativa de preguntas/);
 });
 
 test("defines mutation paths inside the nested task scope", () => {
@@ -132,7 +132,7 @@ test("ships direct dashboard and doctor commands for Pulso", () => {
   for (const name of ["pulso-dashboard", "pulso-doctor"]) {
     const command = fs.readFileSync(path.resolve(agentsDirectory, "..", "commands", `${name}.md`), "utf8");
     assert.match(command, /agent: pulso/);
-    assert.match(command, /Do not delegate this operation/);
+    assert.match(command, /No delegues esta operación/);
   }
 });
 
@@ -161,4 +161,21 @@ test("uses native interactive tools for every user question", () => {
   const pulso = agent("pulso");
   assert.match(pulso, /Whenever asking the user a question, use the runtime's interactive question tool instead of plain prose/);
   assert.match(pulso, /`question` in OpenCode or `ask_user` in GitHub Copilot CLI/);
+});
+
+test("requires all human-facing Pulso communication to be in Spanish", () => {
+  const pulso = agent("pulso");
+  const protocol = fs.readFileSync(path.resolve(agentsDirectory, "..", "skills", "pulso-protocol", "SKILL.md"), "utf8");
+  assert.match(pulso, /siempre con el usuario en español/);
+  assert.match(protocol, /user-visible prose[\s\S]*must be in Spanish/);
+  for (const name of fs.readdirSync(agentsDirectory).filter((entry) => entry.endsWith(".md"))) {
+    const contents = fs.readFileSync(path.join(agentsDirectory, name), "utf8");
+    assert.match(contents, /(?:debe estar|siempre con).*en español/, name);
+    const description = contents.match(/^description: (.+)$/m)?.[1] || "";
+    assert.match(description, /[áéíóúñ]/i, name);
+  }
+  for (const name of ["pulso-autointegrate", "pulso-dashboard", "pulso-doctor"]) {
+    const command = fs.readFileSync(path.resolve(agentsDirectory, "..", "commands", `${name}.md`), "utf8");
+    assert.match(command, /[áéíóúñ]/i, name);
+  }
 });

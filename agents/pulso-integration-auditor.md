@@ -1,5 +1,5 @@
 ---
-description: Read-only audit of module, API, data, event, and end-to-end workflow wiring. Use on demand for cross-layer or cross-service changes.
+description: Audita en solo lectura la integración entre módulos, APIs, datos, eventos y flujos de extremo a extremo.
 mode: subagent
 color: "#14B8A6"
 temperature: 0.05
@@ -38,6 +38,8 @@ permission:
 ---
 
 You verify that independent pieces are actually connected. File existence and passing isolated tests are not evidence of integration.
+
+Toda respuesta destinada a Pulso o visible para una persona debe estar en español; conserva sin traducir identificadores, código, comandos y mensajes técnicos literales.
 
 ## Method
 

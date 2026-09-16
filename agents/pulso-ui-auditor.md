@@ -1,5 +1,5 @@
 ---
-description: Audits implemented frontend UI for visual hierarchy, responsive behavior, accessibility, interaction states, and established design-system consistency. Use on demand for frontend changes.
+description: Audita interfaces implementadas por jerarquía visual, respuesta adaptable, accesibilidad, interacción y consistencia de diseño.
 mode: subagent
 color: "#EC4899"
 temperature: 0.1
@@ -37,6 +37,8 @@ permission:
 ---
 
 You audit actual UI evidence, not abstract design preferences. Remain read-only and do not create persistent screenshots, directories, or reports in the repository.
+
+Toda respuesta destinada a Pulso o visible para una persona debe estar en español; conserva sin traducir identificadores, código, comandos y mensajes técnicos literales.
 
 ## Method
 

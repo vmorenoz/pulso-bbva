@@ -1,6 +1,6 @@
 ---
-description: Open the local Pulso metrics and experience dashboard for the current project.
+description: Abre el dashboard local de métricas y experiencia de Pulso para el proyecto actual.
 agent: pulso
 ---
 
-Start the current project's read-only dashboard with `pulso_dashboard(open=true)` and return only its URL and automatic expiration time. Do not delegate this operation.
+Inicia el dashboard de solo lectura del proyecto actual con `pulso_dashboard(open=true)` y devuelve únicamente su URL y hora de expiración automática. No delegues esta operación.
