@@ -19,7 +19,7 @@ Su principio es sencillo: **usar el menor proceso que permita entregar con confi
 | Preferencias controladas | Propone preferencias a partir del uso, pero requiere aprobación humana antes de convertirlas en comportamiento estable. |
 | Observabilidad local | Dashboard y métricas muestran objetivos, agentes, duración, validaciones, reparaciones e intervenciones humanas. |
 | Diagnóstico y recuperación | Doctor, *leases* recuperables y reparación de experiencia permiten detectar y resolver estado inconsistente sin borrar trabajo útil. |
-| Perfiles de modelos | Permite elegir perfiles OpenAI o Claude y asigna modelos por nivel de razonamiento y coste. |
+| Configuración de modelos | `/pulso-configure` descubre el catálogo real de OpenCode y guía presets rápidos o asignaciones por agente, globales o por proyecto. |
 | OpenCode y Copilot CLI | Comparte protocolo y plano de control mediante adaptadores específicos, sin contaminar sesiones donde Pulso no está activo. |
 | Contexto BBVA | Activa reglas especializadas para BBVA, CELLS y APX solo cuando el repositorio proporciona evidencia suficiente. |
 
@@ -56,21 +56,23 @@ Experiencia, métricas y cierre del objetivo
 
 Las rutas se escogen por señales explícitas, como ambigüedad, dependencias, cambios entre capas, autenticación, persistencia, datos sensibles, operaciones remotas, cambios destructivos o evidencia de validación contradictoria. No se añaden especialistas por orden ceremonial: se incorporan solo si ayudan a resolver un hecho, una decisión o un riesgo material.
 
-Para editar, Executor adquiere un *lease* de 30 minutos sobre la tarea. Los cambios que se solapan se serializan; únicamente pueden paralelizarse trabajos independientes. La integración Git es deliberadamente restrictiva: requiere una petición explícita del usuario y una referencia Jira válida.
+Antes de permitir una edición, el plugin asigna al Executor un *lease* de 30 minutos y lo renueva en cada operación. Los cambios que se solapan se serializan; únicamente pueden paralelizarse trabajos independientes. La integración Git es deliberadamente restrictiva: requiere una petición explícita del usuario y una referencia Jira válida.
 
 ## Componentes y capas del sistema
 
 | Capa | Componentes | Responsabilidad |
 | --- | --- | --- |
-| Orquestación | `agents/pulso.md`, `tools/pulso_route.ts` | Define el objetivo, mantiene decisiones y bloqueos, y selecciona la ruta mínima de entrega. |
+| Orquestación | `agents/pulso.md`, `pulso_delivery`, `pulso-control-core.js` | Activa entregas solo tras detectar intención sustantiva, proyecta su contrato y selecciona la ruta mínima. |
 | Contactos de agentes | `/pulso-autointegrate`, `pulso_agent_contacts` | Descubre especialistas externos, conserva fichas aprobadas globalmente y los recupera bajo demanda sin ampliar el prompt permanente. |
 | Ejecución y revisión | `pulso-executor`, Planner, Challenger, Explorer, Verifier y auditores | Implementan o aportan evidencia dentro de límites de autoridad y alcance definidos. |
-| Protocolo y estado | `skills/pulso-protocol/`, `.pulso/` | Establece contratos de tareas, propiedad del estado, *leases* y comunicación entre agentes. |
+| Protocolo y estado | `skills/pulso-protocol/`, `.pulso/` | Establece contratos internos; los plugins proyectan estado, evidencia y *leases* sin parches del agente. |
 | Resiliencia | `plugins/pulso-circuit-breaker.mjs`, `lib/pulso-circuit-breaker-core.js` | Limita reparaciones repetitivas y bloquea mutaciones cuando una tarea entra en un estado de riesgo. |
 | Experiencia y observabilidad | `plugins/pulso-experience-engine.mjs`, dashboard y reporter | Conserva métricas y memorias verificadas en SQLite, y presenta el estado operativo de forma local. |
 | Operación e instalación | `scripts/`, `bin/`, `tools/`, `pulso.manifest.json` | Sincroniza la distribución, instala el runtime y ofrece diagnóstico y operación local. |
 
-La configuración local vive en `PULSO.md`: guarda una sola vez si `.pulso/**` se versiona y ofrece una sección `Project Rules` para instrucciones definidas por el usuario. Cuando se elige `untracked`, Pulso usa exclusivamente el exclude local de Git y no modifica `.gitignore`; cuando se elige `tracked`, elimina su propia exclusión local. El estado de coordinación incluye estado compartido, contratos de tarea, circuit breakers y *leases*. El motor de experiencia utiliza un almacén SQLite externo al estado de tareas; la memoria técnica se curará únicamente tras cierres `verified` o `integrated`.
+La configuración local vive en `PULSO.md`: guarda una sola vez si `.pulso/**` se versiona y ofrece una sección `Project Rules` para instrucciones definidas por el usuario. Cuando se elige `untracked`, Pulso usa exclusivamente el exclude local de Git y no modifica `.gitignore`; cuando se elige `tracked`, elimina su propia exclusión local. `.pulso/**` es una proyección interna escrita atómicamente por plugins; los agentes no la leen, editan ni muestran durante el trabajo normal. El motor de experiencia utiliza un almacén SQLite externo; la memoria técnica se cura únicamente tras cierres `verified` o `integrated`.
+
+Los mensajes informativos, dudas puntuales y revisiones sin cambios no crean objetivos. Una entrega se activa mediante la fachada compacta `pulso_delivery` cuando existen resultado y alcance concretos; esa misma fachada cierra la entrega. Enrutamiento, restricciones de habilidades, memoria, preferencias, métricas y artefactos permanecen en el plano de control.
 
 El dashboard web es opt-in. Solo se inicia y abre cuando el usuario pide explícitamente ver el dashboard o ejecuta `/pulso-dashboard`; consultar métricas, memorias, preferencias o configuración no abre el navegador.
 
@@ -96,8 +98,8 @@ Cada actor tiene una responsabilidad limitada para evitar conflictos de estado y
 | Agente o componente | Autoridad principal |
 | --- | --- |
 | `pulso` | Objetivo, prioridades, decisiones, bloqueos, asignación y ciclo de vida de tareas. |
-| `pulso-planner` | Crea contratos de tareas y actualiza exclusivamente su sección `plan`. |
-| `pulso-executor` | Implementa el cambio, gestiona `execution` e `integration`, y libera el *lease*. |
+| `pulso-planner` | Produce propuestas de plan de solo lectura; no modifica artefactos. |
+| `pulso-executor` | Implementa y valida el cambio dentro del alcance; el plugin registra evidencia y propiedad. |
 | `pulso-verifier` y auditores | Proporcionan revisión independiente y de solo lectura. |
 | `pulso-challenger` | Revisa riesgos irreversibles, dependencias nuevas o decisiones materiales sin modificar el estado. |
 | `pulso-experience-curator` y `pulso-delivery-reporter` | Generan propuestas de memoria y comunicación operativa; no cambian el resultado técnico. |
@@ -107,7 +109,7 @@ Los especialistas entregan evidencia estructurada y no pueden modificar la inten
 
 ## Concurrencia y resiliencia con circuit breaker
 
-La concurrencia se protege mediante *leases* por tarea. Un Executor debe poseer un *lease* activo para editar. Durante la ejecución ordinaria se respetan los *leases* activos; ante sesiones abortadas, canceladas o caídas por límites del proveedor, el orquestador recupera el *lease* huérfano (`pulso_lease(action='recover')`) o el operador puede liberarlo mediante la CLI `pulso-lease` sin esperar los 30 minutos de expiración. El plugin valida además que las mutaciones se mantengan dentro de las rutas autorizadas por el contrato de tarea.
+La concurrencia se protege mediante *leases* por tarea. El plugin adquiere el lease al iniciar Executor, lo renueva antes de cada herramienta y lo libera ante eventos `idle`, `error`, cierre o eliminación. Antes de una nueva delegación consulta los estados de sesión de OpenCode: conserva el bloqueo si el propietario sigue `busy` o `retry`, pero libera automáticamente propietarios ausentes o inactivos y transfiere la tarea al reemplazo. Si la consulta no está disponible, un heartbeat sin actividad puede recuperarse tras una gracia acotada. La CLI `pulso-lease` permanece como respaldo del operador, no como paso normal.
 
 El circuit breaker observa validaciones y ciclos de reparación para evitar insistir sobre el mismo error. Por defecto abre el circuito ante dos errores de validación repetidos o tres ciclos de reparación sin progreso. Cuando está abierto, bloquea las herramientas mutantes, pero conserva la investigación de solo lectura y la validación diagnóstica. El reinicio del circuito requiere intervención humana mediante `pulso-breaker`.
 
@@ -128,12 +130,7 @@ npm install
 npm test
 ```
 
-Edite Pulso en este repositorio. El instalador interactivo pregunta si debe configurar OpenCode, GitHub Copilot CLI o ambos y después permite elegir uno de dos perfiles de modelos:
-
-- **OpenAI:** Terra para orquestación, planificación y ejecución; Luna para exploración y tareas ligeras.
-- **Claude:** Sonnet para orquestación, planificación y ejecución; Haiku para exploración y tareas ligeras.
-
-Sol y Opus no se asignan por defecto debido a su mayor coste; siguen disponibles mediante personalización manual.
+Edite Pulso en este repositorio. El instalador interactivo pregunta si debe configurar OpenCode, GitHub Copilot CLI o ambos. La instalación no selecciona perfiles, proveedores ni modelos de OpenCode y conserva cualquier asignación existente.
 
 ```bash
 npm run install:local
@@ -145,42 +142,24 @@ En ejecución no interactiva se conserva OpenCode como destino predeterminado po
 npm run install:opencode
 npm run install:copilot
 npm run install:both
-npm run install:both -- --profile claude
 ```
 
-### Perfiles de modelos y selección de proveedor en OpenCode
+### Configuración interactiva de modelos en OpenCode
 
-Pulso organiza los modelos en dos perfiles seleccionables:
-- **`openai` (Versátil):** Asigna modelos según la criticidad del agente (`deep`: `gpt-5.6-sol`, `standard`: `gpt-5.6-terra`, `light`: `gpt-5.6-luna`). En OpenCode este perfil es versátil y permite operar tanto con el proveedor `openai` directo como con `github-copilot`. Si no se especifica, el instalador detecta automáticamente el proveedor predominante en su configuración.
-- **`claude`:** Asigna modelos Claude (`sonnet-5`, `haiku-4.5`, `opus-4.8`) y queda restringido exclusivamente al proveedor `github-copilot`.
+Los modelos de OpenCode se configuran sin reinstalar mediante `/pulso-configure` o pidiéndole a Pulso que configure sus agentes. `pulso_models` es la única autoridad de Pulso que modifica esas asignaciones.
 
-Comandos de instalación por proveedor:
-```bash
-# Instalar con OpenAI directo (openai/):
-npm run install:opencode -- --profile openai --provider openai
+El wizard consulta primero `opencode models`, por lo que solo ofrece proveedores y modelos realmente disponibles para ese usuario. Recomienda `github-copilot` cuando existe, pero permite elegir cualquier otro proveedor detectado.
 
-# Instalar con OpenAI vía GitHub Copilot (github-copilot/):
-npm run install:opencode -- --profile openai --provider github-copilot
+- **Rápida / Recomendada:** un modelo para razonamiento y ejecución y otro para trabajo estático.
+- **Rápida / Rendimiento:** modelos separados para razonamiento, ejecución y trabajo estático.
+- **Rápida / Heredada:** elimina modelos fijados para que los agentes usen el modelo de la sesión.
+- **Personalizada:** permite escoger un modelo disponible para cada agente, mostrando su rol recomendado.
 
-# Instalar con Claude (exclusivo para GitHub Copilot):
-npm run install:opencode -- --profile claude
-```
+La configuración puede guardarse globalmente en la instalación de OpenCode o únicamente en el proyecto actual. El gestor solicita confirmación antes de escribir y preserva el resto del archivo JSONC.
 
-### Cambio de proveedor entre sesiones (`switch:provider`)
+> **Nota sobre el ciclo de vida de OpenCode:** OpenCode carga la configuración de modelos al arrancar y no la recarga en caliente. Después de aplicar el wizard es necesario cerrar y reiniciar OpenCode.
 
-Si dispone de ambos proveedores configurados en OpenCode y desea alternar entre ellos (por ejemplo, si se agota la cuota en GitHub Copilot y desea continuar con su clave directa de OpenAI):
-
-```bash
-# Alternar a OpenAI directo:
-npm run switch:provider -- --provider openai
-
-# Alternar a GitHub Copilot:
-npm run switch:provider -- --provider github-copilot
-```
-
-> **Nota sobre el ciclo de vida de OpenCode:** OpenCode carga la configuración de modelos de los agentes en memoria al arrancar el proceso (`opencode.json` / `opencode.jsonc`) y no la recarga en caliente durante una sesión activa. Por ello, tras ejecutar `switch:provider` es necesario cerrar y reiniciar OpenCode para que los agentes comiencen a operar bajo el nuevo proveedor.
-
-El adaptador OpenCode usa `~/.config/opencode` de forma predeterminada; `OPENCODE_CONFIG_DIR` permite elegir otra instalación. El adaptador Copilot instala el plugin local `pulso`, sus agentes, skill, hooks y servidor MCP. Ambos persisten el perfil seleccionado y asignan explícitamente el modelo correspondiente a cada agente. La instalación deja Pulso disponible, pero no lo selecciona como agente predeterminado. Inicie una sesión Copilot con `copilot --agent pulso`. Para hacer opt-in al agente predeterminado de OpenCode:
+El adaptador OpenCode usa `~/.config/opencode` de forma predeterminada; `OPENCODE_CONFIG_DIR` permite elegir otra instalación. El adaptador Copilot instala el plugin local `pulso`, sus agentes, skill, hooks y servidor MCP. La instalación deja Pulso disponible, pero no lo selecciona como agente predeterminado ni cambia los modelos configurados en OpenCode. Inicie una sesión Copilot con `copilot --agent pulso`. Para hacer opt-in al agente predeterminado de OpenCode:
 
 ```bash
 npm run install:opencode -- --set-default

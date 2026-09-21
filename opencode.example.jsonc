@@ -9,6 +9,8 @@
     "pulso": { "model": "github-copilot/gpt-5.6-terra" },
     "pulso-planner": { "model": "github-copilot/gpt-5.6-terra" },
     "pulso-challenger": { "model": "github-copilot/gpt-5.6-terra" },
+    "pulso-contact-manager": { "model": "github-copilot/gpt-5.6-terra" },
+    "pulso-config-manager": { "model": "github-copilot/gpt-5.6-terra" },
     "pulso-experience-curator": { "model": "github-copilot/gpt-5.6-luna" },
     "pulso-delivery-reporter": { "model": "github-copilot/gpt-5.6-luna" },
     "pulso-explorer": { "model": "github-copilot/gpt-5.6-luna" },

@@ -4,6 +4,9 @@ import { execFileSync } from "node:child_process";
 import core from "../lib/pulso-circuit-breaker-core.js";
 import stateFiles from "../lib/pulso-file-state.js";
 import contacts from "../lib/pulso-agent-contacts.js";
+import leases from "../lib/pulso-lease-core.js";
+import contracts from "../lib/pulso-contract-core.js";
+import ownership from "../lib/pulso-ownership-core.js";
 
 const TRACKED_AGENTS = new Set(["pulso-executor", "pulso-verifier"]);
 const READ_ONLY_TOOLS = new Set(["read", "glob", "grep", "lsp"]);
@@ -13,6 +16,7 @@ const CONTACT_ID_PATTERN = /\bPULSO_CONTACT_ID=([A-Za-z0-9._-]+)\b/;
 const CONTACT_PROBE_PATTERN = /\bPULSO_CONTACT_PROBE=([A-Za-z0-9._-]+)\b/;
 const sessionTasks = new Map();
 const primarySessions = new Set();
+const ORPHAN_GRACE_MS = 5 * 60 * 1000;
 
 function taskIDFromParts(parts) {
   for (const part of parts || []) {
@@ -55,12 +59,24 @@ function hasRunnableTask(directory, taskID) {
   }
 }
 
+function taskInstructions(directory, taskID) {
+  const file = path.join(stateFiles.safeDirectory(directory, [".pulso", "tasks"]), `${taskID}.json`);
+  if (!fs.existsSync(file)) return null;
+  const task = JSON.parse(fs.readFileSync(file, "utf8"));
+  const details = contracts.workerContract(task);
+  return `\n\n[PULSO INTERNAL CONTRACT - do not mention in user-facing output]\n${JSON.stringify(details)}\n[/PULSO INTERNAL CONTRACT]`;
+}
+
 function mutationPaths(tool, args = {}) {
   if (tool === "apply_patch") {
     return [...String(args.patchText || "").matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((match) => match[1].trim());
   }
   if (tool === "multi_edit") return (args.edits || []).map((edit) => edit.filePath || edit.path).filter(Boolean);
   return [args.filePath || args.path].filter(Boolean);
+}
+
+function isGitMutationCommand(command) {
+  return /\bgit\s+(?:add|commit|push|merge|rebase|cherry-pick|reset|restore|clean|stash)\b/i.test(String(command || ""));
 }
 
 function relativePath(directory, candidate) {
@@ -106,6 +122,14 @@ function enforceMutation(directory, sessionID, taskID, tool, args, allowTaskStat
   }
 }
 
+function enforceGitMutation(directory, sessionID, taskID) {
+  const { task, lease } = readTaskAndLease(directory, taskID);
+  if (!['ready', 'in_progress'].includes(task.status)) throw new Error(`${taskID} must be resumed before Git integration.`);
+  if (lease.status !== "active" || lease.owner_session !== sessionID || leases.isExpired(lease)) {
+    throw new Error(`${taskID} requires an active lease owned by this session before Git integration.`);
+  }
+}
+
 function safeHead(directory) {
   try {
     return execFileSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
@@ -137,15 +161,100 @@ function releaseSessionLeases(directory, sessionID) {
   for (const name of fs.readdirSync(safeLeasesDirectory)) {
     if (!/^PULSO-\d+\.json$/.test(name)) continue;
     const file = path.join(safeLeasesDirectory, name);
-    stateFiles.withFileLock(file, () => {
-      const lease = JSON.parse(fs.readFileSync(file, "utf8"));
-      if (lease.status !== "active" || lease.owner_session !== sessionID) return;
-      lease.status = "released";
-      lease.released_at = new Date().toISOString();
-      lease.release_reason = "session_terminal";
-      stateFiles.writeAtomic(file, lease);
-    });
+    const lease = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (lease.status !== "active" || lease.owner_session !== sessionID) continue;
+    leases.release(directory, lease.task_id, { ownerSession: sessionID, releasedBy: "plugin", reason: "session_terminal" });
   }
+}
+
+function updateTaskStatus(directory, taskID, status) {
+  const file = path.join(stateFiles.safeDirectory(directory, [".pulso", "tasks"]), `${taskID}.json`);
+  if (!fs.existsSync(file)) return;
+  stateFiles.withFileLock(file, () => {
+    const task = JSON.parse(fs.readFileSync(file, "utf8"));
+    task.revision = Math.max(0, Number(task.revision) || 0) + 1;
+    task.status = status;
+    task.execution = { ...(task.execution || {}), updated_at: new Date().toISOString() };
+    stateFiles.writeAtomic(file, task);
+  });
+}
+
+function updateTaskExecution(directory, taskID, mutator) {
+  const file = path.join(stateFiles.safeDirectory(directory, [".pulso", "tasks"]), `${taskID}.json`);
+  if (!fs.existsSync(file)) return;
+  stateFiles.withFileLock(file, () => {
+    const task = JSON.parse(fs.readFileSync(file, "utf8"));
+    const execution = { ...(task.execution || {}) };
+    mutator(execution);
+    execution.updated_at = new Date().toISOString();
+    task.revision = Math.max(0, Number(task.revision) || 0) + 1;
+    task.execution = execution;
+    task.updated_at = execution.updated_at;
+    stateFiles.writeAtomic(file, task);
+  });
+}
+
+function recordTaskMutation(directory, taskID, tool, args) {
+  const paths = mutationPaths(tool, args).map((candidate) => relativePath(directory, candidate));
+  updateTaskExecution(directory, taskID, (execution) => {
+    execution.changed_files = [...new Set([...(execution.changed_files || []), ...paths])];
+  });
+}
+
+function recordTaskValidation(directory, taskID, command, output, failed) {
+  updateTaskExecution(directory, taskID, (execution) => {
+    execution.commands = [...(execution.commands || []), command].slice(-20);
+    const result = `${failed ? "failed" : "passed"}: ${String(output || "").trim().slice(0, 500) || "no output"}`;
+    execution.results = [...(execution.results || []), result].slice(-20);
+    execution.validation_confidence = failed ? "unverified" : "verified";
+  });
+}
+
+function responseData(response) {
+  return response?.data || response;
+}
+
+async function ownerActivity(input, ownerSession) {
+  if (!input.client?.session?.status) return "unknown";
+  try {
+    const statuses = responseData(await input.client.session.status({ query: { directory: input.directory } })) || {};
+    const status = statuses[ownerSession];
+    if (!status || status.type === "idle") return "inactive";
+    return ["busy", "retry"].includes(status.type) ? "active" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+async function releaseOrphanedLease(input, taskID) {
+  const lease = leases.read(input.directory, taskID);
+  if (!lease || lease.status !== "active") return false;
+  const activity = await ownerActivity(input, lease.owner_session);
+  if (ownership.decideLeaseAction({ lease, ownerActivity: activity, graceMs: ORPHAN_GRACE_MS }) !== "recover") return false;
+  try {
+    leases.release(input.directory, taskID, {
+      force: true,
+      expectedOwner: lease.owner_session,
+      expectedHeartbeat: lease.heartbeat_at,
+      releasedBy: "plugin",
+      reason: activity === "inactive" ? "owner_session_inactive" : "owner_session_unreachable",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function acquireExecutorLease(input, taskID, sessionID) {
+  const current = leases.read(input.directory, taskID);
+  if (current?.status === "active" && current.owner_session !== sessionID) {
+    await releaseOrphanedLease(input, taskID);
+  }
+  const remaining = leases.read(input.directory, taskID);
+  if (remaining?.status === "active" && remaining.owner_session !== sessionID) {
+    throw new Error(`${taskID} still has an active executor; overlapping mutation is blocked.`);
+  }
+  return leases.acquire(input.directory, taskID, sessionID, 30);
 }
 
 function commandFailed(output) {
@@ -211,6 +320,15 @@ export async function PulsoCircuitBreakerPlugin(input) {
         migrated = true;
       }
       sessionTasks.set(event.sessionID, { taskID, agent: event.agent, contact: Boolean(external), mutation: registeredContact?.mutation });
+      // The parent task call stays compact; only the worker receives the full contract.
+      const instructions = taskInstructions(input.directory, taskID);
+      if (instructions) output.parts = [...(output.parts || []), { type: "text", text: instructions }];
+      if (event.agent === "pulso-executor" || registeredContact?.mutation === "scoped") {
+        if (hasRunnableTask(input.directory, taskID)) {
+          await acquireExecutorLease(input, taskID, event.sessionID);
+          updateTaskStatus(input.directory, taskID, "in_progress");
+        }
+      }
       const state = await update(input.directory, taskID, (current) => {
         core.addSession(current, event.sessionID);
       }, input.client);
@@ -228,6 +346,15 @@ export async function PulsoCircuitBreakerPlugin(input) {
           const validContact = contactID === agent && hasRunnableTask(input.directory, taskID) && contacts.registeredContact(input.directory, agent);
           if (!validProbe && !validContact) throw new Error(`External agent ${agent} must be an available Pulso contact with the required delegation markers.`);
         }
+        const taskID = taskIDFromParts([{ text: output.args?.prompt || "" }]);
+        const mutatingDispatch = agent === "pulso-executor" || contacts.registeredContact(input.directory, agent)?.mutation === "scoped";
+        if (taskID && mutatingDispatch) {
+          const current = leases.read(input.directory, taskID);
+          if (current?.status === "active") {
+            const released = await releaseOrphanedLease(input, taskID);
+            if (!released) throw new Error(`${taskID} still has an active executor; overlapping mutation is blocked.`);
+          }
+        }
       }
       const session = sessionTasks.get(event.sessionID);
       if (!session) return;
@@ -235,6 +362,12 @@ export async function PulsoCircuitBreakerPlugin(input) {
         throw new Error(`Pulso contact probe ${session.agent} cannot use tools.`);
       }
       const { taskID } = session;
+      if (session.agent === "pulso-executor" || session.mutation === "scoped") {
+        const lease = leases.read(input.directory, taskID);
+        if (lease?.status === "active" && lease.owner_session === event.sessionID) {
+          leases.heartbeat(input.directory, taskID, event.sessionID, 30);
+        }
+      }
       if (session.contact) {
         if (["bash", "task"].includes(event.tool)) throw new Error(`Pulso contact ${session.agent} cannot use ${event.tool}.`);
         if (event.tool.startsWith("pulso_") && event.tool !== "pulso_lease") throw new Error(`Pulso contact ${session.agent} cannot operate Pulso control tool ${event.tool}.`);
@@ -248,18 +381,21 @@ export async function PulsoCircuitBreakerPlugin(input) {
         throw new Error(`CIRCUIT BREAKER OPEN for ${taskID}: ${state.trip_reason}. Mutating execution blocked; read-only diagnosis remains available.`);
       }
       if (MUTATING_TOOLS.has(event.tool)) enforceMutation(input.directory, event.sessionID, taskID, event.tool, output.args, !session.contact);
+      if (event.tool === "bash" && isGitMutationCommand(output.args?.command)) enforceGitMutation(input.directory, event.sessionID, taskID);
     },
     "tool.execute.after": async (event, output) => {
       const session = sessionTasks.get(event.sessionID);
       if (!session) return;
       const { taskID } = session;
       if (["edit", "write", "apply_patch", "multi_edit"].includes(event.tool)) {
+        recordTaskMutation(input.directory, taskID, event.tool, event.args);
         await update(input.directory, taskID, (state) => core.recordRepairAction(state), input.client);
         return;
       }
       if (event.tool !== "bash") return;
       const command = event.args?.command;
       if (!core.isValidationCommand(command)) return;
+      recordTaskValidation(input.directory, taskID, command, output.output, commandFailed(output));
       await update(input.directory, taskID, (state) => core.recordValidation(state, command, output.output, commandFailed(output)), input.client);
     },
     event: async ({ event }) => {

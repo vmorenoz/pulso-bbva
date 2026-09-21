@@ -18,7 +18,7 @@ the value is valid.
 
 When the setting is missing, ask through the runtime's native interactive question tool using user-facing choices: keep Pulso coordination files only on the developer's machine, or version them in Git for the team. Do not present unexplained `tracked`/`untracked` labels. In OpenCode, persist the choice with `pulso_artifacts`; do not edit `PULSO.md` or Git metadata manually for this setup.
 
-Repository-local state lives under `.pulso/`:
+Repository-local state lives under `.pulso/` and is owned by Pulso plugins:
 
 ```text
 state.json
@@ -35,23 +35,23 @@ store secrets, customer data, credentials, raw payloads, or verbose logs.
 
 Task status: `draft`, `ready`, `in_progress`, `blocked`, `implemented`, `verified`, `integrated`, `failed`, `cancelled`.
 
-Required task contract: `id`, title/objective, status, dependencies, `scope: { allowed_paths: [...], excluded_paths: [...] }`, acceptance criteria, validation, audits, skills, and `plan`/`execution`/`integration` sections. Always nest both path lists under `scope`; never write them at the task root.
-
-Before writing state: read revision/status, verify ownership, make the smallest edit, increment revision once, update the owned timestamp, validate JSON, and re-read changed fields. Return `state_conflict` instead of overwriting changed state.
+Required task contracts retain `id`, title/objective, status, dependencies, nested scope, acceptance criteria, validation, audits, skills, and lifecycle sections. Agents never read or write these files during routine delivery; `pulso_delivery` and plugin hooks project them atomically.
 
 ## Ownership
 
-- Pulso: objective, shared state, decisions, scope, acceptance criteria, priority, assignment, lifecycle.
-- Planner: new delegated task files and assigned `plan` sections only.
-- Executor: assigned `execution`/`integration`; transitions `ready -> in_progress -> implemented|blocked|failed`, or to `integrated` after explicitly requested selective commit.
-- Circuit-breaker plugin: breaker state. Experience engine: external SQLite metrics/memory.
+- Pulso: objective, decisions, scope, acceptance criteria, priority, assignment, lifecycle intent.
+- Planner: read-only plan proposals.
+- Executor: scoped implementation, validation, and optional integration evidence.
+- Control plugins: task projection, execution evidence, leases, breaker state, SQLite metrics, and memory.
 - Reporter/curator/explorers/verifiers/auditors: read-only; never mutate `.pulso`.
 
 Never change another owner's section without explicit Pulso delegation.
 
 ## Objectives And Tasks
 
-Before substantive work, Pulso inspects shared state, relevant tasks, and incomplete objectives, then calls `pulso_experience_start` once with `new` or `resume` and a concrete reason. A chat message alone never creates an objective. OpenCode session IDs remain internal.
+Before substantive work, Pulso calls `pulso_delivery(action="begin")` after intent and scope are concrete. A chat message alone never creates an objective: questions, explanations, read-only reviews, and casual conversation stay stateless. The plugin creates or resumes the objective and projects one task contract.
+
+On GitHub Copilot CLI, where `pulso_delivery` is not exposed, use the equivalent `pulso_experience_start`, routing, skill, and primary state tools supplied by `pulso-control`; the generated Copilot agent instructions are authoritative for that runtime.
 
 Before creating a task, decide `reuse` or `new`. Corrections, retries, validation, verification, audits, commit, push, and integration remain lifecycle stages of the existing task when deliverable and scope are stable. Create another task only for a separately deliverable code outcome with materially different scope or criteria.
 
@@ -59,7 +59,7 @@ Every Executor/Verifier delegation includes `PULSO_TASK_ID=PULSO-xxx`. The suppl
 
 ## Routing
 
-Call `pulso_route` after scope is known and use the smallest route:
+Use the route returned by `pulso_delivery` after scope is known:
 
 - `fast`: Executor only for clear bounded work.
 - `normal`: Executor plus Verifier for contradictory or weak evidence.
@@ -70,7 +70,9 @@ Explorer is only for a concrete iterative/cross-file fact. Challenger is one opt
 
 ## Execution Safety
 
-Executor acquires a 30-minute lease before editing, heartbeats before long validation/integration, and releases on every terminal return. Never override a live lease during normal execution. If an executor session was cancelled, aborted, or crashed (e.g. provider quota limit), recover or release the orphaned lease using `pulso_lease(action="recover", reason="...")` or CLI `pulso-lease release PULSO-xxx`.
+The control plugin acquires a 30-minute lease before Executor tools run, heartbeats on every tool call, and releases it on terminal session events. Before retrying a task it queries OpenCode session status: busy/retrying owners remain protected; idle or missing owners are released and replaced automatically. If status lookup is unavailable, a stale heartbeat becomes recoverable after a bounded grace period. Manual CLI release remains an operator fallback, not a normal workflow.
+
+On GitHub Copilot CLI, its generated agents and hooks retain the explicit `pulso-control` lease flow.
 
 Repeated zero-progress behavioral failures may open the circuit for mutations; token usage and runner-infrastructure failures are observational. Read-only diagnosis remains available. Only a human resets an open circuit.
 
@@ -82,13 +84,13 @@ Validation confidence is `verified`, `partially_verified`, or `unverified`. Unav
 
 Recall at most three relevant memories once before planned or direct execution work; current-project results rank before promoted global results. Use approved profile preferences only.
 
-Before Pulso's final response for substantive delivery, call `pulso_experience_finalize`. A partial closure must list concrete `verification_gaps`. Only `verified`/`integrated` triggers selective memory curation; reporter formatting never changes facts or status. Do not finalize casual chat, dashboard/doctor requests, subagent runs, or idle sessions.
+Before Pulso's final response for substantive delivery, call `pulso_delivery(action="close")`. A partial closure must list concrete `verification_gaps`. Only `verified`/`integrated` triggers selective memory curation. Do not close casual chat, dashboard/doctor requests, subagent runs, or idle sessions.
 
 Experience bootstrap is asynchronous and fail-open. `pulso_doctor` reports unresolved diagnostics; `pulso_experience_repair` retries bounded reconciliation without manual SQLite/session deletion.
 
 ## Skills
 
-Pulso resolves skills once per objective through `pulso_skill_digest` and sends the compact rules to specialists. Load a full skill only for detailed implementation/testing/audit rules or when digest says `full_skill_required`.
+`pulso_delivery` resolves compact skill constraints once per objective and stores them in the internal task contract. Load a full skill only for detailed implementation, testing, or audit rules.
 
 - BBVA: `bbva-engineering`
 - CELLS: plus `bbva-cells`; behavior/tests also `bbva-cells-testing`
@@ -100,12 +102,11 @@ Do not infer BBVA context merely because skills are installed.
 
 All user-visible prose from Pulso and its specialists must be in Spanish, regardless of the language used by the user, command template, tool, or delegated agent. Keep identifiers, code, commands, and literal technical messages in their original form when translation would reduce accuracy.
 
-Lead with verdict. Do not restate prompt, method, routine tools, loaded skills, unchanged files, or obvious next steps. Cite only decisive `path:line` evidence. Ask one concrete question only when blocked. Normal specialist responses stay under 140 words with at most three findings.
+Lead with verdict. Do not expose task IDs, leases, breaker state, artifact paths, revisions, prompts, or other control-plane mechanics. Do not restate prompt, method, routine tools, loaded skills, unchanged files, or obvious next steps. Cite only decisive `path:line` evidence. Ask one concrete question only when blocked. Normal specialist responses stay under 140 words with at most three findings.
 
 ```markdown
-## Resultado Pulso
-**Tarea:** PULSO-001
-**Estado:** completed | blocked | failed | state_conflict
+## Resultado
+**Estado:** completed | blocked | failed
 **Resumen:** una oración
 
 ### Evidencia

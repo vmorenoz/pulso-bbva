@@ -88,6 +88,24 @@ test("force release allows clearing an active lease from another session", async
   }
 });
 
+test("orphan recovery cannot release a lease that heartbeated during status inspection", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-lease-recovery-race-"));
+  const leases = require("../lib/pulso-lease-core.js");
+  try {
+    const observed = leases.acquire(directory, "PULSO-001", "session-a", 30);
+    leases.heartbeat(directory, "PULSO-001", "session-a", 31);
+    assert.throws(() => leases.release(directory, "PULSO-001", {
+      force: true,
+      expectedOwner: observed.owner_session,
+      expectedHeartbeat: "2020-01-01T00:00:00.000Z",
+      reason: "stale recovery",
+    }), /heartbeat changed during recovery/);
+    assert.equal(leases.read(directory, "PULSO-001").status, "active");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("pulso-lease CLI inspects and releases an active lease", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-lease-cli-"));
   try {
@@ -136,6 +154,55 @@ test("artifact setup persists PULSO.md and local Git exclusion without losing pr
   }
 });
 
+test("model wizard uses the live catalog and writes global, project, custom, and inherited configurations", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-model-wizard-"));
+  const previousConfig = process.env.OPENCODE_CONFIG_DIR;
+  const previousBinary = process.env.PULSO_OPENCODE_BIN;
+  try {
+    const configRoot = path.join(root, "config");
+    const project = path.join(root, "project");
+    const binary = path.join(root, "opencode-models.js");
+    fs.mkdirSync(configRoot);
+    fs.mkdirSync(project);
+    fs.writeFileSync(binary, "#!/usr/bin/env node\nprocess.stdout.write('vendor/deep\\nvendor/run\\nvendor/light\\ngithub-copilot/gpt-terra\\n');\n");
+    fs.chmodSync(binary, 0o755);
+    process.env.OPENCODE_CONFIG_DIR = configRoot;
+    process.env.PULSO_OPENCODE_BIN = binary;
+    const models = (await import("../tools/pulso_models.ts")).default;
+    const context = { directory: project, agent: "pulso-config-manager" };
+
+    const catalog = JSON.parse(await models.execute({ action: "catalog" }, context));
+    assert.deepEqual(catalog.providers.vendor, ["vendor/deep", "vendor/light", "vendor/run"]);
+    assert.equal(catalog.recommended_provider, "github-copilot");
+
+    await models.execute({
+      action: "apply", scope: "global", preset: "recommended", provider: "vendor",
+      reasoning_model: "vendor/deep", static_model: "vendor/light",
+    }, context);
+    let global = JSON.parse(fs.readFileSync(path.join(configRoot, "opencode.jsonc"), "utf8"));
+    assert.equal(global.agent.pulso.model, "vendor/deep");
+    assert.equal(global.agent["pulso-executor"].model, "vendor/deep");
+    assert.equal(global.agent["pulso-explorer"].model, "vendor/light");
+
+    const assignments = Object.fromEntries(Object.keys(catalog.agents).map((agent) => [agent, "vendor/run"]));
+    await models.execute({ action: "apply", scope: "project", preset: "custom", provider: "vendor", assignments }, context);
+    const projectConfig = JSON.parse(fs.readFileSync(path.join(project, "opencode.jsonc"), "utf8"));
+    assert.equal(projectConfig.agent.pulso.model, "vendor/run");
+    assert.equal(projectConfig.agent["pulso-config-manager"].model, "vendor/run");
+
+    await models.execute({ action: "apply", scope: "global", preset: "inherited" }, context);
+    global = JSON.parse(fs.readFileSync(path.join(configRoot, "opencode.jsonc"), "utf8"));
+    assert.equal(global.agent.pulso?.model, undefined);
+    assert.equal(global.agent["pulso-executor"]?.model, undefined);
+  } finally {
+    if (previousConfig === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+    else process.env.OPENCODE_CONFIG_DIR = previousConfig;
+    if (previousBinary === undefined) delete process.env.PULSO_OPENCODE_BIN;
+    else process.env.PULSO_OPENCODE_BIN = previousBinary;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("doctor reports a healthy configured control plane", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-doctor-"));
   const configRoot = path.join(directory, "config");
@@ -145,7 +212,7 @@ test("doctor reports a healthy configured control plane", async () => {
     process.env.OPENCODE_CONFIG_DIR = configRoot;
     process.env.XDG_DATA_HOME = path.join(directory, "data");
     for (const agent of [
-      "pulso", "pulso-planner", "pulso-challenger", "pulso-contact-manager", "pulso-executor", "pulso-explorer", "pulso-verifier",
+      "pulso", "pulso-planner", "pulso-challenger", "pulso-contact-manager", "pulso-config-manager", "pulso-executor", "pulso-explorer", "pulso-verifier",
       "pulso-integration-auditor", "pulso-security-auditor", "pulso-ui-auditor", "pulso-experience-curator", "pulso-delivery-reporter",
     ]) {
       fs.mkdirSync(path.join(configRoot, "agents"), { recursive: true });
@@ -155,7 +222,7 @@ test("doctor reports a healthy configured control plane", async () => {
       fs.mkdirSync(path.join(configRoot, "plugins"), { recursive: true });
       fs.writeFileSync(path.join(configRoot, "plugins", `${plugin}.mjs`), "export default () => ({})\n");
     }
-    for (const customTool of ["pulso_lease", "pulso_artifacts", "pulso_route", "pulso_skill_digest", "pulso_doctor", "pulso_dashboard", "pulso_agent_contacts", "pulso_identity"]) {
+    for (const customTool of ["pulso_lease", "pulso_artifacts", "pulso_models", "pulso_route", "pulso_skill_digest", "pulso_doctor", "pulso_dashboard", "pulso_agent_contacts", "pulso_identity"]) {
       fs.mkdirSync(path.join(configRoot, "tools"), { recursive: true });
       fs.writeFileSync(path.join(configRoot, "tools", `${customTool}.ts`), "export default {}\n");
     }
@@ -186,13 +253,13 @@ test("doctor reports skipped experience reconciliation rows", async () => {
   try {
     process.env.OPENCODE_CONFIG_DIR = configRoot;
     process.env.XDG_DATA_HOME = dataHome;
-    const agentNames = ["pulso", "pulso-planner", "pulso-challenger", "pulso-contact-manager", "pulso-executor", "pulso-explorer", "pulso-verifier", "pulso-integration-auditor", "pulso-security-auditor", "pulso-ui-auditor", "pulso-experience-curator", "pulso-delivery-reporter"];
+    const agentNames = ["pulso", "pulso-planner", "pulso-challenger", "pulso-contact-manager", "pulso-config-manager", "pulso-executor", "pulso-explorer", "pulso-verifier", "pulso-integration-auditor", "pulso-security-auditor", "pulso-ui-auditor", "pulso-experience-curator", "pulso-delivery-reporter"];
     fs.mkdirSync(path.join(configRoot, "agents"), { recursive: true });
     for (const name of agentNames) fs.writeFileSync(path.join(configRoot, "agents", `${name}.md`), "---\n---\n");
     fs.mkdirSync(path.join(configRoot, "plugins"), { recursive: true });
     for (const name of ["pulso-circuit-breaker", "pulso-experience-engine"]) fs.writeFileSync(path.join(configRoot, "plugins", `${name}.mjs`), "export default () => ({})\n");
     fs.mkdirSync(path.join(configRoot, "tools"), { recursive: true });
-    for (const name of ["pulso_lease", "pulso_artifacts", "pulso_route", "pulso_skill_digest", "pulso_doctor", "pulso_dashboard", "pulso_agent_contacts", "pulso_identity"]) fs.writeFileSync(path.join(configRoot, "tools", `${name}.ts`), "export default {}\n");
+    for (const name of ["pulso_lease", "pulso_artifacts", "pulso_models", "pulso_route", "pulso_skill_digest", "pulso_doctor", "pulso_dashboard", "pulso_agent_contacts", "pulso_identity"]) fs.writeFileSync(path.join(configRoot, "tools", `${name}.ts`), "export default {}\n");
     fs.writeFileSync(path.join(configRoot, "opencode.jsonc"), JSON.stringify({ plugin: ["./plugins/pulso-circuit-breaker.mjs", "./plugins/pulso-experience-engine.mjs"] }));
     const experienceDirectory = path.join(dataHome, "opencode", "pulso");
     fs.mkdirSync(experienceDirectory, { recursive: true });

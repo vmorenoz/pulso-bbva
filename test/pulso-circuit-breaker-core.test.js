@@ -181,6 +181,140 @@ test("releases active leases when their owner session becomes idle", async () =>
   }
 });
 
+test("recovers an orphaned executor lease before redispatch and transfers ownership", async () => {
+  const { PulsoCircuitBreakerPlugin } = await import("../plugins/pulso-circuit-breaker.mjs");
+  const leases = require("../lib/pulso-lease-core.js");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-orphan-recovery-"));
+  fs.mkdirSync(path.join(directory, ".pulso", "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(directory, ".pulso", "tasks", "PULSO-010.json"), JSON.stringify({
+    schema_version: 1,
+    revision: 1,
+    id: "PULSO-010",
+    status: "ready",
+    scope: { allowed_paths: ["src/**"], excluded_paths: [] },
+  }));
+  leases.acquire(directory, "PULSO-010", "dead-session", 30);
+  const client = { session: { status: async () => ({ data: {} }) } };
+  try {
+    const hooks = await PulsoCircuitBreakerPlugin({ directory, client });
+    await hooks["chat.message"]({ agent: "pulso", sessionID: "primary" }, { parts: [{ text: "Continue" }] });
+    await hooks["tool.execute.before"](
+      { sessionID: "primary", tool: "task" },
+      { args: { subagent_type: "pulso-executor", prompt: "PULSO_TASK_ID=PULSO-010 Continue implementation" } },
+    );
+    assert.equal(leases.read(directory, "PULSO-010").status, "released");
+    assert.equal(leases.read(directory, "PULSO-010").release_reason, "owner_session_inactive");
+
+    await hooks["chat.message"](
+      { agent: "pulso-executor", sessionID: "replacement-session" },
+      { parts: [{ text: "PULSO_TASK_ID=PULSO-010 Continue implementation" }] },
+    );
+    const transferred = leases.read(directory, "PULSO-010");
+    assert.equal(transferred.status, "active");
+    assert.equal(transferred.owner_session, "replacement-session");
+
+    await hooks.event({ event: { type: "session.error", properties: { sessionID: "replacement-session" } } });
+    assert.equal(leases.read(directory, "PULSO-010").status, "released");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("injects the internal contract into the worker message without expanding the parent prompt", async () => {
+  const { PulsoCircuitBreakerPlugin } = await import("../plugins/pulso-circuit-breaker.mjs");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-worker-contract-"));
+  const taskDirectory = path.join(directory, ".pulso", "tasks");
+  fs.mkdirSync(taskDirectory, { recursive: true });
+  fs.writeFileSync(path.join(taskDirectory, "PULSO-013.json"), JSON.stringify({
+    id: "PULSO-013",
+    status: "ready",
+    objective: "Implement the scoped change",
+    scope: { allowed_paths: ["src/app.js"], excluded_paths: ["package.json"] },
+    acceptance_criteria: ["The behavior is observable."],
+    validation: ["npm test -- app"],
+    skills: ["bbva-engineering"],
+    project_rules: "- Keep tests focused.",
+  }));
+  try {
+    const hooks = await PulsoCircuitBreakerPlugin({ directory, client: {} });
+    const output = { parts: [{ type: "text", text: "PULSO_TASK_ID=PULSO-013\nImplement the assigned change." }] };
+    await hooks["chat.message"]({ agent: "pulso-executor", sessionID: "worker" }, output);
+    assert.equal(output.parts.length, 2);
+    assert.equal(output.parts[0].text, "PULSO_TASK_ID=PULSO-013\nImplement the assigned change.");
+    assert.match(output.parts[1].text, /PULSO INTERNAL CONTRACT/);
+    assert.match(output.parts[1].text, /src\/app\.js/);
+    assert.match(output.parts[1].text, /npm test -- app/);
+    assert.match(output.parts[1].text, /Keep tests focused/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("refuses redispatch while the current executor remains busy", async () => {
+  const { PulsoCircuitBreakerPlugin } = await import("../plugins/pulso-circuit-breaker.mjs");
+  const leases = require("../lib/pulso-lease-core.js");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-live-lease-"));
+  leases.acquire(directory, "PULSO-011", "busy-session", 30);
+  const client = { session: { status: async () => ({ data: { "busy-session": { type: "busy" } } }) } };
+  try {
+    const hooks = await PulsoCircuitBreakerPlugin({ directory, client });
+    await hooks["chat.message"]({ agent: "pulso", sessionID: "primary" }, { parts: [{ text: "Continue" }] });
+    await assert.rejects(
+      () => hooks["tool.execute.before"](
+        { sessionID: "primary", tool: "task" },
+        { args: { subagent_type: "pulso-executor", prompt: "PULSO_TASK_ID=PULSO-011 Continue implementation" } },
+      ),
+      /still has an active executor/,
+    );
+    assert.equal(leases.read(directory, "PULSO-011").owner_session, "busy-session");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("protects an expired lease while its owner session is still busy", async () => {
+  const { PulsoCircuitBreakerPlugin } = await import("../plugins/pulso-circuit-breaker.mjs");
+  const leases = require("../lib/pulso-lease-core.js");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-expired-busy-"));
+  const lease = leases.acquire(directory, "PULSO-014", "busy-session", 30);
+  lease.expires_at = "2020-01-01T00:00:00.000Z";
+  fs.writeFileSync(leases.leasePath(directory, "PULSO-014"), JSON.stringify(lease));
+  try {
+    const hooks = await PulsoCircuitBreakerPlugin({ directory, client: { session: { status: async () => ({ data: { "busy-session": { type: "busy" } } }) } } });
+    await hooks["chat.message"]({ agent: "pulso", sessionID: "primary" }, { parts: [{ text: "Continue" }] });
+    await assert.rejects(() => hooks["tool.execute.before"](
+      { sessionID: "primary", tool: "task" },
+      { args: { subagent_type: "pulso-executor", prompt: "PULSO_TASK_ID=PULSO-014 Continue" } },
+    ), /still has an active executor/);
+    assert.equal(leases.read(directory, "PULSO-014").owner_session, "busy-session");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("recovers a stale orphan when session status is temporarily unavailable", async () => {
+  const { PulsoCircuitBreakerPlugin } = await import("../plugins/pulso-circuit-breaker.mjs");
+  const leases = require("../lib/pulso-lease-core.js");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-stale-orphan-"));
+  const lease = leases.acquire(directory, "PULSO-012", "lost-session", 30);
+  lease.heartbeat_at = "2020-01-01T00:00:00.000Z";
+  fs.writeFileSync(leases.leasePath(directory, "PULSO-012"), JSON.stringify(lease));
+  const client = { session: { status: async () => { throw new Error("server unavailable"); } } };
+  try {
+    const hooks = await PulsoCircuitBreakerPlugin({ directory, client });
+    await hooks["chat.message"]({ agent: "pulso", sessionID: "primary" }, { parts: [{ text: "Continue" }] });
+    await hooks["tool.execute.before"](
+      { sessionID: "primary", tool: "task" },
+      { args: { subagent_type: "pulso-executor", prompt: "PULSO_TASK_ID=PULSO-012 Continue implementation" } },
+    );
+    const recovered = leases.read(directory, "PULSO-012");
+    assert.equal(recovered.status, "released");
+    assert.equal(recovered.release_reason, "owner_session_unreachable");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("keeps an open-breaker session available for read-only diagnosis", async () => {
   const { PulsoCircuitBreakerPlugin } = await import("../plugins/pulso-circuit-breaker.mjs");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-breaker-diagnosis-"));
@@ -264,17 +398,33 @@ test("requires an owned lease and enforces direct mutation scope", async () => {
       ),
       /outside PULSO-001 scope/,
     );
-    await hooks["chat.message"](
-      { agent: "pulso-executor", sessionID: "session-b" },
-      { parts: [{ text: "PULSO_TASK_ID=PULSO-001" }] },
-    );
     await assert.rejects(
-      () => hooks["tool.execute.before"](
-        { sessionID: "session-b", tool: "edit" },
-        { args: { filePath: "src/app.js" } },
+      () => hooks["chat.message"](
+        { agent: "pulso-executor", sessionID: "session-b" },
+        { parts: [{ text: "PULSO_TASK_ID=PULSO-001" }] },
       ),
-      /active lease owned by this session/,
+      /still has an active executor/,
     );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("blocks Git integration unless the task is active and leased", async () => {
+  const { PulsoCircuitBreakerPlugin } = await import("../plugins/pulso-circuit-breaker.mjs");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-git-lifecycle-"));
+  const taskDirectory = path.join(directory, ".pulso", "tasks");
+  fs.mkdirSync(taskDirectory, { recursive: true });
+  fs.writeFileSync(path.join(taskDirectory, "PULSO-015.json"), JSON.stringify({
+    id: "PULSO-015", status: "implemented", scope: { allowed_paths: ["src/**"], excluded_paths: [] },
+  }));
+  require("../lib/pulso-lease-core.js").acquire(directory, "PULSO-015", "executor", 30);
+  try {
+    const hooks = await PulsoCircuitBreakerPlugin({ directory, client: {} });
+    await hooks["chat.message"]({ agent: "pulso-executor", sessionID: "executor" }, { parts: [{ text: "PULSO_TASK_ID=PULSO-015" }] });
+    await assert.rejects(() => hooks["tool.execute.before"](
+      { sessionID: "executor", tool: "bash" }, { args: { command: "git commit -m test" } },
+    ), /must be resumed before Git integration/);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

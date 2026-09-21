@@ -19,8 +19,8 @@ test("keeps Pulso and Executor as the autonomous base route", () => {
   assert.match(executor, /Do not require Explorer or another specialist/);
   assert.match(executor, /edit: allow/);
   assert.match(executor, /bash:\n\s+"\*": allow/);
-  assert.match(pulso, /Never create an integration-only or validation-only follow-up task/);
-  assert.match(pulso, /Record commit and push in that task's `integration` section/);
+  assert.match(pulso, /Never create, inspect, or patch task files manually/);
+  assert.match(pulso, /The plugin records metrics and starts eligible asynchronous curation/);
 });
 
 test("preserves Pulso identity and creator attribution", () => {
@@ -33,8 +33,8 @@ test("preserves Pulso identity and creator attribution", () => {
 });
 
 test("keeps validation and integration in the existing task lifecycle", () => {
-  assert.match(agent("pulso-planner"), /Never create a task solely for validation, audit, repair, commit, push, or integration/);
-  assert.match(agent("pulso-executor"), /Record commit evidence in `integration` and transition `implemented\|verified -> integrated`/);
+  assert.match(agent("pulso-planner"), /Never propose a task solely for validation, audit, repair, commit, push, or integration/);
+  assert.match(agent("pulso-executor"), /Report commit evidence in the result; the plugin records integration state/);
 });
 
 test("limits open task delegation to Pulso agents and approved contacts", () => {
@@ -59,12 +59,29 @@ test("limits open task delegation to Pulso agents and approved contacts", () => 
   assert.equal(commandBody, "Inicia la gestión interactiva de contactos de agentes de Pulso.");
 });
 
+test("isolates interactive model configuration from the primary prompt", () => {
+  const pulso = agent("pulso");
+  const manager = agent("pulso-config-manager");
+  assert.match(pulso, /delega esa configuración a `pulso-config-manager`/);
+  assert.doesNotMatch(pulso, /Rápida|Personalizada|Rendimiento|reasoning_model/);
+  assert.match(manager, /pulso_models: allow/);
+  assert.match(manager, /Rápida o Personalizada/);
+  assert.match(manager, /Recomendada/);
+  assert.match(manager, /Rendimiento/);
+  assert.match(manager, /Heredada/);
+  assert.match(manager, /global o solo para el proyecto actual/);
+  assert.match(manager, /recomienda `github-copilot` solo si existe/);
+  const command = fs.readFileSync(path.resolve(agentsDirectory, "..", "commands", "pulso-configure.md"), "utf8");
+  assert.match(command, /agent: pulso-config-manager/);
+  assert.match(command, /subtask: true/);
+});
+
 test("defines mutation paths inside the nested task scope", () => {
   const pulso = agent("pulso");
   const protocol = fs.readFileSync(path.resolve(agentsDirectory, "..", "skills", "pulso-protocol", "SKILL.md"), "utf8");
   assert.match(pulso, /nested `scope` object containing `allowed_paths` and `excluded_paths`/);
-  assert.match(protocol, /`scope: \{ allowed_paths: \[\.\.\.\], excluded_paths: \[\.\.\.\] \}`/);
-  assert.match(protocol, /never write them at the task root/);
+  assert.match(protocol, /Required task contracts retain .* nested scope/);
+  assert.match(protocol, /Agents never read or write these files during routine delivery/);
 });
 
 test("uses Explorer only for iterative discovery and keeps it read-only", () => {
@@ -77,8 +94,10 @@ test("uses Explorer only for iterative discovery and keeps it read-only", () => 
   assert.match(explorer, /pulso_lease: deny/);
 });
 
-test("reserves task lease ownership for Executor", () => {
-  assert.match(agent("pulso-executor"), /pulso_lease: allow/);
+test("keeps lease ownership internal to the control plugin", () => {
+  assert.match(agent("pulso"), /pulso_lease: deny/);
+  assert.match(agent("pulso-executor"), /pulso_lease: deny/);
+  assert.match(agent("pulso-executor"), /plugin performs those operations around the session and every tool call/);
   for (const name of [
     "pulso-planner",
     "pulso-challenger",
@@ -97,9 +116,11 @@ test("reserves task lease ownership for Executor", () => {
 test("reserves human-confirmed memory mutation for Pulso", () => {
   assert.match(agent("pulso"), /pulso_memory_review: ask/);
   assert.match(agent("pulso"), /pulso_dashboard: allow/);
-  assert.match(agent("pulso"), /pulso_experience_resume: allow/);
-  assert.match(agent("pulso"), /pulso_experience_curate: allow/);
-  assert.match(agent("pulso"), /pulso_experience_start: allow/);
+  assert.match(agent("pulso"), /pulso_delivery: allow/);
+  assert.match(agent("pulso"), /pulso_status: allow/);
+  assert.match(agent("pulso"), /pulso_experience_resume: deny/);
+  assert.match(agent("pulso"), /pulso_experience_curate: deny/);
+  assert.match(agent("pulso"), /pulso_experience_start: deny/);
   assert.match(agent("pulso"), /pulso_experience_repair: allow/);
   for (const name of fs.readdirSync(agentsDirectory).filter((name) => name.endsWith(".md") && name !== "pulso.md")) {
     const contents = fs.readFileSync(path.join(agentsDirectory, name), "utf8");
@@ -107,6 +128,8 @@ test("reserves human-confirmed memory mutation for Pulso", () => {
     assert.match(contents, /pulso_dashboard: deny/, name);
     assert.match(contents, name === "pulso-contact-manager.md" ? /pulso_agent_contacts: allow/ : /pulso_agent_contacts: deny/, name);
     assert.match(contents, /pulso_identity: deny/, name);
+    assert.match(contents, /pulso_delivery: deny/, name);
+    assert.match(contents, /pulso_status: deny/, name);
     assert.match(contents, /pulso_experience_resume: deny/, name);
     assert.match(contents, /pulso_experience_curate: deny/, name);
     assert.match(contents, /pulso_experience_start: deny/, name);
@@ -153,11 +176,26 @@ test("loads one-time project configuration without treating preferences as a das
   assert.match(pulso, /Solo locales \(Recomendado\)/);
   assert.match(pulso, /Versionados en Git/);
   assert.match(pulso, /persist it with `pulso_artifacts`/);
-  assert.match(pulso, /include the compact digest plus the applicable `PULSO\.md` project rules/);
+  assert.match(pulso, /Skill constraints, relevant memories, and approved preferences are projected internally/);
   assert.match(pulso, /Mentions of metrics, memories, preferences, configuration, or `PULSO\.md` are not dashboard requests/);
-  assert.match(pulso, /"PULSO\.md": allow/);
+  assert.match(pulso, /Treat `\.pulso\/` as plugin-owned internal state/);
+  assert.match(pulso, /edit:\n\s+"\*": deny/);
   assert.match(pulso, /question: allow/);
   assert.match(pulso, /pulso_artifacts: allow/);
+});
+
+test("keeps protocol loading and worker contracts out of routine user-visible coordination", () => {
+  const pulso = agent("pulso");
+  const executor = agent("pulso-executor");
+  assert.match(pulso, /Do not load `pulso-protocol` for questions, status requests/);
+  assert.match(pulso, /Never put scope, criteria, validation plans, skills, project rules, routing, leases, or task JSON in a `task` prompt/);
+  assert.match(executor, /internal task contract appended by the control plugin/);
+});
+
+test("reconciles a user-confirmed historical delivery without requesting internal identifiers", () => {
+  const pulso = agent("pulso");
+  assert.match(pulso, /pulso_delivery\(action="reconcile", confirmed=true\)/);
+  assert.match(pulso, /Never request task or objective IDs from the user/);
 });
 
 test("allows Pulso to use MCP tools only for necessary evidence", () => {

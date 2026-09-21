@@ -9,6 +9,8 @@ permission:
   question: allow
   pulso_agent_contacts: allow
   pulso_lease: deny
+  pulso_delivery: deny
+  pulso_status: deny
   pulso_memory_review: deny
   pulso_memory_list: deny
   pulso_memory_recall: deny

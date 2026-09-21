@@ -4,6 +4,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { z } from "zod";
 import core from "../lib/pulso-experience-core.js";
+import control from "../lib/pulso-control-core.js";
+import stateFiles from "../lib/pulso-file-state.js";
+import contracts from "../lib/pulso-contract-core.js";
 
 const CURATOR = "pulso-experience-curator";
 const REPORTER = "pulso-delivery-reporter";
@@ -105,6 +108,10 @@ function createObjectiveTables(db) {
   CREATE TABLE IF NOT EXISTS agent_runs (
     id INTEGER PRIMARY KEY, objective_key TEXT NOT NULL, objective_id TEXT NOT NULL, agent TEXT NOT NULL, session_id TEXT NOT NULL UNIQUE,
     tokens INTEGER NOT NULL DEFAULT 0, started_at TEXT NOT NULL, finished_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS active_deliveries (
+    session_id TEXT PRIMARY KEY, objective_key TEXT NOT NULL, objective_id TEXT NOT NULL, task_id TEXT NOT NULL,
+    project_key TEXT NOT NULL, started_at TEXT NOT NULL
   );`);
 }
 
@@ -140,8 +147,30 @@ function migrateSchema(db) {
   if (!objectiveColumns.includes("verification_gaps")) db.exec("ALTER TABLE objectives ADD COLUMN verification_gaps TEXT NOT NULL DEFAULT '[]'");
   if (!objectiveColumns.includes("curation_status")) db.exec("ALTER TABLE objectives ADD COLUMN curation_status TEXT NOT NULL DEFAULT 'not_requested'");
   if (!objectiveColumns.includes("curation_result")) db.exec("ALTER TABLE objectives ADD COLUMN curation_result TEXT");
-  db.exec(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-  INSERT INTO schema_meta (key, value) VALUES ('schema_version', '3') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  const agentRunsSQL = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_runs'").get()?.sql || "";
+  if (/session_id\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(agentRunsSQL)) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(`ALTER TABLE agent_runs RENAME TO agent_runs_single_session;
+        CREATE TABLE agent_runs (
+          id INTEGER PRIMARY KEY, objective_key TEXT NOT NULL, objective_id TEXT NOT NULL, agent TEXT NOT NULL, session_id TEXT NOT NULL,
+          tokens INTEGER NOT NULL DEFAULT 0, started_at TEXT NOT NULL, finished_at TEXT
+        );
+        INSERT INTO agent_runs SELECT * FROM agent_runs_single_session;
+        DROP TABLE agent_runs_single_session;
+        CREATE INDEX IF NOT EXISTS agent_runs_active_session ON agent_runs(session_id, finished_at);`);
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS active_deliveries (
+    session_id TEXT PRIMARY KEY, objective_key TEXT NOT NULL, objective_id TEXT NOT NULL, task_id TEXT NOT NULL,
+    project_key TEXT NOT NULL, started_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  INSERT INTO schema_meta (key, value) VALUES ('schema_version', '4') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   CREATE TABLE IF NOT EXISTS memories (
     id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL UNIQUE, scope TEXT NOT NULL CHECK(scope IN ('project', 'global')),
     project_key TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('active', 'superseded', 'retired')),
@@ -176,6 +205,146 @@ function nextObjectiveID(db, projectKey) {
     return match ? Math.max(maximum, Number(match[1])) : maximum;
   }, 0) + 1;
   return `PULSO-OBJ-${String(next).padStart(3, "0")}`;
+}
+
+function nextTaskID(directory) {
+  const tasksDirectory = stateFiles.safeDirectory(directory, [".pulso", "tasks"]);
+  const next = fs.readdirSync(tasksDirectory).reduce((maximum, name) => {
+    const match = name.match(/^PULSO-(\d+)\.json$/);
+    return match ? Math.max(maximum, Number(match[1])) : maximum;
+  }, 0) + 1;
+  return `PULSO-${String(next).padStart(3, "0")}`;
+}
+
+function withProjectStateLock(directory, callback) {
+  const file = path.join(stateFiles.safeDirectory(directory, [".pulso"]), "delivery-sequence.json");
+  return stateFiles.withFileLock(file, callback);
+}
+
+function readJSON(file, fallback = null) {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function projectDelivery(directory, objectiveID, taskID, title, status) {
+  const file = path.join(stateFiles.safeDirectory(directory, [".pulso"]), "state.json");
+  stateFiles.withFileLock(file, () => {
+    const current = readJSON(file, { schema_version: 1, revision: 0, decisions: [], blockers: [] });
+    stateFiles.writeAtomic(file, {
+      ...current,
+      schema_version: 1,
+      revision: Math.max(0, Number(current.revision) || 0) + 1,
+      objective_id: objectiveID,
+      objective: title,
+      active_task_id: taskID,
+      status,
+      updated_at: new Date().toISOString(),
+    });
+  });
+}
+
+function projectTask(directory, args, objectiveID, route) {
+  const taskID = args.task_id || nextTaskID(directory);
+  const file = path.join(stateFiles.safeDirectory(directory, [".pulso", "tasks"]), `${taskID}.json`);
+  stateFiles.withFileLock(file, () => {
+    const current = readJSON(file, {});
+    stateFiles.writeAtomic(file, {
+      ...current,
+      schema_version: 1,
+      revision: Math.max(0, Number(current.revision) || 0) + 1,
+      id: taskID,
+      objective_id: objectiveID,
+      title: args.title,
+      objective: args.title,
+      status: "ready",
+      dependencies: current.dependencies || [],
+      scope: {
+        allowed_paths: args.allowed_paths || current.scope?.allowed_paths || [],
+        excluded_paths: args.excluded_paths || current.scope?.excluded_paths || [],
+      },
+      acceptance_criteria: args.acceptance_criteria || current.acceptance_criteria || [],
+      validation: args.validation || current.validation || [],
+      audits: current.audits || [],
+      skills: args.skills || current.skills || [],
+      skill_constraints: control.skillDigest(args.skills || current.skills || []),
+      experience: args.experience || current.experience || { memories: [], preferences: [] },
+      project_rules: args.project_rules ?? current.project_rules ?? contracts.projectRules(directory),
+      plan: { ...(current.plan || {}), route: route.route, specialists: route.specialists, reasons: route.reasons },
+      execution: current.execution || {},
+      integration: current.integration || {},
+      updated_at: new Date().toISOString(),
+    });
+  });
+  return taskID;
+}
+
+function activeDelivery(db, directory, sessionID) {
+  return db.prepare("SELECT objective_key, objective_id, task_id FROM active_deliveries WHERE session_id = ? AND project_key = ?")
+    .get(sessionID, core.projectKey(directory));
+}
+
+function taskForObjective(directory, objectiveID) {
+  const tasksDirectory = stateFiles.safeDirectory(directory, [".pulso", "tasks"]);
+  for (const name of fs.readdirSync(tasksDirectory)) {
+    if (!/^PULSO-\d+\.json$/.test(name)) continue;
+    const task = readJSON(path.join(tasksDirectory, name), null);
+    if (task?.objective_id === objectiveID) return task;
+  }
+  return null;
+}
+
+function deliveryExperience(directory, query) {
+  const db = database();
+  const projectKey = core.projectKey(directory);
+  const terms = String(query || "").replace(/[^\p{L}\p{N}_-]+/gu, " ").trim();
+  let memories = [];
+  if (terms) {
+    const rows = db.prepare(`SELECT m.* FROM memories_fts f JOIN memories m ON m.id = f.id
+      WHERE memories_fts MATCH ? AND m.status = 'active' AND (m.project_key = ? OR m.scope = 'global')
+      ORDER BY CASE WHEN m.project_key = ? THEN 0 ELSE 1 END, bm25(memories_fts) LIMIT 12`).all(terms, projectKey, projectKey);
+    memories = core.conciseResults(rows);
+  }
+  const preferences = db.prepare("SELECT id, proposed_rule, evidence FROM profile_candidates WHERE status = 'approved' ORDER BY created_at DESC LIMIT 5").all();
+  db.close();
+  return { memories, preferences };
+}
+
+function closeProjectedTask(directory, taskID, status, summary, evidence, verificationGaps) {
+  const file = path.join(stateFiles.safeDirectory(directory, [".pulso", "tasks"]), `${taskID}.json`);
+  if (!fs.existsSync(file)) throw new Error(`Cannot close missing task ${taskID}.`);
+  stateFiles.withFileLock(file, () => {
+    const task = JSON.parse(fs.readFileSync(file, "utf8"));
+    const taskStatus = status === "partially_verified" ? "implemented" : status;
+    stateFiles.writeAtomic(file, {
+      ...task,
+      revision: Math.max(0, Number(task.revision) || 0) + 1,
+      status: taskStatus,
+      execution: {
+        ...(task.execution || {}),
+        summary,
+        results: evidence,
+        verification_gaps: verificationGaps,
+        updated_at: new Date().toISOString(),
+      },
+      updated_at: new Date().toISOString(),
+    });
+  });
+}
+
+function reopenProjectedTask(directory, taskID) {
+  const file = path.join(stateFiles.safeDirectory(directory, [".pulso", "tasks"]), `${taskID}.json`);
+  stateFiles.withFileLock(file, () => {
+    const task = JSON.parse(fs.readFileSync(file, "utf8"));
+    stateFiles.writeAtomic(file, {
+      ...task,
+      revision: Math.max(0, Number(task.revision) || 0) + 1,
+      status: "ready",
+      updated_at: new Date().toISOString(),
+    });
+  });
 }
 
 function migrateSessionObjectiveIDs(db, directory) {
@@ -579,6 +748,179 @@ export async function PulsoExperienceEnginePlugin(input) {
       tracked.close();
     },
     tool: {
+      pulso_delivery: tool({
+        description: "Begin or close a substantive Pulso delivery while keeping coordination artifacts internal.",
+        args: {
+          action: z.enum(["begin", "resume", "close", "reconcile"]),
+          title: z.string().min(3).optional(),
+          objective_id: z.string().regex(/^PULSO-OBJ-\d+$/).optional(),
+          task_id: z.string().regex(/^PULSO-\d+$/).optional(),
+          allowed_paths: z.array(z.string().min(1)).optional(),
+          excluded_paths: z.array(z.string().min(1)).optional(),
+          acceptance_criteria: z.array(z.string().min(3)).optional(),
+          validation: z.array(z.string().min(3)).optional(),
+          skills: z.array(z.string().min(1)).optional(),
+          signals: z.array(z.enum(["ambiguous", "dependencies", "cross_layer", "new_dependency", "authentication", "persistence", "public_contract", "sensitive_data", "remote_operation", "destructive", "validation_gap", "contradictory_evidence"])).optional(),
+          status: z.enum(["implemented", "partially_verified", "verified", "integrated", "blocked", "failed", "cancelled"]).optional(),
+          summary: z.string().min(10).optional(),
+          evidence: z.array(z.string().min(3)).max(5).optional(),
+          verification_gaps: z.array(z.string().min(3)).max(3).optional(),
+          human_interventions: z.number().int().min(0).optional(),
+          confirmed: z.boolean().optional(),
+        },
+        execute: async (args, context) => {
+          if (!context.sessionID) throw new Error("Pulso delivery requires the current session.");
+          if (args.action === "reconcile") {
+            if (!args.confirmed) throw new Error("reconcile requires explicit user confirmation.");
+            if (!args.status || !args.summary || (args.evidence || []).length === 0) throw new Error("reconcile requires status, summary, and evidence.");
+            const db = database();
+            const projectKey = core.projectKey(context.directory);
+            const active = db.prepare(`SELECT o.objective_key, o.id, o.title FROM objectives o
+              WHERE o.project_key = ? AND o.status = 'active'
+                AND NOT EXISTS (SELECT 1 FROM active_deliveries d WHERE d.objective_key = o.objective_key)
+              ORDER BY o.started_at DESC`).all(projectKey);
+            if (active.length === 0) {
+              db.close();
+              throw new Error("No historical active delivery exists to reconcile.");
+            }
+            const evidence = args.evidence || [];
+            const gaps = args.verification_gaps || [];
+            if (args.status === "partially_verified" && gaps.length === 0) {
+              db.close();
+              throw new Error("partially_verified requires verification_gaps.");
+            }
+            for (const target of active) {
+              const task = taskForObjective(context.directory, target.id);
+              if (task) {
+                closeProjectedTask(context.directory, task.id, args.status, args.summary, evidence, gaps);
+                projectDelivery(context.directory, target.id, task.id, target.title, args.status);
+              }
+              db.prepare("UPDATE objectives SET status = ?, finished_at = ?, summary = ?, evidence = ?, verification_gaps = ? WHERE objective_key = ?")
+                .run(args.status, new Date().toISOString(), args.summary, JSON.stringify(evidence), JSON.stringify(gaps), target.objective_key);
+              db.prepare("UPDATE agent_runs SET finished_at = COALESCE(finished_at, ?) WHERE objective_key = ?")
+                .run(new Date().toISOString(), target.objective_key);
+            }
+            db.close();
+            return active.length === 1 ? "Estado histórico reconciliado." : `${active.length} estados históricos reconciliados.`;
+          }
+          if (args.action === "resume") {
+            if (!args.task_id) throw new Error("resume requires task_id.");
+            const taskFile = path.join(stateFiles.safeDirectory(context.directory, [".pulso", "tasks"]), `${args.task_id}.json`);
+            const task = readJSON(taskFile, null);
+            if (!task?.objective_id) throw new Error(`Cannot resume missing task ${args.task_id}.`);
+            const existing = database();
+            if (activeDelivery(existing, context.directory, context.sessionID)) {
+              existing.close();
+              throw new Error("Session already has an active delivery.");
+            }
+            existing.close();
+            await hooks.tool.pulso_experience_start.execute({
+              action: "resume", title: task.title || task.objective || "Pulso delivery", objective_id: task.objective_id,
+              reason: "Resume the same deliverable for correction, validation, or authorized integration.",
+            }, context);
+            withProjectStateLock(context.directory, () => {
+              reopenProjectedTask(context.directory, args.task_id);
+              projectDelivery(context.directory, task.objective_id, args.task_id, task.title || task.objective, "active");
+            });
+            const tracked = database();
+            tracked.prepare("INSERT INTO active_deliveries (session_id, objective_key, objective_id, task_id, project_key, started_at) VALUES (?, ?, ?, ?, ?, ?)")
+              .run(context.sessionID, core.objectiveKey(context.directory, task.objective_id), task.objective_id, args.task_id, core.projectKey(context.directory), new Date().toISOString());
+            tracked.close();
+            return `Entrega reanudada: ${args.task_id}.`;
+          }
+
+          if (args.action === "begin") {
+            if (!args.title) throw new Error("begin requires title.");
+            const existing = database();
+            const active = activeDelivery(existing, context.directory, context.sessionID);
+            if (active) {
+              existing.close();
+              throw new Error(`Session already has active delivery ${active.objective_id}. Close or resume it before beginning another.`);
+            }
+            let run = existing.prepare("SELECT objective_id FROM agent_runs WHERE session_id = ? AND finished_at IS NULL ORDER BY id DESC LIMIT 1").get(context.sessionID);
+            existing.close();
+            if (!run) {
+              await hooks.tool.pulso_experience_start.execute({
+                action: args.objective_id ? "resume" : "new",
+                title: args.title,
+                objective_id: args.objective_id,
+                reason: args.objective_id ? "Continue the existing substantive delivery." : "Begin a new substantive delivery after explicit intent classification.",
+              }, context);
+              const started = database();
+              run = started.prepare("SELECT objective_id FROM agent_runs WHERE session_id = ? AND finished_at IS NULL ORDER BY id DESC LIMIT 1").get(context.sessionID);
+              started.close();
+            } else {
+              const resumed = database();
+              resumed.prepare("UPDATE objectives SET status = 'active', finished_at = NULL WHERE objective_key = ?")
+                .run(core.objectiveKey(context.directory, run.objective_id));
+              resumed.close();
+            }
+            if (!run?.objective_id) throw new Error("Pulso could not establish a delivery objective.");
+            const route = control.classifyRoute({
+              objective: args.title,
+              paths: args.allowed_paths || [],
+              changed_files: args.allowed_paths?.length || 0,
+              signals: args.signals || [],
+            });
+            const taskID = withProjectStateLock(context.directory, () => {
+              const id = projectTask(context.directory, { ...args, experience: deliveryExperience(context.directory, args.title) }, run.objective_id, route);
+              projectDelivery(context.directory, run.objective_id, id, args.title, "active");
+              return id;
+            });
+            const tracked = database();
+            tracked.prepare("INSERT INTO active_deliveries (session_id, objective_key, objective_id, task_id, project_key, started_at) VALUES (?, ?, ?, ?, ?, ?)")
+              .run(context.sessionID, core.objectiveKey(context.directory, run.objective_id), run.objective_id, taskID, core.projectKey(context.directory), new Date().toISOString());
+            tracked.close();
+            return `Entrega preparada: ${taskID} (${route.route}).`;
+          }
+
+          if (!args.status || !args.summary) throw new Error("close requires status and summary.");
+          const tracked = database();
+          const active = activeDelivery(tracked, context.directory, context.sessionID);
+          tracked.close();
+          if (!active) throw new Error("No active Pulso delivery exists for this session.");
+          const taskID = args.task_id || active.task_id;
+          const objectiveID = args.objective_id || active.objective_id;
+          if (taskID !== active.task_id || objectiveID !== active.objective_id) throw new Error("Delivery close must target the session's active task and objective.");
+          if (!taskID || !objectiveID) throw new Error("No active Pulso delivery exists for this project.");
+          const evidence = args.evidence || [];
+          const gaps = args.verification_gaps || [];
+          if (evidence.length === 0) throw new Error("close requires at least one evidence entry.");
+          if (args.status === "partially_verified" && gaps.length === 0) throw new Error("partially_verified requires verification_gaps.");
+          const task = readJSON(path.join(context.directory, ".pulso", "tasks", `${taskID}.json`), {});
+          const title = task.title || task.objective || args.summary;
+          closeProjectedTask(context.directory, taskID, args.status, args.summary, evidence, gaps);
+          projectDelivery(context.directory, objectiveID, taskID, title, args.status);
+          await hooks.tool.pulso_experience_finalize.execute({
+            objective_id: objectiveID,
+            title,
+            status: args.status,
+            summary: args.summary,
+            evidence,
+            verification_gaps: gaps,
+            human_interventions: args.human_interventions || 0,
+          }, context);
+          const finalized = database();
+          finalized.prepare("UPDATE agent_runs SET finished_at = ? WHERE session_id = ? AND objective_key = ? AND finished_at IS NULL")
+            .run(new Date().toISOString(), context.sessionID, active.objective_key);
+          finalized.prepare("DELETE FROM active_deliveries WHERE session_id = ? AND project_key = ?").run(context.sessionID, core.projectKey(context.directory));
+          finalized.close();
+          return `Entrega cerrada: ${args.status}.`;
+        },
+      }),
+      pulso_status: tool({
+        description: "Summarize the latest Pulso delivery for the current project without exposing coordination records.",
+        args: {},
+        execute: async (_, context) => {
+          const db = database();
+          const row = db.prepare(`SELECT title, status, summary, finished_at FROM objectives
+            WHERE project_key = ? ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, COALESCE(finished_at, started_at) DESC LIMIT 1`).get(core.projectKey(context.directory));
+          db.close();
+          if (!row) return "No hay entregas de Pulso registradas para este proyecto.";
+          const when = row.finished_at ? ` Finalizó: ${row.finished_at}.` : " Sigue activa.";
+          return `${row.title}: ${row.status}.${row.summary ? ` ${row.summary}` : ""}${when}`;
+        },
+      }),
       pulso_experience_start: tool({
         description: "Persist a Pulso objective only after explicitly deciding whether the current work is new or resumes an incomplete objective.",
         args: {
@@ -591,7 +933,7 @@ export async function PulsoExperienceEnginePlugin(input) {
           if (!context.sessionID) throw new Error("Objective evaluation requires the current Pulso session.");
           const db = database();
           const key = core.projectKey(context.directory);
-          const current = db.prepare("SELECT objective_id FROM agent_runs WHERE session_id = ?").get(context.sessionID);
+          const current = db.prepare("SELECT objective_id FROM agent_runs WHERE session_id = ? AND finished_at IS NULL ORDER BY id DESC LIMIT 1").get(context.sessionID);
           if (current) {
             db.close();
             return `Current session already belongs to ${current.objective_id}; no objective created.`;

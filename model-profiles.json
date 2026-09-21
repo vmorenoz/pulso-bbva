@@ -4,6 +4,7 @@
     "pulso-planner": "standard",
     "pulso-challenger": "standard",
     "pulso-contact-manager": "standard",
+    "pulso-config-manager": "standard",
     "pulso-executor": "standard",
     "pulso-explorer": "light",
     "pulso-verifier": "standard",

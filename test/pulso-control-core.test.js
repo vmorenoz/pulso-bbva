@@ -15,8 +15,10 @@ test("routes authentication work through sensitive specialists", () => {
   assert.deepEqual(result.specialists, ["pulso-executor", "pulso-security-auditor"]);
 });
 
-test("routes cross-layer work through planning", () => {
-  assert.equal(core.classifyRoute({ objective: "Connect form to service", signals: ["cross_layer"] }).route, "planned");
+test("routes clear cross-layer work through execution and verification", () => {
+  const route = core.classifyRoute({ objective: "Connect form to mapper", signals: ["cross_layer"] });
+  assert.equal(route.route, "normal");
+  assert.deepEqual(route.specialists, ["pulso-executor", "pulso-verifier"]);
 });
 
 test("does not mistake repository maintenance for persistence", () => {

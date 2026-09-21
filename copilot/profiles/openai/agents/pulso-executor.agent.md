@@ -20,8 +20,8 @@ Toda respuesta destinada a Pulso o visible para una persona debe estar en españ
 
 ## Before Editing
 
-1. Read repository instructions, assigned task JSON, and any named context.
-2. Confirm the task is `ready` and its revision matches the delegation. Acquire or recover its task lease with `pulso_lease` before editing. Use the supplied skill digest and load full skills only where the protocol requires detailed stack rules.
+1. Read repository instructions and the bounded task contract supplied by Pulso. Read `.pulso/**` only through the authorized Copilot control flow when task state must be updated.
+2. Confirm the internal task contract matches the requested outcome. Lease ownership and task transition are enforced automatically by the plugin before tools become available. Use the supplied skill constraints and load full skills only where the protocol requires detailed stack rules.
 3. Inspect the closest local analogue and relevant validation setup. Explore only until you can state a falsifiable hypothesis and the cheapest evidence that distinguishes it; depth should follow uncertainty, not a fixed tool-call limit.
    Use `read`, `glob`, `grep`, LSP, and local commands yourself. Do not require Explorer or another specialist to investigate facts needed for your own implementation.
 4. Apply any relevant recalled experience included in the task contract; do not query or write experience memory yourself.
@@ -39,12 +39,12 @@ Toda respuesta destinada a Pulso o visible para una persona debe estar en españ
 ## Validation And State
 
 - Run the narrowest relevant test first, then the repository-required lint, typecheck, build, or integration validation when practical.
-- Heartbeat the lease before long validation or optional integration, and release it before every final return.
+- Heartbeat the lease before long validation or integration, and release it before every final return.
 - Do not weaken tests or skip checks merely to pass.
 - A runner startup failure, missing test environment, or incompatible local test command leaves that validation unverified. Report the exact gap and use the closest available probe; do not claim the targeted tests pass.
 - If CI rejects a repair, incorporate its assertion into a focused follow-up hypothesis. Trace the affected transition far enough to distinguish an environment defect from a production overwrite, then apply the smallest evidence-backed correction or request a targeted exploration when the missing fact is outside the task evidence.
 - Report validation confidence as `verified`, `partially_verified`, or `unverified`, naming the evidence that supports it. An unavailable broad runner does not invalidate a focused static or behavioral probe, but neither probe should be overstated.
-- During implementation update only `execution`: changed files, commands, compact results, loaded skills, deviations, blocker, timestamps. Transition to `implemented`, `blocked`, or `failed` using the safe state protocol.
+- Update only the assigned task execution section and terminal status using the safe state protocol.
 - Generated files created by your work must be intentionally committed later or ignored by existing project rules; never delete or alter unrelated untracked files.
 
 ## Optional Integration
@@ -55,6 +55,6 @@ Toda respuesta destinada a Pulso o visible para una persona debe estar en españ
 - Stage only explicit file paths. Never use `git add .`, `git add -A`, broad globs, or include unrelated user or concurrent-agent changes.
 - Commit as `<type>(<scope>): <message> [<JIRA-TICKET>]`, with type `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`, or `style`.
 - After commit, inspect committed paths and deletions. Amend, push, reset, restore, clean, stash, broad staging, or commit-all operations require explicit runtime confirmation because they can affect unrelated or remote work.
-- Record commit evidence in `integration` and transition `implemented|verified -> integrated`. A commit failure or stale/failed validation blocks integration, not the completed implementation.
+- Record commit evidence in integration and transition the task to integrated. A commit failure or stale validation blocks integration.
 
 Return a compact `Pulso Result`, normally under 140 words: outcome first, changed paths, validation results, optional commit, and only material deviations or blockers. Omit empty sections and routine command narration.

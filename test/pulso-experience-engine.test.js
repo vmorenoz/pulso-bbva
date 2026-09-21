@@ -14,6 +14,7 @@ test("keeps experience storage dormant until Pulso is activated", async () => {
   process.env.XDG_DATA_HOME = path.join(root, "data");
   const directory = path.join(root, "project");
   fs.mkdirSync(directory);
+  fs.writeFileSync(path.join(directory, "PULSO.md"), "---\nartifacts: untracked\n---\n\n## Project Rules\n- Keep the module tests focused.\n");
   try {
     const { PulsoExperienceEnginePlugin } = await import("../plugins/pulso-experience-engine.mjs");
     const plugin = await PulsoExperienceEnginePlugin({ directory, client: {} });
@@ -194,6 +195,7 @@ test("does not persist objectives before an explicit new or resume decision", as
   process.env.XDG_DATA_HOME = path.join(root, "data");
   const directory = path.join(root, "project");
   fs.mkdirSync(directory);
+  fs.writeFileSync(path.join(directory, "PULSO.md"), "---\nartifacts: untracked\n---\n\n## Project Rules\n- Keep the module tests focused.\n");
   try {
     const { PulsoExperienceEnginePlugin } = await import("../plugins/pulso-experience-engine.mjs");
     const plugin = await PulsoExperienceEnginePlugin({ directory, client: { session: { get: async () => ({ data: {} }) } } });
@@ -205,6 +207,155 @@ test("does not persist objectives before an explicit new or resume decision", as
     metrics = JSON.parse(await plugin.tool.pulso_metrics.execute({}, { directory }));
     assert.equal(metrics.objectives.length, 1);
     assert.equal(metrics.objectives[0].title, "Actual objective");
+  } finally {
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("projects a compact delivery internally and closes it without manual artifact patches", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-compact-delivery-"));
+  const previousDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(root, "data");
+  const directory = path.join(root, "project");
+  fs.mkdirSync(directory);
+  fs.writeFileSync(path.join(directory, "PULSO.md"), "---\nartifacts: untracked\n---\n\n## Project Rules\n- Keep the module tests focused.\n");
+  try {
+    const { PulsoExperienceEnginePlugin } = await import("../plugins/pulso-experience-engine.mjs");
+    const plugin = await PulsoExperienceEnginePlugin({ directory, client: {} });
+    await plugin["chat.message"]({ agent: "pulso", sessionID: "primary" }, { parts: [{ text: "Please explain this module" }] });
+    let metrics = JSON.parse(await plugin.tool.pulso_metrics.execute({}, { directory }));
+    assert.equal(metrics.objectives.length, 0);
+
+    const begin = await plugin.tool.pulso_delivery.execute({
+      action: "begin",
+      title: "Update module behavior",
+      allowed_paths: ["src/module.js", "test/module.test.js"],
+      excluded_paths: ["package.json"],
+      acceptance_criteria: ["The new behavior is observable."],
+      validation: ["npm test -- module"],
+      skills: ["bbva-engineering"],
+    }, { directory, sessionID: "primary", agent: "pulso" });
+    assert.match(begin, /Entrega preparada: PULSO-001 \(fast\)/);
+    const task = JSON.parse(fs.readFileSync(path.join(directory, ".pulso", "tasks", "PULSO-001.json"), "utf8"));
+    assert.equal(task.status, "ready");
+    assert.deepEqual(task.scope.allowed_paths, ["src/module.js", "test/module.test.js"]);
+    assert.equal(task.skill_constraints[0].name, "bbva-engineering");
+    assert.equal(task.project_rules, "- Keep the module tests focused.");
+
+    const close = await plugin.tool.pulso_delivery.execute({
+      action: "close",
+      status: "implemented",
+      summary: "The module behavior was updated with focused validation.",
+      evidence: ["Focused syntax validation passed."],
+    }, { directory, sessionID: "primary", agent: "pulso" });
+    assert.equal(close, "Entrega cerrada: implemented.");
+    metrics = JSON.parse(await plugin.tool.pulso_metrics.execute({}, { directory }));
+    assert.equal(metrics.objectives[0].status, "implemented");
+    assert.equal(JSON.parse(fs.readFileSync(path.join(directory, ".pulso", "state.json"), "utf8")).status, "implemented");
+    const status = await plugin.tool.pulso_status.execute({}, { directory, sessionID: "primary", agent: "pulso" });
+    assert.match(status, /^Update module behavior: implemented\./);
+    assert.doesNotMatch(status, /objective_key|project_key|\{"/);
+  } finally {
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps delivery ownership with its session and permits a later delivery", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-session-delivery-"));
+  const previousDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(root, "data");
+  const directory = path.join(root, "project");
+  fs.mkdirSync(directory);
+  try {
+    const { PulsoExperienceEnginePlugin } = await import("../plugins/pulso-experience-engine.mjs");
+    const plugin = await PulsoExperienceEnginePlugin({ directory, client: {} });
+    const first = { directory, sessionID: "first", agent: "pulso" };
+    const second = { directory, sessionID: "second", agent: "pulso" };
+    await plugin.tool.pulso_delivery.execute({ action: "begin", title: "First delivery", allowed_paths: ["src/first.js"] }, first);
+    await plugin.tool.pulso_delivery.execute({ action: "begin", title: "Second delivery", allowed_paths: ["src/second.js"] }, second);
+    await plugin.tool.pulso_delivery.execute({ action: "close", status: "implemented", summary: "First delivery completed with focused evidence.", evidence: ["First evidence passed."] }, first);
+    await assert.rejects(() => plugin.tool.pulso_delivery.execute({ action: "close", status: "implemented", summary: "Second session cannot close again.", evidence: ["Invalid closure evidence."] }, first), /No active Pulso delivery exists for this session/);
+    await plugin.tool.pulso_delivery.execute({ action: "close", status: "implemented", summary: "Second delivery completed with focused evidence.", evidence: ["Second evidence passed."] }, second);
+    const next = await plugin.tool.pulso_delivery.execute({ action: "begin", title: "Third delivery", allowed_paths: ["src/third.js"] }, first);
+    assert.match(next, /PULSO-003/);
+  } finally {
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resumes a closed task for authorized integration in the same session", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-resume-delivery-"));
+  const previousDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(root, "data");
+  const directory = path.join(root, "project");
+  fs.mkdirSync(directory);
+  try {
+    const { PulsoExperienceEnginePlugin } = await import("../plugins/pulso-experience-engine.mjs");
+    const plugin = await PulsoExperienceEnginePlugin({ directory, client: {} });
+    const context = { directory, sessionID: "primary", agent: "pulso" };
+    await plugin.tool.pulso_delivery.execute({ action: "begin", title: "Integrable delivery", allowed_paths: ["src/app.js"] }, context);
+    await plugin.tool.pulso_delivery.execute({ action: "close", status: "partially_verified", summary: "Implementation is ready with one environment gap.", evidence: ["Focused static validation passed."], verification_gaps: ["Browser environment is unavailable."] }, context);
+    const resumed = await plugin.tool.pulso_delivery.execute({ action: "resume", task_id: "PULSO-001" }, context);
+    assert.equal(resumed, "Entrega reanudada: PULSO-001.");
+    const task = JSON.parse(fs.readFileSync(path.join(directory, ".pulso", "tasks", "PULSO-001.json"), "utf8"));
+    assert.equal(task.status, "ready");
+    await plugin.tool.pulso_delivery.execute({ action: "close", status: "integrated", summary: "Authorized integration completed successfully.", evidence: ["Commit and push completed."] }, context);
+  } finally {
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reconciles one user-confirmed historical active delivery without exposing task ids", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-reconcile-delivery-"));
+  const previousDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(root, "data");
+  const directory = path.join(root, "project");
+  fs.mkdirSync(directory);
+  try {
+    const { PulsoExperienceEnginePlugin } = await import("../plugins/pulso-experience-engine.mjs");
+    const plugin = await PulsoExperienceEnginePlugin({ directory, client: {} });
+    await plugin.tool.pulso_experience_start.execute({ action: "new", title: "Historical completed work", reason: "A prior session started this delivery." }, { directory, sessionID: "historical", agent: "pulso" });
+    const result = await plugin.tool.pulso_delivery.execute({
+      action: "reconcile", confirmed: true, status: "verified",
+      summary: "The user confirmed this historical delivery was completed.", evidence: ["Explicit user confirmation of completion."],
+    }, { directory, sessionID: "current", agent: "pulso" });
+    assert.equal(result, "Estado histórico reconciliado.");
+    const status = await plugin.tool.pulso_status.execute({}, { directory, sessionID: "current", agent: "pulso" });
+    assert.match(status, /^Historical completed work: verified\./);
+  } finally {
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reconciles every confirmed historical delivery without using visible titles", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-reconcile-title-"));
+  const previousDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(root, "data");
+  const directory = path.join(root, "project");
+  fs.mkdirSync(directory);
+  try {
+    const { PulsoExperienceEnginePlugin } = await import("../plugins/pulso-experience-engine.mjs");
+    const plugin = await PulsoExperienceEnginePlugin({ directory, client: {} });
+    for (const sessionID of ["historical-one", "historical-two"]) {
+      await plugin.tool.pulso_experience_start.execute({ action: "new", title: "Stabilize TSEC precedence tests", reason: "A prior session started this delivery." }, { directory, sessionID, agent: "pulso" });
+    }
+    const result = await plugin.tool.pulso_delivery.execute({
+      action: "reconcile", confirmed: true, status: "verified",
+      summary: "The user confirmed the matching historical deliveries were completed.", evidence: ["Explicit user confirmation of completion."],
+    }, { directory, sessionID: "current", agent: "pulso" });
+    assert.equal(result, "2 estados históricos reconciliados.");
+    const metrics = JSON.parse(await plugin.tool.pulso_metrics.execute({}, { directory }));
+    assert.deepEqual(metrics.objectives.map((objective) => objective.status), ["verified", "verified"]);
   } finally {
     if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = previousDataHome;

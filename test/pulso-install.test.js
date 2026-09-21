@@ -50,12 +50,54 @@ test("failed OpenCode synchronization releases its configuration lock", () => {
     const conflict = path.join(configRoot, "agents", "pulso.md");
     fs.mkdirSync(path.dirname(conflict), { recursive: true });
     fs.writeFileSync(conflict, "customized\n");
-    const result = spawnSync(process.execPath, [install, "install", "--profile", "openai"], {
+    const result = spawnSync(process.execPath, [install, "install"], {
       cwd: root, env: { ...process.env, OPENCODE_CONFIG_DIR: configRoot }, encoding: "utf8",
     });
     assert.notEqual(result.status, 0);
     assert.equal(fs.existsSync(path.join(configRoot, "opencode.jsonc.lock")), false);
     assert.equal(fs.readFileSync(conflict, "utf8"), "customized\n");
+  } finally {
+    fs.rmSync(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("OpenCode install replaces prior managed files and removes retired managed artifacts", () => {
+  const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-sync-upgrade-"));
+  try {
+    const retired = path.join(configRoot, "agents", "pulso-code-auditor.md");
+    fs.mkdirSync(path.dirname(retired), { recursive: true });
+    fs.writeFileSync(retired, "retired managed agent\n");
+    const digest = require("node:crypto").createHash("sha256").update(fs.readFileSync(retired)).digest("hex");
+    fs.writeFileSync(path.join(configRoot, ".pulso-install.json"), JSON.stringify({
+      schema_version: 1, managed_by: "pulso", files: { "agents/pulso-code-auditor.md": digest },
+    }));
+    const result = spawnSync(process.execPath, [sync, "install"], {
+      cwd: root, env: { ...process.env, OPENCODE_CONFIG_DIR: configRoot }, encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(retired), false);
+    const state = JSON.parse(fs.readFileSync(path.join(configRoot, ".pulso-install.json"), "utf8"));
+    assert.equal(state.managed_by, "pulso");
+    assert.ok(state.files["agents/pulso.md"]);
+  } finally {
+    fs.rmSync(configRoot, { recursive: true, force: true });
+  }
+});
+
+test("OpenCode install preserves a modified retired managed artifact without force", () => {
+  const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-sync-retired-conflict-"));
+  try {
+    const retired = path.join(configRoot, "agents", "pulso-code-auditor.md");
+    fs.mkdirSync(path.dirname(retired), { recursive: true });
+    fs.writeFileSync(retired, "user customization\n");
+    fs.writeFileSync(path.join(configRoot, ".pulso-install.json"), JSON.stringify({
+      schema_version: 1, managed_by: "pulso", files: { "agents/pulso-code-auditor.md": "old-managed-digest" },
+    }));
+    const result = spawnSync(process.execPath, [sync, "install"], {
+      cwd: root, env: { ...process.env, OPENCODE_CONFIG_DIR: configRoot }, encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.equal(fs.readFileSync(retired, "utf8"), "user customization\n");
   } finally {
     fs.rmSync(configRoot, { recursive: true, force: true });
   }

@@ -10,12 +10,16 @@ const operation = process.argv[2];
 const binary = process.env.COPILOT_BINARY || "copilot";
 const force = process.argv.includes("--force");
 const profileIndex = process.argv.indexOf("--profile");
-const profileName = profileIndex >= 0 ? process.argv[profileIndex + 1] : "openai";
 const profiles = JSON.parse(fs.readFileSync(path.join(root, "model-profiles.json"), "utf8")).profiles;
 const copilotHome = path.resolve(process.env.COPILOT_HOME || path.join(os.homedir(), ".copilot"));
 const agentsDirectory = path.join(copilotHome, "agents");
 const profileFile = path.join(copilotHome, "pulso-profile.json");
 const mcpServer = path.join(root, "copilot", "dist", "pulso-mcp-server.mjs");
+let persistedProfile = null;
+try { persistedProfile = JSON.parse(fs.readFileSync(profileFile, "utf8")); } catch {}
+const profileName = profileIndex >= 0
+  ? process.argv[profileIndex + 1]
+  : (persistedProfile?.schema_version === 1 && Object.hasOwn(profiles, persistedProfile.profile) ? persistedProfile.profile : "openai");
 if (!["install", "uninstall"].includes(operation)) throw new Error("Usage: node scripts/install-copilot.mjs <install|uninstall>");
 if (operation === "install" && !profiles[profileName]) throw new Error(`Unknown model profile: ${profileName}.`);
 

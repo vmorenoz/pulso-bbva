@@ -7222,7 +7222,7 @@ var require_pulso_control_core = __commonJS({
       for (const signal of input2.signals || []) if (!reasons.includes(signal)) reasons.push(signal);
       const files = Number.isInteger(input2.changed_files) ? input2.changed_files : 0;
       const sensitive = reasons.some((reason) => ["authentication", "persistence", "public_contract", "sensitive_data", "remote_operation", "destructive"].includes(reason));
-      const needsPlan = reasons.some((reason) => ["ambiguous", "dependencies", "cross_layer", "new_dependency"].includes(reason));
+      const needsPlan = reasons.some((reason) => ["ambiguous", "dependencies", "new_dependency"].includes(reason));
       if (sensitive) {
         const planning = needsPlan ? ["pulso-planner"] : [];
         const auditors = [];
@@ -7232,7 +7232,7 @@ var require_pulso_control_core = __commonJS({
         return { route: "sensitive", specialists: [...planning, "pulso-executor", ...verification, ...auditors], reasons };
       }
       if (needsPlan) return { route: "planned", specialists: ["pulso-planner", "pulso-executor"], reasons };
-      if (reasons.some((reason) => ["validation_gap", "contradictory_evidence"].includes(reason))) {
+      if (reasons.some((reason) => ["cross_layer", "validation_gap", "contradictory_evidence"].includes(reason))) {
         return { route: "normal", specialists: ["pulso-executor", "pulso-verifier"], reasons };
       }
       return { route: "fast", specialists: ["pulso-executor"], reasons: files > 8 ? ["large_but_clear_change"] : ["bounded_change"] };
@@ -7407,6 +7407,46 @@ var require_pulso_experience_core = __commonJS({
       return results;
     }
     module.exports = { SENSITIVE, conciseResults, fingerprint, objectiveKey, projectKey, validMemory };
+  }
+});
+
+// lib/pulso-contract-core.js
+var require_pulso_contract_core = __commonJS({
+  "lib/pulso-contract-core.js"(exports, module) {
+    "use strict";
+    var fs3 = __require("fs");
+    var path3 = __require("path");
+    function projectRules(directory) {
+      const file3 = path3.join(directory, "PULSO.md");
+      try {
+        const text2 = fs3.readFileSync(file3, "utf8");
+        const heading = /^## Project Rules\s*$/m.exec(text2);
+        if (!heading) return "";
+        const body = text2.slice(heading.index + heading[0].length).replace(/^\r?\n/, "");
+        const nextHeading = /^##\s+/m.exec(body);
+        return (nextHeading ? body.slice(0, nextHeading.index) : body).trim();
+      } catch {
+        return "";
+      }
+    }
+    function workerContract(task) {
+      const scope = task.scope && typeof task.scope === "object" ? task.scope : task;
+      return {
+        schema_version: 1,
+        outcome: task.objective || task.title,
+        scope: {
+          allowed_paths: Array.isArray(scope.allowed_paths) ? scope.allowed_paths : [],
+          excluded_paths: Array.isArray(scope.excluded_paths) ? scope.excluded_paths : []
+        },
+        acceptance_criteria: task.acceptance_criteria || [],
+        validation: task.validation || [],
+        skills: task.skills || [],
+        skill_constraints: task.skill_constraints || [],
+        project_rules: task.project_rules || "",
+        experience: task.experience || { memories: [], preferences: [] }
+      };
+    }
+    module.exports = { projectRules, workerContract };
   }
 });
 
@@ -49641,8 +49681,8 @@ var StdioServerTransport = class {
 };
 
 // copilot/pulso-mcp-server.mjs
-var import_pulso_control_core = __toESM(require_pulso_control_core(), 1);
-var import_pulso_file_state = __toESM(require_pulso_file_state(), 1);
+var import_pulso_control_core2 = __toESM(require_pulso_control_core(), 1);
+var import_pulso_file_state2 = __toESM(require_pulso_file_state(), 1);
 var import_pulso_identity = __toESM(require_pulso_identity(), 1);
 
 // plugins/pulso-experience-engine.mjs
@@ -49651,6 +49691,9 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 var import_pulso_experience_core = __toESM(require_pulso_experience_core(), 1);
+var import_pulso_control_core = __toESM(require_pulso_control_core(), 1);
+var import_pulso_file_state = __toESM(require_pulso_file_state(), 1);
+var import_pulso_contract_core = __toESM(require_pulso_contract_core(), 1);
 var CURATOR = "pulso-experience-curator";
 var REPORTER = "pulso-delivery-reporter";
 var curatorSessions = /* @__PURE__ */ new Map();
@@ -49744,6 +49787,10 @@ function createObjectiveTables(db) {
   CREATE TABLE IF NOT EXISTS agent_runs (
     id INTEGER PRIMARY KEY, objective_key TEXT NOT NULL, objective_id TEXT NOT NULL, agent TEXT NOT NULL, session_id TEXT NOT NULL UNIQUE,
     tokens INTEGER NOT NULL DEFAULT 0, started_at TEXT NOT NULL, finished_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS active_deliveries (
+    session_id TEXT PRIMARY KEY, objective_key TEXT NOT NULL, objective_id TEXT NOT NULL, task_id TEXT NOT NULL,
+    project_key TEXT NOT NULL, started_at TEXT NOT NULL
   );`);
 }
 function migrateSchema(db) {
@@ -49778,8 +49825,30 @@ function migrateSchema(db) {
   if (!objectiveColumns.includes("verification_gaps")) db.exec("ALTER TABLE objectives ADD COLUMN verification_gaps TEXT NOT NULL DEFAULT '[]'");
   if (!objectiveColumns.includes("curation_status")) db.exec("ALTER TABLE objectives ADD COLUMN curation_status TEXT NOT NULL DEFAULT 'not_requested'");
   if (!objectiveColumns.includes("curation_result")) db.exec("ALTER TABLE objectives ADD COLUMN curation_result TEXT");
-  db.exec(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-  INSERT INTO schema_meta (key, value) VALUES ('schema_version', '3') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+  const agentRunsSQL = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_runs'").get()?.sql || "";
+  if (/session_id\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(agentRunsSQL)) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(`ALTER TABLE agent_runs RENAME TO agent_runs_single_session;
+        CREATE TABLE agent_runs (
+          id INTEGER PRIMARY KEY, objective_key TEXT NOT NULL, objective_id TEXT NOT NULL, agent TEXT NOT NULL, session_id TEXT NOT NULL,
+          tokens INTEGER NOT NULL DEFAULT 0, started_at TEXT NOT NULL, finished_at TEXT
+        );
+        INSERT INTO agent_runs SELECT * FROM agent_runs_single_session;
+        DROP TABLE agent_runs_single_session;
+        CREATE INDEX IF NOT EXISTS agent_runs_active_session ON agent_runs(session_id, finished_at);`);
+      db.exec("COMMIT");
+    } catch (error106) {
+      db.exec("ROLLBACK");
+      throw error106;
+    }
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS active_deliveries (
+    session_id TEXT PRIMARY KEY, objective_key TEXT NOT NULL, objective_id TEXT NOT NULL, task_id TEXT NOT NULL,
+    project_key TEXT NOT NULL, started_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  INSERT INTO schema_meta (key, value) VALUES ('schema_version', '4') ON CONFLICT(key) DO UPDATE SET value = excluded.value;
   CREATE TABLE IF NOT EXISTS memories (
     id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL UNIQUE, scope TEXT NOT NULL CHECK(scope IN ('project', 'global')),
     project_key TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('active', 'superseded', 'retired')),
@@ -49807,6 +49876,135 @@ function nextObjectiveID(db, projectKey) {
     return match ? Math.max(maximum, Number(match[1])) : maximum;
   }, 0) + 1;
   return `PULSO-OBJ-${String(next).padStart(3, "0")}`;
+}
+function nextTaskID(directory) {
+  const tasksDirectory = import_pulso_file_state.default.safeDirectory(directory, [".pulso", "tasks"]);
+  const next = fs.readdirSync(tasksDirectory).reduce((maximum, name) => {
+    const match = name.match(/^PULSO-(\d+)\.json$/);
+    return match ? Math.max(maximum, Number(match[1])) : maximum;
+  }, 0) + 1;
+  return `PULSO-${String(next).padStart(3, "0")}`;
+}
+function withProjectStateLock(directory, callback) {
+  const file3 = path.join(import_pulso_file_state.default.safeDirectory(directory, [".pulso"]), "delivery-sequence.json");
+  return import_pulso_file_state.default.withFileLock(file3, callback);
+}
+function readJSON(file3, fallback = null) {
+  try {
+    return JSON.parse(fs.readFileSync(file3, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+function projectDelivery(directory, objectiveID, taskID, title, status) {
+  const file3 = path.join(import_pulso_file_state.default.safeDirectory(directory, [".pulso"]), "state.json");
+  import_pulso_file_state.default.withFileLock(file3, () => {
+    const current = readJSON(file3, { schema_version: 1, revision: 0, decisions: [], blockers: [] });
+    import_pulso_file_state.default.writeAtomic(file3, {
+      ...current,
+      schema_version: 1,
+      revision: Math.max(0, Number(current.revision) || 0) + 1,
+      objective_id: objectiveID,
+      objective: title,
+      active_task_id: taskID,
+      status,
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  });
+}
+function projectTask(directory, args, objectiveID, route) {
+  const taskID = args.task_id || nextTaskID(directory);
+  const file3 = path.join(import_pulso_file_state.default.safeDirectory(directory, [".pulso", "tasks"]), `${taskID}.json`);
+  import_pulso_file_state.default.withFileLock(file3, () => {
+    const current = readJSON(file3, {});
+    import_pulso_file_state.default.writeAtomic(file3, {
+      ...current,
+      schema_version: 1,
+      revision: Math.max(0, Number(current.revision) || 0) + 1,
+      id: taskID,
+      objective_id: objectiveID,
+      title: args.title,
+      objective: args.title,
+      status: "ready",
+      dependencies: current.dependencies || [],
+      scope: {
+        allowed_paths: args.allowed_paths || current.scope?.allowed_paths || [],
+        excluded_paths: args.excluded_paths || current.scope?.excluded_paths || []
+      },
+      acceptance_criteria: args.acceptance_criteria || current.acceptance_criteria || [],
+      validation: args.validation || current.validation || [],
+      audits: current.audits || [],
+      skills: args.skills || current.skills || [],
+      skill_constraints: import_pulso_control_core.default.skillDigest(args.skills || current.skills || []),
+      experience: args.experience || current.experience || { memories: [], preferences: [] },
+      project_rules: args.project_rules ?? current.project_rules ?? import_pulso_contract_core.default.projectRules(directory),
+      plan: { ...current.plan || {}, route: route.route, specialists: route.specialists, reasons: route.reasons },
+      execution: current.execution || {},
+      integration: current.integration || {},
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  });
+  return taskID;
+}
+function activeDelivery(db, directory, sessionID2) {
+  return db.prepare("SELECT objective_key, objective_id, task_id FROM active_deliveries WHERE session_id = ? AND project_key = ?").get(sessionID2, import_pulso_experience_core.default.projectKey(directory));
+}
+function taskForObjective(directory, objectiveID) {
+  const tasksDirectory = import_pulso_file_state.default.safeDirectory(directory, [".pulso", "tasks"]);
+  for (const name of fs.readdirSync(tasksDirectory)) {
+    if (!/^PULSO-\d+\.json$/.test(name)) continue;
+    const task = readJSON(path.join(tasksDirectory, name), null);
+    if (task?.objective_id === objectiveID) return task;
+  }
+  return null;
+}
+function deliveryExperience(directory, query) {
+  const db = database();
+  const projectKey = import_pulso_experience_core.default.projectKey(directory);
+  const terms = String(query || "").replace(/[^\p{L}\p{N}_-]+/gu, " ").trim();
+  let memories = [];
+  if (terms) {
+    const rows = db.prepare(`SELECT m.* FROM memories_fts f JOIN memories m ON m.id = f.id
+      WHERE memories_fts MATCH ? AND m.status = 'active' AND (m.project_key = ? OR m.scope = 'global')
+      ORDER BY CASE WHEN m.project_key = ? THEN 0 ELSE 1 END, bm25(memories_fts) LIMIT 12`).all(terms, projectKey, projectKey);
+    memories = import_pulso_experience_core.default.conciseResults(rows);
+  }
+  const preferences = db.prepare("SELECT id, proposed_rule, evidence FROM profile_candidates WHERE status = 'approved' ORDER BY created_at DESC LIMIT 5").all();
+  db.close();
+  return { memories, preferences };
+}
+function closeProjectedTask(directory, taskID, status, summary, evidence, verificationGaps) {
+  const file3 = path.join(import_pulso_file_state.default.safeDirectory(directory, [".pulso", "tasks"]), `${taskID}.json`);
+  if (!fs.existsSync(file3)) throw new Error(`Cannot close missing task ${taskID}.`);
+  import_pulso_file_state.default.withFileLock(file3, () => {
+    const task = JSON.parse(fs.readFileSync(file3, "utf8"));
+    const taskStatus = status === "partially_verified" ? "implemented" : status;
+    import_pulso_file_state.default.writeAtomic(file3, {
+      ...task,
+      revision: Math.max(0, Number(task.revision) || 0) + 1,
+      status: taskStatus,
+      execution: {
+        ...task.execution || {},
+        summary,
+        results: evidence,
+        verification_gaps: verificationGaps,
+        updated_at: (/* @__PURE__ */ new Date()).toISOString()
+      },
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  });
+}
+function reopenProjectedTask(directory, taskID) {
+  const file3 = path.join(import_pulso_file_state.default.safeDirectory(directory, [".pulso", "tasks"]), `${taskID}.json`);
+  import_pulso_file_state.default.withFileLock(file3, () => {
+    const task = JSON.parse(fs.readFileSync(file3, "utf8"));
+    import_pulso_file_state.default.writeAtomic(file3, {
+      ...task,
+      revision: Math.max(0, Number(task.revision) || 0) + 1,
+      status: "ready",
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  });
 }
 function migrateSessionObjectiveIDs(db, directory) {
   const key = import_pulso_experience_core.default.projectKey(directory);
@@ -50180,6 +50378,173 @@ async function PulsoExperienceEnginePlugin(input2) {
       tracked.close();
     },
     tool: {
+      pulso_delivery: tool2({
+        description: "Begin or close a substantive Pulso delivery while keeping coordination artifacts internal.",
+        args: {
+          action: external_exports.enum(["begin", "resume", "close", "reconcile"]),
+          title: external_exports.string().min(3).optional(),
+          objective_id: external_exports.string().regex(/^PULSO-OBJ-\d+$/).optional(),
+          task_id: external_exports.string().regex(/^PULSO-\d+$/).optional(),
+          allowed_paths: external_exports.array(external_exports.string().min(1)).optional(),
+          excluded_paths: external_exports.array(external_exports.string().min(1)).optional(),
+          acceptance_criteria: external_exports.array(external_exports.string().min(3)).optional(),
+          validation: external_exports.array(external_exports.string().min(3)).optional(),
+          skills: external_exports.array(external_exports.string().min(1)).optional(),
+          signals: external_exports.array(external_exports.enum(["ambiguous", "dependencies", "cross_layer", "new_dependency", "authentication", "persistence", "public_contract", "sensitive_data", "remote_operation", "destructive", "validation_gap", "contradictory_evidence"])).optional(),
+          status: external_exports.enum(["implemented", "partially_verified", "verified", "integrated", "blocked", "failed", "cancelled"]).optional(),
+          summary: external_exports.string().min(10).optional(),
+          evidence: external_exports.array(external_exports.string().min(3)).max(5).optional(),
+          verification_gaps: external_exports.array(external_exports.string().min(3)).max(3).optional(),
+          human_interventions: external_exports.number().int().min(0).optional(),
+          confirmed: external_exports.boolean().optional()
+        },
+        execute: async (args, context) => {
+          if (!context.sessionID) throw new Error("Pulso delivery requires the current session.");
+          if (args.action === "reconcile") {
+            if (!args.confirmed) throw new Error("reconcile requires explicit user confirmation.");
+            if (!args.status || !args.summary || (args.evidence || []).length === 0) throw new Error("reconcile requires status, summary, and evidence.");
+            const db = database();
+            const projectKey = import_pulso_experience_core.default.projectKey(context.directory);
+            const active2 = db.prepare(`SELECT o.objective_key, o.id, o.title FROM objectives o
+              WHERE o.project_key = ? AND o.status = 'active'
+                AND NOT EXISTS (SELECT 1 FROM active_deliveries d WHERE d.objective_key = o.objective_key)
+              ORDER BY o.started_at DESC`).all(projectKey);
+            if (active2.length === 0) {
+              db.close();
+              throw new Error("No historical active delivery exists to reconcile.");
+            }
+            const evidence2 = args.evidence || [];
+            const gaps2 = args.verification_gaps || [];
+            if (args.status === "partially_verified" && gaps2.length === 0) {
+              db.close();
+              throw new Error("partially_verified requires verification_gaps.");
+            }
+            for (const target of active2) {
+              const task2 = taskForObjective(context.directory, target.id);
+              if (task2) {
+                closeProjectedTask(context.directory, task2.id, args.status, args.summary, evidence2, gaps2);
+                projectDelivery(context.directory, target.id, task2.id, target.title, args.status);
+              }
+              db.prepare("UPDATE objectives SET status = ?, finished_at = ?, summary = ?, evidence = ?, verification_gaps = ? WHERE objective_key = ?").run(args.status, (/* @__PURE__ */ new Date()).toISOString(), args.summary, JSON.stringify(evidence2), JSON.stringify(gaps2), target.objective_key);
+              db.prepare("UPDATE agent_runs SET finished_at = COALESCE(finished_at, ?) WHERE objective_key = ?").run((/* @__PURE__ */ new Date()).toISOString(), target.objective_key);
+            }
+            db.close();
+            return active2.length === 1 ? "Estado hist\xF3rico reconciliado." : `${active2.length} estados hist\xF3ricos reconciliados.`;
+          }
+          if (args.action === "resume") {
+            if (!args.task_id) throw new Error("resume requires task_id.");
+            const taskFile = path.join(import_pulso_file_state.default.safeDirectory(context.directory, [".pulso", "tasks"]), `${args.task_id}.json`);
+            const task2 = readJSON(taskFile, null);
+            if (!task2?.objective_id) throw new Error(`Cannot resume missing task ${args.task_id}.`);
+            const existing = database();
+            if (activeDelivery(existing, context.directory, context.sessionID)) {
+              existing.close();
+              throw new Error("Session already has an active delivery.");
+            }
+            existing.close();
+            await hooks.tool.pulso_experience_start.execute({
+              action: "resume",
+              title: task2.title || task2.objective || "Pulso delivery",
+              objective_id: task2.objective_id,
+              reason: "Resume the same deliverable for correction, validation, or authorized integration."
+            }, context);
+            withProjectStateLock(context.directory, () => {
+              reopenProjectedTask(context.directory, args.task_id);
+              projectDelivery(context.directory, task2.objective_id, args.task_id, task2.title || task2.objective, "active");
+            });
+            const tracked2 = database();
+            tracked2.prepare("INSERT INTO active_deliveries (session_id, objective_key, objective_id, task_id, project_key, started_at) VALUES (?, ?, ?, ?, ?, ?)").run(context.sessionID, import_pulso_experience_core.default.objectiveKey(context.directory, task2.objective_id), task2.objective_id, args.task_id, import_pulso_experience_core.default.projectKey(context.directory), (/* @__PURE__ */ new Date()).toISOString());
+            tracked2.close();
+            return `Entrega reanudada: ${args.task_id}.`;
+          }
+          if (args.action === "begin") {
+            if (!args.title) throw new Error("begin requires title.");
+            const existing = database();
+            const active2 = activeDelivery(existing, context.directory, context.sessionID);
+            if (active2) {
+              existing.close();
+              throw new Error(`Session already has active delivery ${active2.objective_id}. Close or resume it before beginning another.`);
+            }
+            let run = existing.prepare("SELECT objective_id FROM agent_runs WHERE session_id = ? AND finished_at IS NULL ORDER BY id DESC LIMIT 1").get(context.sessionID);
+            existing.close();
+            if (!run) {
+              await hooks.tool.pulso_experience_start.execute({
+                action: args.objective_id ? "resume" : "new",
+                title: args.title,
+                objective_id: args.objective_id,
+                reason: args.objective_id ? "Continue the existing substantive delivery." : "Begin a new substantive delivery after explicit intent classification."
+              }, context);
+              const started = database();
+              run = started.prepare("SELECT objective_id FROM agent_runs WHERE session_id = ? AND finished_at IS NULL ORDER BY id DESC LIMIT 1").get(context.sessionID);
+              started.close();
+            } else {
+              const resumed = database();
+              resumed.prepare("UPDATE objectives SET status = 'active', finished_at = NULL WHERE objective_key = ?").run(import_pulso_experience_core.default.objectiveKey(context.directory, run.objective_id));
+              resumed.close();
+            }
+            if (!run?.objective_id) throw new Error("Pulso could not establish a delivery objective.");
+            const route = import_pulso_control_core.default.classifyRoute({
+              objective: args.title,
+              paths: args.allowed_paths || [],
+              changed_files: args.allowed_paths?.length || 0,
+              signals: args.signals || []
+            });
+            const taskID2 = withProjectStateLock(context.directory, () => {
+              const id = projectTask(context.directory, { ...args, experience: deliveryExperience(context.directory, args.title) }, run.objective_id, route);
+              projectDelivery(context.directory, run.objective_id, id, args.title, "active");
+              return id;
+            });
+            const tracked2 = database();
+            tracked2.prepare("INSERT INTO active_deliveries (session_id, objective_key, objective_id, task_id, project_key, started_at) VALUES (?, ?, ?, ?, ?, ?)").run(context.sessionID, import_pulso_experience_core.default.objectiveKey(context.directory, run.objective_id), run.objective_id, taskID2, import_pulso_experience_core.default.projectKey(context.directory), (/* @__PURE__ */ new Date()).toISOString());
+            tracked2.close();
+            return `Entrega preparada: ${taskID2} (${route.route}).`;
+          }
+          if (!args.status || !args.summary) throw new Error("close requires status and summary.");
+          const tracked = database();
+          const active = activeDelivery(tracked, context.directory, context.sessionID);
+          tracked.close();
+          if (!active) throw new Error("No active Pulso delivery exists for this session.");
+          const taskID = args.task_id || active.task_id;
+          const objectiveID = args.objective_id || active.objective_id;
+          if (taskID !== active.task_id || objectiveID !== active.objective_id) throw new Error("Delivery close must target the session's active task and objective.");
+          if (!taskID || !objectiveID) throw new Error("No active Pulso delivery exists for this project.");
+          const evidence = args.evidence || [];
+          const gaps = args.verification_gaps || [];
+          if (evidence.length === 0) throw new Error("close requires at least one evidence entry.");
+          if (args.status === "partially_verified" && gaps.length === 0) throw new Error("partially_verified requires verification_gaps.");
+          const task = readJSON(path.join(context.directory, ".pulso", "tasks", `${taskID}.json`), {});
+          const title = task.title || task.objective || args.summary;
+          closeProjectedTask(context.directory, taskID, args.status, args.summary, evidence, gaps);
+          projectDelivery(context.directory, objectiveID, taskID, title, args.status);
+          await hooks.tool.pulso_experience_finalize.execute({
+            objective_id: objectiveID,
+            title,
+            status: args.status,
+            summary: args.summary,
+            evidence,
+            verification_gaps: gaps,
+            human_interventions: args.human_interventions || 0
+          }, context);
+          const finalized = database();
+          finalized.prepare("UPDATE agent_runs SET finished_at = ? WHERE session_id = ? AND objective_key = ? AND finished_at IS NULL").run((/* @__PURE__ */ new Date()).toISOString(), context.sessionID, active.objective_key);
+          finalized.prepare("DELETE FROM active_deliveries WHERE session_id = ? AND project_key = ?").run(context.sessionID, import_pulso_experience_core.default.projectKey(context.directory));
+          finalized.close();
+          return `Entrega cerrada: ${args.status}.`;
+        }
+      }),
+      pulso_status: tool2({
+        description: "Summarize the latest Pulso delivery for the current project without exposing coordination records.",
+        args: {},
+        execute: async (_, context) => {
+          const db = database();
+          const row = db.prepare(`SELECT title, status, summary, finished_at FROM objectives
+            WHERE project_key = ? ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, COALESCE(finished_at, started_at) DESC LIMIT 1`).get(import_pulso_experience_core.default.projectKey(context.directory));
+          db.close();
+          if (!row) return "No hay entregas de Pulso registradas para este proyecto.";
+          const when = row.finished_at ? ` Finaliz\xF3: ${row.finished_at}.` : " Sigue activa.";
+          return `${row.title}: ${row.status}.${row.summary ? ` ${row.summary}` : ""}${when}`;
+        }
+      }),
       pulso_experience_start: tool2({
         description: "Persist a Pulso objective only after explicitly deciding whether the current work is new or resumes an incomplete objective.",
         args: {
@@ -50192,7 +50557,7 @@ async function PulsoExperienceEnginePlugin(input2) {
           if (!context.sessionID) throw new Error("Objective evaluation requires the current Pulso session.");
           const db = database();
           const key = import_pulso_experience_core.default.projectKey(context.directory);
-          const current = db.prepare("SELECT objective_id FROM agent_runs WHERE session_id = ?").get(context.sessionID);
+          const current = db.prepare("SELECT objective_id FROM agent_runs WHERE session_id = ? AND finished_at IS NULL ORDER BY id DESC LIMIT 1").get(context.sessionID);
           if (current) {
             db.close();
             return `Current session already belongs to ${current.objective_id}; no objective created.`;
@@ -50546,10 +50911,10 @@ register("pulso_route", "Select the smallest Pulso delivery route using determin
   paths: external_exports.array(external_exports.string()).optional(),
   changed_files: external_exports.number().int().min(0).optional(),
   signals: external_exports.array(external_exports.enum(["ambiguous", "dependencies", "cross_layer", "new_dependency", "authentication", "persistence", "public_contract", "sensitive_data", "remote_operation", "destructive", "validation_gap", "contradictory_evidence"])).optional()
-}, async (args) => JSON.stringify(import_pulso_control_core.default.classifyRoute(args)), { readOnlyHint: true });
+}, async (args) => JSON.stringify(import_pulso_control_core2.default.classifyRoute(args)), { readOnlyHint: true });
 register("pulso_skill_digest", "Resolve compact Pulso skill constraints once per objective.", {
   skills: external_exports.array(external_exports.string()).max(10)
-}, async ({ skills }) => JSON.stringify(import_pulso_control_core.default.skillDigest([...new Set(skills)])), { readOnlyHint: true });
+}, async ({ skills }) => JSON.stringify(import_pulso_control_core2.default.skillDigest([...new Set(skills)])), { readOnlyHint: true });
 register("pulso_identity", "Resolve Pulso's integrity-checked canonical identity.", {}, async () => JSON.stringify(import_pulso_identity.default.resolveIdentity()), { readOnlyHint: true });
 register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable Pulso task lease.", {
   action: external_exports.enum(["acquire", "heartbeat", "release", "status", "recover"]),
@@ -50560,20 +50925,20 @@ register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable P
   reason: external_exports.string().optional()
 }, async ({ action, task_id, ttl_minutes = 30, owner_session, force, reason }, projectDirectory) => {
   const leaseOwner = owner_session;
-  const file3 = path2.join(import_pulso_file_state.default.safeDirectory(projectDirectory, [".pulso", "leases"]), `${task_id}.json`);
-  return import_pulso_file_state.default.withFileLock(file3, () => {
+  const file3 = path2.join(import_pulso_file_state2.default.safeDirectory(projectDirectory, [".pulso", "leases"]), `${task_id}.json`);
+  return import_pulso_file_state2.default.withFileLock(file3, () => {
     const existing = fs2.existsSync(file3) ? JSON.parse(fs2.readFileSync(file3, "utf8")) : null;
     if (action === "status") return JSON.stringify(existing || { task_id, status: "none" });
     const now = /* @__PURE__ */ new Date();
     if (action === "acquire") {
-      if (existing?.status === "active" && !import_pulso_control_core.default.isExpired(existing) && existing.owner_session !== leaseOwner) throw new Error(`${task_id} is leased by another active session until ${existing.expires_at}.`);
-      const lease = { schema_version: 1, task_id, status: "active", owner_session: leaseOwner, acquired_at: now.toISOString(), heartbeat_at: now.toISOString(), expires_at: new Date(now.getTime() + ttl_minutes * 6e4).toISOString(), recovered_from: import_pulso_control_core.default.isExpired(existing) ? existing.owner_session : null };
-      import_pulso_file_state.default.writeAtomic(file3, lease);
+      if (existing?.status === "active" && !import_pulso_control_core2.default.isExpired(existing) && existing.owner_session !== leaseOwner) throw new Error(`${task_id} is leased by another active session until ${existing.expires_at}.`);
+      const lease = { schema_version: 1, task_id, status: "active", owner_session: leaseOwner, acquired_at: now.toISOString(), heartbeat_at: now.toISOString(), expires_at: new Date(now.getTime() + ttl_minutes * 6e4).toISOString(), recovered_from: import_pulso_control_core2.default.isExpired(existing) ? existing.owner_session : null };
+      import_pulso_file_state2.default.writeAtomic(file3, lease);
       return JSON.stringify(lease);
     }
     if (action === "recover") {
-      const lease = { schema_version: 1, task_id, status: "active", owner_session: leaseOwner, acquired_at: now.toISOString(), heartbeat_at: now.toISOString(), expires_at: new Date(now.getTime() + ttl_minutes * 6e4).toISOString(), recovered_from: existing?.status === "active" ? existing.owner_session : import_pulso_control_core.default.isExpired(existing) ? existing.owner_session : null, recovery_reason: reason || "manual recovery" };
-      import_pulso_file_state.default.writeAtomic(file3, lease);
+      const lease = { schema_version: 1, task_id, status: "active", owner_session: leaseOwner, acquired_at: now.toISOString(), heartbeat_at: now.toISOString(), expires_at: new Date(now.getTime() + ttl_minutes * 6e4).toISOString(), recovered_from: existing?.status === "active" ? existing.owner_session : import_pulso_control_core2.default.isExpired(existing) ? existing.owner_session : null, recovery_reason: reason || "manual recovery" };
+      import_pulso_file_state2.default.writeAtomic(file3, lease);
       return JSON.stringify(lease);
     }
     if (action === "release" && force) {
@@ -50582,7 +50947,7 @@ register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable P
       existing.released_at = now.toISOString();
       existing.released_by = leaseOwner;
       if (reason) existing.release_reason = reason;
-      import_pulso_file_state.default.writeAtomic(file3, existing);
+      import_pulso_file_state2.default.writeAtomic(file3, existing);
       return JSON.stringify(existing);
     }
     if (!existing || existing.owner_session !== leaseOwner || existing.status !== "active") throw new Error(`${task_id} has no active lease owned by this session.`);
@@ -50593,7 +50958,7 @@ register("pulso_lease", "Acquire, heartbeat, release, or inspect a recoverable P
       existing.status = "released";
       existing.released_at = now.toISOString();
     }
-    import_pulso_file_state.default.writeAtomic(file3, existing);
+    import_pulso_file_state2.default.writeAtomic(file3, existing);
     return JSON.stringify(existing);
   });
 });
@@ -50602,8 +50967,8 @@ register("pulso_lease_diagnostic", "Inspect a lease or safely probe lease recove
   task_id: external_exports.string().regex(/^PULSO-\d+$/),
   reason: external_exports.string().optional()
 }, async ({ action, task_id, reason }, projectDirectory) => {
-  const file3 = path2.join(import_pulso_file_state.default.safeDirectory(projectDirectory, [".pulso", "leases"]), `${task_id}.json`);
-  return import_pulso_file_state.default.withFileLock(file3, () => {
+  const file3 = path2.join(import_pulso_file_state2.default.safeDirectory(projectDirectory, [".pulso", "leases"]), `${task_id}.json`);
+  return import_pulso_file_state2.default.withFileLock(file3, () => {
     const prior = fs2.existsSync(file3) ? fs2.readFileSync(file3) : null;
     const existing = prior === null ? null : JSON.parse(prior.toString("utf8"));
     if (action === "status") return JSON.stringify(existing || { task_id, status: "none" });
@@ -50613,14 +50978,14 @@ register("pulso_lease_diagnostic", "Inspect a lease or safely probe lease recove
       existing.released_at = (/* @__PURE__ */ new Date()).toISOString();
       existing.released_by = "primary";
       if (reason) existing.release_reason = reason;
-      import_pulso_file_state.default.writeAtomic(file3, existing);
+      import_pulso_file_state2.default.writeAtomic(file3, existing);
       return JSON.stringify(existing);
     }
-    if (existing?.status === "active" && !import_pulso_control_core.default.isExpired(existing)) throw new Error(`${task_id} has an active lease and cannot be probed.`);
+    if (existing?.status === "active" && !import_pulso_control_core2.default.isExpired(existing)) throw new Error(`${task_id} has an active lease and cannot be probed.`);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const probe = { schema_version: 1, task_id, status: "released", owner_session: `copilot-probe-${crypto2.randomUUID()}`, acquired_at: now, heartbeat_at: now, expires_at: now, released_at: now };
     try {
-      import_pulso_file_state.default.writeAtomic(file3, probe);
+      import_pulso_file_state2.default.writeAtomic(file3, probe);
       return JSON.stringify({ task_id, status: "healthy", probe: "acquired_and_released" });
     } finally {
       if (prior === null) fs2.rmSync(file3, { force: true });
@@ -50685,10 +51050,10 @@ register("pulso_primary_write", "Write primary-owned Pulso configuration or stat
   expected_absent: external_exports.literal(true).optional()
 }, async ({ path: relative, content, expected_digest, expected_revision, expected_absent }, projectDirectory) => {
   const { resolved, normalized } = primaryPath(projectDirectory, relative);
-  const parent = normalized === "PULSO.md" ? projectDirectory : import_pulso_file_state.default.safeDirectory(projectDirectory, normalized.split("/").slice(0, -1));
+  const parent = normalized === "PULSO.md" ? projectDirectory : import_pulso_file_state2.default.safeDirectory(projectDirectory, normalized.split("/").slice(0, -1));
   const json3 = normalized.startsWith(".pulso/") && path2.extname(resolved) === ".json";
   if (json3) JSON.parse(content);
-  import_pulso_file_state.default.withFileLock(resolved, () => {
+  import_pulso_file_state2.default.withFileLock(resolved, () => {
     const check3 = () => {
       primaryPath(projectDirectory, relative);
       const existing = fs2.existsSync(resolved) ? fs2.readFileSync(resolved, "utf8") : null;
@@ -50732,7 +51097,7 @@ register("pulso_primary_artifacts", "Set Pulso artifact tracking without editing
   safeGitMetadataPath(commonDirectory, file3);
   if (!fs2.existsSync(file3) && artifacts === "tracked") return JSON.stringify({ artifacts, status: "configured" });
   fs2.mkdirSync(path2.dirname(file3), { recursive: true, mode: 448 });
-  import_pulso_file_state.default.withFileLock(file3, () => {
+  import_pulso_file_state2.default.withFileLock(file3, () => {
     const previous = fs2.existsSync(file3) ? fs2.readFileSync(file3, "utf8") : "";
     const lines = previous.split(/\r?\n/).filter((line) => line !== ".pulso/");
     while (lines.length && lines.at(-1) === "") lines.pop();

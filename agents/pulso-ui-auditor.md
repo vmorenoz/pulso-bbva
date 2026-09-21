@@ -6,6 +6,8 @@ temperature: 0.1
 steps: 16
 permission:
   pulso_lease: deny
+  pulso_delivery: deny
+  pulso_status: deny
   pulso_memory_review: deny
   pulso_memory_list: deny
   pulso_memory_recall: deny
