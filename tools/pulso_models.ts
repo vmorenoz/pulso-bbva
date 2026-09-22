@@ -99,7 +99,7 @@ function mappingsFor(preset, provider, reasoningModel, executionModel, staticMod
   }
   const byRole = {
     reasoning: reasoningModel,
-    execution: preset === "performance" ? executionModel : reasoningModel,
+    execution: preset === "performance" ? executionModel : staticModel,
     static: staticModel,
   }
   return Object.fromEntries(Object.entries(AGENT_ROLES).map(([agent, role]) => [agent, byRole[role]]))
