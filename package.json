@@ -15,6 +15,7 @@
     "commands/",
     "com.github.copilot/",
     "docs/",
+    "com.github.copilot/",
     "vscode/",
     ".github/plugin/marketplace.json",
     "lib/",
