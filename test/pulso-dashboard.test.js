@@ -63,13 +63,13 @@ test("loads project metrics and experience without modifying SQLite", () => {
   }
 });
 
-test("marks Copilot objectives as token tracking unavailable", () => {
+test("marks VS Code objectives as token tracking unavailable", () => {
   const item = fixture();
   const previousDataHome = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = item.dataHome;
   try {
     const db = new DatabaseSync(dashboard.databasePath());
-    db.prepare("UPDATE agent_runs SET session_id = 'copilot:project:session'").run();
+    db.prepare("UPDATE agent_runs SET session_id = 'vscode:project:session'").run();
     db.close();
     const data = dashboard.loadDashboardData(item.project);
     assert.equal(data.objectives[0].token_tracking, "unavailable");
@@ -83,7 +83,7 @@ test("marks Copilot objectives as token tracking unavailable", () => {
   }
 });
 
-test("retains measured tokens when OpenCode and Copilot runs are mixed", () => {
+test("retains measured tokens when OpenCode and VS Code runs are mixed", () => {
   const item = fixture();
   const previousDataHome = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = item.dataHome;
@@ -91,7 +91,7 @@ test("retains measured tokens when OpenCode and Copilot runs are mixed", () => {
     const db = new DatabaseSync(dashboard.databasePath());
     const key = experience.projectKey(item.project);
     db.prepare("UPDATE agent_runs SET tokens = 0 WHERE id = 1").run();
-    db.prepare("INSERT INTO agent_runs VALUES (2, ?, 'PULSO-001', 'pulso-executor', 'copilot:project:session', 999, '2026-01-01', '2026-01-02')").run(`${key}:PULSO-001`);
+    db.prepare("INSERT INTO agent_runs VALUES (2, ?, 'PULSO-001', 'pulso-executor', 'vscode:project:session', 999, '2026-01-01', '2026-01-02')").run(`${key}:PULSO-001`);
     db.close();
     const data = dashboard.loadDashboardData(item.project);
     assert.equal(data.objectives[0].token_tracking, "mixed");

@@ -28,7 +28,13 @@ test("preserves Pulso identity and creator attribution", () => {
   const identity = require("../lib/pulso-identity.js").resolveIdentity();
   const crypto = require("node:crypto");
   assert.match(pulso, /canonical identity is provided by `pulso_identity`/);
-  assert.equal(crypto.createHash("sha256").update(identity.creator).digest("hex"), "6b5a905fd6c4b2ac81897a012636a0c52e7bd7a44254f5ecbffe9484ac016d24");
+  assert.equal(crypto.createHash("sha256").update(identity.creator.name).digest("hex"), "6cb05fa0ec1100fbbcec953f7d66d8463af3219f1371306d3c8748fee39203d6");
+  assert.equal(identity.creator.employee_id, "P041413");
+  assert.equal(identity.creator.github, "@vmorenoz");
+  assert.equal(identity.creator.linkedin, "@vicodev");
+  assert.equal(identity.creator.contacts.length, 2);
+  assert.match(pulso, /return every field supplied by `pulso_identity`/);
+  assert.match(pulso, /Never describe Pulso as created with/);
   assert.equal(crypto.createHash("sha256").update(identity.organization).digest("hex"), "244902c4926f77b1f68b77ba7a405fa043da1f981d17ca8aedcd47632ddab148");
 });
 
@@ -95,7 +101,7 @@ test("uses Explorer only for iterative discovery and keeps it read-only", () => 
 });
 
 test("keeps lease ownership internal to the control plugin", () => {
-  assert.match(agent("pulso"), /pulso_lease: deny/);
+  assert.match(agent("pulso"), /pulso_lease: allow/);
   assert.match(agent("pulso-executor"), /pulso_lease: deny/);
   assert.match(agent("pulso-executor"), /plugin performs those operations around the session and every tool call/);
   for (const name of [
@@ -194,8 +200,16 @@ test("keeps protocol loading and worker contracts out of routine user-visible co
 
 test("reconciles a user-confirmed historical delivery without requesting internal identifiers", () => {
   const pulso = agent("pulso");
-  assert.match(pulso, /pulso_delivery\(action="reconcile", confirmed=true\)/);
+  assert.match(pulso, /pulso_delivery\(action="reconcile", confirmed=true, status="verified"\)/);
+  assert.match(pulso, /status="verified"\)`? before any other close or resume attempt/);
   assert.match(pulso, /Never request task or objective IDs from the user/);
+});
+
+test("permits controlled primary lease repair without exposing task identifiers", () => {
+  const pulso = agent("pulso");
+  assert.match(pulso, /pulso_lease\(action="recover"\)/);
+  assert.match(pulso, /pulso_lease\(action="release", force=true\)/);
+  assert.match(pulso, /never expose or ask the user for task IDs/);
 });
 
 test("allows Pulso to use MCP tools only for necessary evidence", () => {
@@ -208,7 +222,21 @@ test("allows Pulso to use MCP tools only for necessary evidence", () => {
 test("uses native interactive tools for every user question", () => {
   const pulso = agent("pulso");
   assert.match(pulso, /Whenever asking the user a question, use the runtime's interactive question tool instead of plain prose/);
-  assert.match(pulso, /`question` in OpenCode or `ask_user` in GitHub Copilot CLI/);
+  assert.match(pulso, /`question` in OpenCode/);
+});
+
+test("uses semantic prompt blocks without changing OpenCode authority", () => {
+  const required = {
+    "pulso": ["identity", "role", "workflow", "routing", "safety", "communication"],
+    "pulso-executor": ["identity", "role", "contracts", "workflow", "safety", "result-format"],
+    "pulso-planner": ["identity", "role", "contracts", "workflow", "safety", "result-format"],
+    "pulso-explorer": ["identity", "role", "contracts", "workflow", "safety", "result-format"],
+    "pulso-verifier": ["identity", "role", "contracts", "workflow", "safety", "result-format"],
+  };
+  for (const [name, tags] of Object.entries(required)) for (const tag of tags) assert.match(agent(name), new RegExp(`<${tag}>`), `${name}:${tag}`);
+  assert.match(agent("pulso-executor"), /edit: allow/);
+  assert.match(agent("pulso-executor"), /Do not edit `\.pulso\/\*\*`/);
+  assert.match(agent("pulso"), /edit:\n\s+"\*": deny/);
 });
 
 test("requires all human-facing Pulso communication to be in Spanish", () => {
@@ -226,4 +254,9 @@ test("requires all human-facing Pulso communication to be in Spanish", () => {
     const command = fs.readFileSync(path.resolve(agentsDirectory, "..", "commands", `${name}.md`), "utf8");
     assert.match(command, /[áéíóúñ]/i, name);
   }
+});
+
+test("requires the primary agent to speak about itself in first person", () => {
+  assert.match(agent("pulso"), /Habla de tus acciones, estado, límites y hallazgos en primera persona/);
+  assert.match(agent("pulso"), /No te refieras a Pulso como una entidad externa o en tercera persona/);
 });

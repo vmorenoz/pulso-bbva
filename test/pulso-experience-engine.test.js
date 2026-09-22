@@ -337,7 +337,36 @@ test("reconciles one user-confirmed historical active delivery without exposing 
   }
 });
 
-test("reconciles every confirmed historical delivery without using visible titles", async () => {
+test("reconciles a closed partially_verified delivery to verified without internal ids", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-reconcile-verified-"));
+  const previousDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(root, "data");
+  const directory = path.join(root, "project");
+  fs.mkdirSync(directory);
+  try {
+    const { PulsoExperienceEnginePlugin } = await import("../plugins/pulso-experience-engine.mjs");
+    const plugin = await PulsoExperienceEnginePlugin({ directory, client: {} });
+    const historical = { directory, sessionID: "historical", agent: "pulso" };
+    await plugin.tool.pulso_delivery.execute({ action: "begin", title: "Pipeline confirmation", allowed_paths: ["src/app.js"] }, historical);
+    await plugin.tool.pulso_delivery.execute({ action: "close", status: "partially_verified", summary: "The change is ready pending pipeline confirmation.", evidence: ["Focused validation passed."], verification_gaps: ["Pipeline result was unavailable."] }, historical);
+    const result = await plugin.tool.pulso_delivery.execute({
+      action: "reconcile", confirmed: true, status: "verified",
+      summary: "The user confirmed the pipeline completed correctly.", evidence: ["Explicit user confirmation of a successful pipeline."],
+    }, { directory, sessionID: "current", agent: "pulso" });
+    assert.equal(result, "Estado histórico reconciliado.");
+    const task = JSON.parse(fs.readFileSync(path.join(directory, ".pulso", "tasks", "PULSO-001.json"), "utf8"));
+    assert.equal(task.status, "verified");
+    const metrics = JSON.parse(await plugin.tool.pulso_metrics.execute({}, { directory }));
+    assert.equal(metrics.objectives[0].status, "verified");
+    assert.deepEqual(JSON.parse(metrics.objectives[0].verification_gaps), []);
+  } finally {
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reconciles only the most recent partially verified delivery without internal ids", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-reconcile-title-"));
   const previousDataHome = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = path.join(root, "data");
@@ -346,16 +375,20 @@ test("reconciles every confirmed historical delivery without using visible title
   try {
     const { PulsoExperienceEnginePlugin } = await import("../plugins/pulso-experience-engine.mjs");
     const plugin = await PulsoExperienceEnginePlugin({ directory, client: {} });
-    for (const sessionID of ["historical-one", "historical-two"]) {
-      await plugin.tool.pulso_experience_start.execute({ action: "new", title: "Stabilize TSEC precedence tests", reason: "A prior session started this delivery." }, { directory, sessionID, agent: "pulso" });
-    }
+    const first = { directory, sessionID: "historical-one", agent: "pulso" };
+    const second = { directory, sessionID: "historical-two", agent: "pulso" };
+    await plugin.tool.pulso_delivery.execute({ action: "begin", title: "Older pipeline delivery", allowed_paths: ["src/older.js"] }, first);
+    await plugin.tool.pulso_delivery.execute({ action: "close", status: "partially_verified", summary: "Older delivery awaits pipeline confirmation.", evidence: ["Focused validation passed."], verification_gaps: ["Pipeline result was unavailable."] }, first);
+    await plugin.tool.pulso_delivery.execute({ action: "begin", title: "Latest pipeline delivery", allowed_paths: ["src/latest.js"] }, second);
+    await plugin.tool.pulso_delivery.execute({ action: "close", status: "partially_verified", summary: "Latest delivery awaits pipeline confirmation.", evidence: ["Focused validation passed."], verification_gaps: ["Pipeline result was unavailable."] }, second);
     const result = await plugin.tool.pulso_delivery.execute({
       action: "reconcile", confirmed: true, status: "verified",
-      summary: "The user confirmed the matching historical deliveries were completed.", evidence: ["Explicit user confirmation of completion."],
+      summary: "The user confirmed the latest pipeline completed successfully.", evidence: ["Explicit user confirmation of completion."],
     }, { directory, sessionID: "current", agent: "pulso" });
-    assert.equal(result, "2 estados históricos reconciliados.");
+    assert.equal(result, "Estado histórico reconciliado.");
     const metrics = JSON.parse(await plugin.tool.pulso_metrics.execute({}, { directory }));
-    assert.deepEqual(metrics.objectives.map((objective) => objective.status), ["verified", "verified"]);
+    assert.equal(metrics.objectives.find((objective) => objective.title === "Older pipeline delivery").status, "partially_verified");
+    assert.equal(metrics.objectives.find((objective) => objective.title === "Latest pipeline delivery").status, "verified");
   } finally {
     if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = previousDataHome;
