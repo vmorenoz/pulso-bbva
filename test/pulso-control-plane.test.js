@@ -154,7 +154,7 @@ test("artifact setup persists PULSO.md and local Git exclusion without losing pr
   }
 });
 
-test("model wizard uses the live catalog and writes global, project, custom, and inherited configurations", async () => {
+test("model wizard assigns Terra only to reasoning roles and Luna to all other recommended roles", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pulso-model-wizard-"));
   const previousConfig = process.env.OPENCODE_CONFIG_DIR;
   const previousBinary = process.env.PULSO_OPENCODE_BIN;
@@ -174,15 +174,18 @@ test("model wizard uses the live catalog and writes global, project, custom, and
     const catalog = JSON.parse(await models.execute({ action: "catalog" }, context));
     assert.deepEqual(catalog.providers.vendor, ["vendor/deep", "vendor/light", "vendor/run"]);
     assert.equal(catalog.recommended_provider, "github-copilot");
+    assert.equal(catalog.agents.pulso, "reasoning");
+    assert.equal(catalog.agents["pulso-executor"], "execution");
+    assert.equal(catalog.agents["pulso-explorer"], "static");
 
     await models.execute({
       action: "apply", scope: "global", preset: "recommended", provider: "vendor",
       reasoning_model: "vendor/deep", static_model: "vendor/light",
     }, context);
     let global = JSON.parse(fs.readFileSync(path.join(configRoot, "opencode.jsonc"), "utf8"));
-    assert.equal(global.agent.pulso.model, "vendor/deep");
-    assert.equal(global.agent["pulso-executor"].model, "vendor/deep");
-    assert.equal(global.agent["pulso-explorer"].model, "vendor/light");
+    for (const [agent, role] of Object.entries(catalog.agents)) {
+      assert.equal(global.agent[agent].model, role === "reasoning" ? "vendor/deep" : "vendor/light");
+    }
 
     const assignments = Object.fromEntries(Object.keys(catalog.agents).map((agent) => [agent, "vendor/run"]));
     await models.execute({ action: "apply", scope: "project", preset: "custom", provider: "vendor", assignments }, context);
@@ -194,6 +197,11 @@ test("model wizard uses the live catalog and writes global, project, custom, and
     global = JSON.parse(fs.readFileSync(path.join(configRoot, "opencode.jsonc"), "utf8"));
     assert.equal(global.agent.pulso?.model, undefined);
     assert.equal(global.agent["pulso-executor"]?.model, undefined);
+
+    const profiles = JSON.parse(fs.readFileSync(path.resolve(__dirname, "..", "model-profiles.json"), "utf8"));
+    for (const [agent, role] of Object.entries(catalog.agents)) {
+      assert.equal(profiles.agent_tiers[agent], role === "reasoning" ? "standard" : "light");
+    }
   } finally {
     if (previousConfig === undefined) delete process.env.OPENCODE_CONFIG_DIR;
     else process.env.OPENCODE_CONFIG_DIR = previousConfig;

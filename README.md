@@ -130,7 +130,7 @@ npm install
 npm test
 ```
 
-Edite Pulso en este repositorio. El instalador interactivo pregunta si debe configurar OpenCode, GitHub Copilot CLI o ambos. La instalación no selecciona perfiles, proveedores ni modelos de OpenCode y conserva cualquier asignación existente.
+Edite Pulso en este repositorio. La instalación de OpenCode aplica el preset recomendado a los agentes Pulso que aún no tengan `model`: `github-copilot/gpt-5.6-terra` para razonamiento y `github-copilot/gpt-5.6-luna` para los demás agentes, incluida la ejecución. Conserva cualquier asignación existente, incluso configuraciones parciales, y la desinstalación nunca elimina modelos.
 
 ```bash
 npm run install:local

@@ -19,6 +19,7 @@ const legacyProfileFile = path.join(configRoot, "pulso-profile.json");
 const operation = process.argv[2];
 const force = process.argv.includes("--force");
 const setDefault = process.argv.includes("--set-default");
+const noModelPreset = process.argv.includes("--no-model-preset");
 if (process.argv.some((arg) => arg === "--profile" || arg === "--provider" || arg === "--dynamic" || arg.startsWith("--profile=") || arg.startsWith("--provider="))) {
   throw new Error("Model profile/provider installation flags were removed. Configure Pulso models with /pulso-configure.");
 }
@@ -29,8 +30,29 @@ const pluginPaths = [
 const formattingOptions = { insertSpaces: true, tabSize: 2, eol: "\n" };
 
 if (!["install", "uninstall"].includes(operation)) {
-  throw new Error("Usage: node scripts/install.mjs <install|uninstall> [--set-default] [--force]");
+  throw new Error("Usage: node scripts/install.mjs <install|uninstall> [--set-default] [--no-model-preset] [--force]");
 }
+
+const agentRoles = {
+  pulso: "reasoning",
+  "pulso-planner": "reasoning",
+  "pulso-challenger": "reasoning",
+  "pulso-verifier": "reasoning",
+  "pulso-integration-auditor": "reasoning",
+  "pulso-security-auditor": "reasoning",
+  "pulso-ui-auditor": "reasoning",
+  "pulso-executor": "execution",
+  "pulso-contact-manager": "execution",
+  "pulso-config-manager": "execution",
+  "pulso-explorer": "static",
+  "pulso-experience-curator": "static",
+  "pulso-delivery-reporter": "static",
+};
+const recommendedModels = {
+  reasoning: "github-copilot/gpt-5.6-terra",
+  execution: "github-copilot/gpt-5.6-luna",
+  static: "github-copilot/gpt-5.6-luna",
+};
 
 function runSync(action) {
   const args = [path.join(projectRoot, "scripts", "sync.mjs"), action];
@@ -65,11 +87,11 @@ function updatedConfigText(legacyProfile) {
     : currentPlugins.filter(plugin => !pluginPaths.includes(plugin));
   text = applyEdits(text, modify(text, ["plugin"], nextPlugins, { formattingOptions }));
 
-  if (legacyProfile?.managed_by === "pulso" && legacyProfile.models && typeof legacyProfile.models === "object") {
-    for (const [agent, model] of Object.entries(legacyProfile.models)) {
-      if (config.agent?.[agent]?.model === model) {
-        text = applyEdits(text, modify(text, ["agent", agent, "model"], undefined, { formattingOptions }));
-      }
+  if (operation === "install" && !noModelPreset) {
+    for (const [agent, role] of Object.entries(agentRoles)) {
+      const current = config.agent?.[agent];
+      if (current && typeof current === "object" && Object.hasOwn(current, "model")) continue;
+      text = applyEdits(text, modify(text, ["agent", agent, "model"], recommendedModels[role], { formattingOptions }));
     }
   }
 
