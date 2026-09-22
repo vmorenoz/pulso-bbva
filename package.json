@@ -1,8 +1,8 @@
 {
   "name": "pulso-opencode",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Adaptive delivery orchestration for OpenCode and GitHub Copilot CLI",
+  "description": "Adaptive delivery orchestration for OpenCode and VS Code Agents",
   "license": "UNLICENSED",
   "bin": {
     "pulso-breaker": "bin/pulso-breaker.js",
@@ -14,7 +14,9 @@
     "bin/",
     "commands/",
     "com.github.copilot/",
-    "copilot/",
+    "docs/",
+    "com.github.copilot/",
+    "vscode/",
     ".github/plugin/marketplace.json",
     "lib/",
     "plugins/",
@@ -23,6 +25,7 @@
     "test/",
     "tools/",
     "README.md",
+    "mcp.json",
     "model-profiles.json",
     "opencode.example.jsonc",
     "plugin.json",
@@ -30,16 +33,15 @@
   ],
   "scripts": {
     "bootstrap": "node scripts/sync.mjs export --force",
-    "build:copilot": "node scripts/build-copilot.mjs",
-    "prepack": "npm run build:copilot",
     "install:local": "node scripts/setup.mjs install",
     "install:local:force": "node scripts/setup.mjs install --force",
     "install:opencode": "node scripts/setup.mjs install --target opencode",
-    "install:copilot": "node scripts/setup.mjs install --target copilot",
-    "install:both": "node scripts/setup.mjs install --target both",
+    "install:vscode": "node scripts/setup.mjs install --target vscode",
+    "uninstall:opencode": "node scripts/setup.mjs uninstall --target opencode",
+    "uninstall:vscode": "node scripts/setup.mjs uninstall --target vscode",
     "uninstall:local": "node scripts/setup.mjs uninstall",
     "dashboard": "node bin/pulso-dashboard.js --open",
-    "test": "npm run build:copilot && node --test test/*.test.js"
+    "test": "node --test test/*.test.js"
   },
   "engines": {
     "node": ">=22.5.0"

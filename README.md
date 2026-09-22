@@ -1,6 +1,6 @@
 # Pulso
 
-**Pulso** convierte una solicitud de ingeniería en un cambio implementado, validado y trazable. Es un framework local de orquestación adaptativa para [OpenCode](https://opencode.ai) y GitHub Copilot CLI que coordina especialistas, protege el alcance y exige evidencia antes de declarar una entrega completa.
+**Pulso** convierte una solicitud de ingeniería en un cambio implementado, validado y trazable. Es un framework local de orquestación adaptativa para [OpenCode](https://opencode.ai) y VS Code Agents que coordina especialistas, protege el alcance y exige evidencia antes de declarar una entrega completa.
 
 Su principio es sencillo: **usar el menor proceso que permita entregar con confianza**. Una corrección acotada va directamente a Executor; planificación, exploración, verificación y auditorías aparecen solo cuando aportan valor real.
 
@@ -20,8 +20,8 @@ Su principio es sencillo: **usar el menor proceso que permita entregar con confi
 | Observabilidad local | Dashboard y métricas muestran objetivos, agentes, duración, validaciones, reparaciones e intervenciones humanas. |
 | Diagnóstico y recuperación | Doctor, *leases* recuperables y reparación de experiencia permiten detectar y resolver estado inconsistente sin borrar trabajo útil. |
 | Configuración de modelos | `/pulso-configure` descubre el catálogo real de OpenCode y guía presets rápidos o asignaciones por agente, globales o por proyecto. |
-| OpenCode y Copilot CLI | Comparte protocolo y plano de control mediante adaptadores específicos, sin contaminar sesiones donde Pulso no está activo. |
-| Contexto BBVA | Activa reglas especializadas para BBVA, CELLS y APX solo cuando el repositorio proporciona evidencia suficiente. |
+| OpenCode y VS Code Agents | Comparte protocolo y plano de control mediante adaptadores específicos, sin contaminar sesiones donde Pulso no está activo. |
+| Contexto BBVA | Distribuye skills de Pulso para BBVA, CELLS, APX y testing; se activan solo cuando el repositorio proporciona evidencia suficiente. |
 
 ## Por qué Pulso
 
@@ -30,7 +30,7 @@ Su principio es sencillo: **usar el menor proceso que permita entregar con confi
 - **No confunde actividad con progreso.** Detiene ciclos repetitivos y mantiene disponibles el diagnóstico y la evidencia.
 - **No hace crecer su prompt con cada extensión.** Los agentes personalizados viven en una agenda consultada bajo demanda.
 - **No convierte todo en memoria.** Solo cura resultados verificados con valor reutilizable.
-- **No obliga a cambiar de herramientas.** Funciona sobre los flujos nativos de OpenCode y Copilot CLI.
+- **No obliga a cambiar de herramientas.** Funciona sobre los flujos nativos de OpenCode y VS Code Agents.
 
 ## Arquitectura y flujo de entrega
 
@@ -118,8 +118,18 @@ Los fallos de infraestructura —por ejemplo, dependencias ausentes, puertos ocu
 ## Requisitos
 
 - Node.js 22.5 o superior; el motor de experiencia utiliza `node:sqlite`.
-- OpenCode con un proveedor de modelos configurado, GitHub Copilot CLI, o ambos.
+- OpenCode con un proveedor de modelos configurado o VS Code Agent Host.
 - `npm` para instalar dependencias y ejecutar los comandos del proyecto.
+
+## Límites de VS Code Agent Host
+
+La distribución de VS Code instala agentes, el MCP de control, hooks y `/pulso-doctor` en las rutas nativas de Agent Host bajo `~/.copilot`. No instala ni anuncia capacidades que Agent Host no ofrece con un contrato estable:
+
+- `/pulso-configure` y `pulso-config-manager`: la asignación de modelos por agente es exclusiva de OpenCode.
+- Los agentes built-in de Agent Host no se descubren ni registran como contactos. `/pulso-autointegrate` sí gestiona agentes externos definidos por el usuario o el workspace en `~/.copilot/agents` o `.github/agents`.
+- `/pulso-dashboard` y métricas: los eventos de ejecución y tokens de Agent Host no permiten datos consistentes.
+
+Estas capacidades siguen disponibles sin cambios en OpenCode. En VS Code, `pulso_capabilities` devuelve explícitamente la lista soportada.
 
 ## Desarrollo
 
@@ -140,8 +150,7 @@ En ejecución no interactiva se conserva OpenCode como destino predeterminado po
 
 ```bash
 npm run install:opencode
-npm run install:copilot
-npm run install:both
+npm run install:vscode
 ```
 
 ### Configuración interactiva de modelos en OpenCode
@@ -159,11 +168,13 @@ La configuración puede guardarse globalmente en la instalación de OpenCode o �
 
 > **Nota sobre el ciclo de vida de OpenCode:** OpenCode carga la configuración de modelos al arrancar y no la recarga en caliente. Después de aplicar el wizard es necesario cerrar y reiniciar OpenCode.
 
-El adaptador OpenCode usa `~/.config/opencode` de forma predeterminada; `OPENCODE_CONFIG_DIR` permite elegir otra instalación. El adaptador Copilot instala el plugin local `pulso`, sus agentes, skill, hooks y servidor MCP. La instalación deja Pulso disponible, pero no lo selecciona como agente predeterminado ni cambia los modelos configurados en OpenCode. Inicie una sesión Copilot con `copilot --agent pulso`. Para hacer opt-in al agente predeterminado de OpenCode:
+El adaptador OpenCode usa `~/.config/opencode` de forma predeterminada; `OPENCODE_CONFIG_DIR` permite elegir otra instalación. El adaptador VS Code registra un plugin local con agentes, skill, hooks y servidor MCP. La instalación deja Pulso disponible, conserva los modelos ya configurados y no lo selecciona como agente predeterminado. Para hacer opt-in al agente predeterminado de OpenCode:
 
 ```bash
 npm run install:opencode -- --set-default
 ```
+
+Para instalar sin aplicar el preset de modelos, use `npm run install:opencode -- --no-model-preset`.
 
 El instalador no sobrescribe archivos administrados que hayan divergido de este repositorio. Revise primero esas diferencias y use el siguiente comando solo cuando el reemplazo sea intencional:
 
@@ -177,25 +188,25 @@ Para retirar únicamente los archivos gestionados por el proyecto que siguen coi
 npm run uninstall:local
 ```
 
-Reinicie OpenCode o abra una sesión nueva de Copilot CLI después de instalar o desinstalar: ambos runtimes descubren agentes, skills, herramientas y plugins al iniciar la sesión, pero Pulso difiere su trabajo de estado hasta una activación explícita.
+Reinicie OpenCode o recargue la ventana de VS Code después de instalar o desinstalar: ambos runtimes descubren agentes, skills, herramientas y plugins al iniciar la sesión, pero Pulso difiere su trabajo de estado hasta una activación explícita.
 
 ## Adaptadores de runtime
 
 OpenCode sincroniza los archivos listados en `pulso.manifest.json` y registra circuit breaker y experiencia. Ambos plugins permanecen inertes en sesiones ajenas: SQLite, mantenimiento y migraciones se activan con el primer mensaje de un agente Pulso o con una operación Pulso explícita. `--set-default` permite configurar `pulso` como agente predeterminado de forma voluntaria.
 
-Copilot CLI consume este repositorio como un plugin Agent Plugins 1.0. Los perfiles en `copilot/profiles/<profile>/agents/` se generan desde los agentes canónicos de `agents/` y el instalador coloca únicamente el perfil elegido en `~/.copilot/agents`; el plugin no aporta una segunda copia. `skills/pulso-protocol/` se comparte sin duplicación. Los perfiles `pulso` y `pulso-executor` registran `pulso-control` como MCP propio del agente; el servidor no se aporta globalmente. Solo `pulso` es invocable por el usuario. No se inyecta contexto Pulso al iniciar ni en cada prompt. El MCP permite al primario escribir solo `PULSO.md` y `.pulso/**`, consultar metadatos Git de solo lectura y diagnosticar leases sin identidad de executor. Los hooks activan exclusivamente Planner y Executor en un cache temporal del sistema: Planner solo puede editar `.pulso/**`; Executor no puede editar ni ejecutar comandos antes de adquirir un lease con su `owner_session`, y después se aplican alcance y circuito. Las sesiones ordinarias no reciben contexto ni MCP.
+VS Code Agents consume este repositorio como un plugin Agent Plugins 1.0. Los agentes en `com.github.copilot/agents/` reflejan los contratos de OpenCode y solo `pulso` es invocable por el usuario. `skills/pulso-protocol/` se comparte sin duplicación. El MCP usa `${PLUGIN_ROOT}`, no requiere binarios externos y proyecta contratos internos al worker autorizado. Los hooks aplican scope, leases, circuit breaker y Git gate sobre eventos nativos; las sesiones ordinarias no reciben estado de Pulso.
 
-Los runtimes deben descubrir al inicio el catálogo de agentes y skills para poder seleccionarlos. Pulso evita trabajo activo fuera de sus sesiones: OpenCode no abre SQLite ni migra estado, y Copilot no añade instrucciones globales ni inicia `pulso-control`. En Copilot, Planner no recibe MCP y Executor recibe únicamente `pulso_lease`.
+Los runtimes deben descubrir al inicio el catálogo de agentes y skills para poder seleccionarlos. Pulso evita trabajo activo fuera de sus sesiones: OpenCode no abre SQLite ni migra estado, y VS Code no añade instrucciones globales ni inicia `pulso-control` fuera del plugin.
 
 Flujo recomendado:
 
 ```bash
 npm install
 npm test
-npm run install:both
+npm run install:vscode
 ```
 
-Tras reiniciar OpenCode, Pulso quedará disponible para selección; solo será el agente predeterminado si se instaló con `--set-default`. En Copilot CLI se selecciona con `copilot --agent pulso` o `/agent`.
+Tras reiniciar OpenCode, Pulso quedará disponible para selección; solo será el agente predeterminado si se instaló con `--set-default`. En VS Code se selecciona desde el catálogo de agentes.
 
 ## Contactos de agentes
 
@@ -209,7 +220,7 @@ Pulso escanea definiciones globales y de proyecto, permite elegir agentes nuevos
 
 Durante una entrega, Pulso consulta la agenda únicamente cuando necesita un especialista que sus agentes internos no cubren. Solo puede delegar contactos vigentes y aprobados, siempre mediante `task` y con `PULSO_TASK_ID` y `PULSO_CONTACT_ID`. Las entrevistas son de solo lectura; los contactos con capacidad de edición quedan sujetos al scope, lease y circuit breaker de la tarea y nunca pueden modificar `.pulso/**`.
 
-Esta primera versión está disponible en OpenCode. El soporte equivalente para Copilot CLI queda fuera de este alcance.
+OpenCode y VS Code Agents comparten el mismo core de control-plane; los adapters no introducen workflows ni persistencia nuevos.
 
 ## Dashboard y Doctor
 
@@ -225,7 +236,7 @@ o, desde este repositorio:
 npm run dashboard
 ```
 
-El dashboard muestra estado y duración de objetivos, tokens y ejecuciones, actividad por agente, intervenciones humanas, ciclos de reparación, memorias verificadas y preferencias de perfil. OpenCode registra tokens mediante sus eventos de modelo; Copilot MCP no ofrece un contrato estable de esos eventos, por lo que sus objetivos se marcan con seguimiento de tokens no disponible, nunca como consumo cero. El doctor de Copilot informa la misma limitación.
+El dashboard muestra estado y duración de objetivos, tokens y ejecuciones, actividad por agente, intervenciones humanas, ciclos de reparación, memorias verificadas y preferencias de perfil. OpenCode registra tokens mediante sus eventos de modelo; VS Code Agents no ofrece un contrato estable de esos eventos, por lo que sus objetivos se marcan con seguimiento de tokens no disponible, nunca como consumo cero.
 
 El servidor se enlaza exclusivamente a `127.0.0.1`, usa un token temporal de acceso, lee SQLite sin modificarlo y se detiene tras 30 minutos de inactividad o al pulsar **Stop server**.
 
@@ -246,8 +257,8 @@ El archivo de ejemplo configura `pulso` como `default_agent`, registra los plugi
 ```text
 agents/                   Orquestador y especialistas acotados
 bin/                      CLI de operación local
-com.github.copilot/       Comandos y hooks del plugin Copilot
-copilot/                  Adaptador MCP y perfiles de agentes para Copilot CLI
+com.github.copilot/       Agentes y hooks de Agent Plugins para VS Code
+vscode/                   Adaptador MCP y hooks de VS Code Agents
 commands/                 Comandos interactivos de OpenCode
 lib/                      Implementación del plano de control
 plugins/                  Circuit breaker y motor de experiencia

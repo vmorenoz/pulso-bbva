@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "pulso",
-  "version": "0.2.0",
-  "description": "Adaptive software delivery orchestration for OpenCode and GitHub Copilot CLI.",
+  "version": "0.3.3",
+  "description": "Adaptive software delivery orchestration for OpenCode and VS Code Agents.",
   "repository": "https://github.com/vmorenoz/pulso-bbva",
-  "keywords": ["delivery", "orchestration", "agents", "copilot"]
+  "keywords": ["delivery", "orchestration", "agents", "vscode"]
 }

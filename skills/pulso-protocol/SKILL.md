@@ -51,7 +51,7 @@ Never change another owner's section without explicit Pulso delegation.
 
 Before substantive work, Pulso calls `pulso_delivery(action="begin")` after intent and scope are concrete. A chat message alone never creates an objective: questions, explanations, read-only reviews, and casual conversation stay stateless. The plugin creates or resumes the objective and projects one task contract.
 
-On GitHub Copilot CLI, where `pulso_delivery` is not exposed, use the equivalent `pulso_experience_start`, routing, skill, and primary state tools supplied by `pulso-control`; the generated Copilot agent instructions are authoritative for that runtime.
+In VS Code Agents, the `pulso-control` adapter projects the same delivery contract without exposing task state to workers.
 
 Before creating a task, decide `reuse` or `new`. Corrections, retries, validation, verification, audits, commit, push, and integration remain lifecycle stages of the existing task when deliverable and scope are stable. Create another task only for a separately deliverable code outcome with materially different scope or criteria.
 
@@ -72,7 +72,7 @@ Explorer is only for a concrete iterative/cross-file fact. Challenger is one opt
 
 The control plugin acquires a 30-minute lease before Executor tools run, heartbeats on every tool call, and releases it on terminal session events. Before retrying a task it queries OpenCode session status: busy/retrying owners remain protected; idle or missing owners are released and replaced automatically. If status lookup is unavailable, a stale heartbeat becomes recoverable after a bounded grace period. Manual CLI release remains an operator fallback, not a normal workflow.
 
-On GitHub Copilot CLI, its generated agents and hooks retain the explicit `pulso-control` lease flow.
+In VS Code Agents, hooks enforce the same `pulso-control` lease flow.
 
 Repeated zero-progress behavioral failures may open the circuit for mutations; token usage and runner-infrastructure failures are observational. Read-only diagnosis remains available. Only a human resets an open circuit.
 

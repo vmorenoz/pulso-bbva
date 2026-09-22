@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,6 +17,7 @@ const configFile = fs.existsSync(path.join(configRoot, "opencode.jsonc"))
     ? path.join(configRoot, "opencode.json")
     : path.join(configRoot, "opencode.jsonc"));
 const legacyProfileFile = path.join(configRoot, "pulso-profile.json");
+const legacyCliHome = path.join(os.homedir(), ".copilot");
 const operation = process.argv[2];
 const force = process.argv.includes("--force");
 const setDefault = process.argv.includes("--set-default");
@@ -72,6 +74,23 @@ function migrateLegacyRuntime() {
   }
 }
 
+function cleanLegacyCliArtifacts() {
+  const profileFile = path.join(legacyCliHome, "pulso-profile.json");
+  let profile = null;
+  try { profile = JSON.parse(fs.readFileSync(profileFile, "utf8")); } catch { return; }
+  if (profile?.managed_by !== "pulso" || !profile.files || typeof profile.files !== "object") return;
+  const preserved = [];
+  for (const [name, expected] of Object.entries(profile.files)) {
+    const file = path.join(legacyCliHome, "agents", name);
+    if (!fs.existsSync(file)) continue;
+    const actual = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+    if (actual === expected) fs.rmSync(file, { force: true });
+    else preserved.push(path.relative(legacyCliHome, file));
+  }
+  fs.rmSync(profileFile, { force: true });
+  if (preserved.length) process.stdout.write(`migration: preserved customized legacy CLI artifacts: ${preserved.join(", ")}\n`);
+}
+
 function updatedConfigText(legacyProfile) {
   fs.mkdirSync(configRoot, { recursive: true });
   let text = fs.existsSync(configFile)
@@ -114,6 +133,7 @@ stateFiles.withFileLock(configFile, () => {
   fs.renameSync(temporary, configFile);
   try {
     if (legacyProfile?.managed_by === "pulso") fs.rmSync(legacyProfileFile, { force: true });
+    if (operation === "install") cleanLegacyCliArtifacts();
   } catch {}
 });
 

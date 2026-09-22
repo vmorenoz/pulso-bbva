@@ -775,13 +775,19 @@ export async function PulsoExperienceEnginePlugin(input) {
             if (!args.status || !args.summary || (args.evidence || []).length === 0) throw new Error("reconcile requires status, summary, and evidence.");
             const db = database();
             const projectKey = core.projectKey(context.directory);
-            const active = db.prepare(`SELECT o.objective_key, o.id, o.title FROM objectives o
-              WHERE o.project_key = ? AND o.status = 'active'
+            let active = args.status === "verified" ? db.prepare(`SELECT o.objective_key, o.id, o.title FROM objectives o
+              WHERE o.project_key = ? AND o.status = 'partially_verified'
                 AND NOT EXISTS (SELECT 1 FROM active_deliveries d WHERE d.objective_key = o.objective_key)
-              ORDER BY o.started_at DESC`).all(projectKey);
+              ORDER BY o.finished_at DESC, o.started_at DESC LIMIT 1`).all(projectKey) : [];
+            if (active.length === 0) {
+              active = db.prepare(`SELECT o.objective_key, o.id, o.title FROM objectives o
+                WHERE o.project_key = ? AND o.status = 'active'
+                  AND NOT EXISTS (SELECT 1 FROM active_deliveries d WHERE d.objective_key = o.objective_key)
+                ORDER BY o.started_at DESC`).all(projectKey);
+            }
             if (active.length === 0) {
               db.close();
-              throw new Error("No historical active delivery exists to reconcile.");
+              throw new Error("No historical delivery exists to reconcile.");
             }
             const evidence = args.evidence || [];
             const gaps = args.verification_gaps || [];
@@ -912,6 +918,7 @@ export async function PulsoExperienceEnginePlugin(input) {
         description: "Summarize the latest Pulso delivery for the current project without exposing coordination records.",
         args: {},
         execute: async (_, context) => {
+          if (!(await activate())) return "El estado de entregas no está disponible: el almacenamiento local de experiencia no pudo inicializarse.";
           const db = database();
           const row = db.prepare(`SELECT title, status, summary, finished_at FROM objectives
             WHERE project_key = ? ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, COALESCE(finished_at, started_at) DESC LIMIT 1`).get(core.projectKey(context.directory));

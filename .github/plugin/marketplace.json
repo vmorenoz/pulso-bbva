@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Pulso adaptive delivery orchestration plugins",
-    "version": "0.2.0"
+    "version": "0.3.3"
   },
   "plugins": [
     {
       "name": "pulso",
-      "description": "Adaptive software delivery orchestration for OpenCode and GitHub Copilot CLI.",
-      "version": "0.2.0",
+      "description": "Adaptive software delivery orchestration for OpenCode and VS Code Agents.",
+      "version": "0.3.3",
       "source": "."
     }
   ]
