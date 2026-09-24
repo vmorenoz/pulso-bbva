@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "pulso": {
+      "command": "bun",
+      "args": ["run", "packages/capabilities-mcp/src/mcp/stdio.ts"],
+      "env": { "PULSO_WORKSPACE": "${workspaceFolder}" }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "pulso",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "biome check .",
+    "test": "bun test packages/*/test",
+    "test:mcp": "bun test packages/capabilities-mcp/test/server.test.ts",
+    "test:orchestration": "bun test packages/orchestration/test",
+    "test:integration": "bun test tests/integration",
+    "test:e2e": "bun test tests/e2e",
+    "test:runtime": "bun test packages/capabilities-mcp/test/runtime.test.ts",
+    "build": "bun build apps/cli/src/index.ts packages/capabilities-mcp/src/index.ts packages/orchestration/src/index.ts --outdir dist --target bun"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.14",
+    "bun-types": "^1.4.2",
+    "typescript": "^5.9.3"
+  }
+}
