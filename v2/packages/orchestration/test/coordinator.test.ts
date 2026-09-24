@@ -52,6 +52,8 @@ test("parallel delegations retain isolated identities when results arrive revers
   prepare(coordinator, "b");
   coordinator.attachBinding("a", "binding-a");
   coordinator.attachBinding("b", "binding-b");
+  coordinator.markRunning("a");
+  coordinator.markRunning("b");
   const second = coordinator.acceptResult(
     "b",
     serializeAgentResult(resultFor("b", "completed")),
@@ -69,6 +71,7 @@ test("failed, blocked and cancelled results map once without retry selection", (
     const coordinator = new DelegationCoordinator();
     prepare(coordinator, status);
     coordinator.attachBinding(status, `binding-${status}`);
+    coordinator.markRunning(status);
     const accepted = coordinator.acceptResult(
       status,
       serializeAgentResult(resultFor(status, status)),
@@ -88,5 +91,91 @@ test("lost bindings are observed without replacing lower-layer recovery", () => 
   const coordinator = new DelegationCoordinator();
   prepare(coordinator, "lost");
   coordinator.attachBinding("lost", "binding-lost");
+  coordinator.markRunning("lost");
   expect(coordinator.observeBindingLost("lost").status).toBe("lost");
+});
+
+test("rejects results before running without consuming the delegation", () => {
+  const coordinator = new DelegationCoordinator();
+  prepare(coordinator, "early");
+  expect(() =>
+    coordinator.acceptResult(
+      "early",
+      serializeAgentResult(resultFor("early", "completed")),
+    ),
+  ).toThrow("INVALID_DELEGATION_STATE");
+  coordinator.attachBinding("early", "binding-early");
+  expect(() =>
+    coordinator.acceptResult(
+      "early",
+      serializeAgentResult(resultFor("early", "completed")),
+    ),
+  ).toThrow("INVALID_DELEGATION_STATE");
+  expect(coordinator.get("early")?.status).toBe("bound");
+});
+
+test("rejects duplicate and post-terminal results without another action", () => {
+  const coordinator = new DelegationCoordinator();
+  for (const status of [
+    "completed",
+    "failed",
+    "blocked",
+    "cancelled",
+  ] as const) {
+    prepare(coordinator, status);
+    coordinator.attachBinding(status, `binding-${status}`);
+    coordinator.markRunning(status);
+    coordinator.acceptResult(
+      status,
+      serializeAgentResult(resultFor(status, status)),
+    );
+    expect(() =>
+      coordinator.acceptResult(
+        status,
+        serializeAgentResult(resultFor(status, "completed")),
+      ),
+    ).toThrow("DELEGATION_ALREADY_TERMINAL");
+  }
+  prepare(coordinator, "lost-after");
+  coordinator.attachBinding("lost-after", "binding-lost-after");
+  coordinator.markRunning("lost-after");
+  coordinator.observeBindingLost("lost-after");
+  expect(() =>
+    coordinator.acceptResult(
+      "lost-after",
+      serializeAgentResult(resultFor("lost-after", "completed")),
+    ),
+  ).toThrow("DELEGATION_ALREADY_TERMINAL");
+});
+
+test("repairs one outer fence before identity validation and rejects malformed input", () => {
+  const coordinator = new DelegationCoordinator();
+  prepare(coordinator, "repaired");
+  coordinator.attachBinding("repaired", "binding-repaired");
+  coordinator.markRunning("repaired");
+  const repaired = coordinator.acceptResult(
+    "repaired",
+    `\`\`\`xml\n${serializeAgentResult(resultFor("repaired", "completed"))}\n\`\`\``,
+  );
+  expect(repaired.action.type).toBe("complete");
+
+  const malformed = new DelegationCoordinator();
+  prepare(malformed, "malformed");
+  malformed.attachBinding("malformed", "binding-malformed");
+  malformed.markRunning("malformed");
+  expect(() =>
+    malformed.acceptResult("malformed", "not a protocol result"),
+  ).toThrow("PROTOCOL_PARSE_ERROR");
+
+  const mismatch = new DelegationCoordinator();
+  prepare(mismatch, "identity");
+  mismatch.attachBinding("identity", "binding-identity");
+  mismatch.markRunning("identity");
+  const mismatched = { ...resultFor("identity", "completed"), workId: "other" };
+  expect(() =>
+    mismatch.acceptResult(
+      "identity",
+      `\`\`\`xml\n${serializeAgentResult(mismatched)}\n\`\`\``,
+    ),
+  ).toThrow("WORK_ID_MISMATCH");
 });

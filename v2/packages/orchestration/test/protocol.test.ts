@@ -102,7 +102,33 @@ test("repair only removes a single outer fence and malformed structures fail", (
   ).toEqual(result);
   expect(() =>
     repairAgentResult('```xml\n<pulso-result v="1">bad</pulso-result>\n```'),
-  ).toThrow("Protocol repair failed");
+  ).toThrow("PROTOCOL_PARSE_ERROR");
+});
+
+test("context warnings are opt-in and never remove context", () => {
+  const built = buildTaskEnvelope({
+    delegationId: "dlg-budget",
+    specialist: "explorer",
+    workId: "work-budget",
+    workItemId: "item-budget",
+    objective: "Inspect",
+    facts: ["long fact"],
+    priorResults: [
+      {
+        delegationId: "prior",
+        specialist: "explorer",
+        summary: "large prior result",
+      },
+    ],
+    contextBudget: { warnAt: 0, priorResultWarnAt: 1, inlineSnippetWarnAt: 1 },
+  });
+  expect(built.warnings).toEqual([
+    "context exceeds configured warning budget",
+    "prior result exceeds configured warning budget",
+    "inline snippet exceeds configured warning budget",
+  ]);
+  expect(built.task.context?.facts).toEqual(["long fact"]);
+  expect(built.task.context?.priorResults).toHaveLength(1);
 });
 
 test("context builder deduplicates, prioritizes and omits empty sections", () => {

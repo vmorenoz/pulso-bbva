@@ -4,21 +4,38 @@ import type {
   SpecialistId,
   TaskEnvelope,
 } from "./schemas";
-export const contextWarnings = (task: TaskEnvelope): string[] => {
+
+export interface ContextBudget {
+  warnAt?: number;
+  priorResultWarnAt?: number;
+  inlineSnippetWarnAt?: number;
+}
+
+export const contextWarnings = (
+  task: TaskEnvelope,
+  budget: ContextBudget = {},
+): string[] => {
   const warnings: string[] = [];
   const facts = task.context?.facts ?? [];
   const refs = task.context?.references ?? [];
-  if (facts.length > 12) warnings.push("too many facts");
+  const priorResultWarnAt = budget.priorResultWarnAt;
+  const inlineSnippetWarnAt = budget.inlineSnippetWarnAt;
+  if (budget.warnAt !== undefined && facts.length + refs.length > budget.warnAt)
+    warnings.push("context exceeds configured warning budget");
   if (
-    task.context?.priorResults?.some((result) => result.summary.length > 1200)
-  )
-    warnings.push("large prior result");
-  if (
-    [...facts, ...refs.map((ref) => ref.ref)].some(
-      (value) => value.length > 2000,
+    priorResultWarnAt !== undefined &&
+    task.context?.priorResults?.some(
+      (result) => result.summary.length > priorResultWarnAt,
     )
   )
-    warnings.push("large inline snippets");
+    warnings.push("prior result exceeds configured warning budget");
+  if (
+    inlineSnippetWarnAt !== undefined &&
+    [...facts, ...refs.map((ref) => ref.ref)].some(
+      (value) => value.length > inlineSnippetWarnAt,
+    )
+  )
+    warnings.push("inline snippet exceeds configured warning budget");
   if (new Set(refs.map((ref) => ref.ref)).size !== refs.length)
     warnings.push("duplicated context");
   return warnings;
@@ -43,6 +60,7 @@ export interface TaskContextBuildInput extends TaskContextInput {
   workId: string;
   workItemId: string;
   objective: string;
+  contextBudget?: ContextBudget;
 }
 
 const compactValues = (values?: Array<string | PrioritizedValue>) => {
@@ -127,5 +145,5 @@ export const buildTaskEnvelope = (input: TaskContextBuildInput) => {
     ...(optional(requestedEvidence) ? { requestedEvidence } : {}),
     output: { contract: "pulso-result/1" },
   };
-  return { task, warnings: contextWarnings(task) };
+  return { task, warnings: contextWarnings(task, input.contextBudget) };
 };

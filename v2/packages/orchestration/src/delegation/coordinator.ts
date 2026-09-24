@@ -1,6 +1,10 @@
 import type { TaskContextBuildInput } from "../protocol/context-budget";
 import { buildTaskEnvelope } from "../protocol/context-budget";
-import { parseAgentResult } from "../protocol/parse";
+import {
+  parseAgentResult,
+  validateAgentResultIdentity,
+} from "../protocol/parse";
+import { repairAgentResult } from "../protocol/repair";
 import type {
   AgentResult,
   SpecialistId,
@@ -78,6 +82,7 @@ export class DelegationCoordinator {
 
   attachBinding(delegationId: string, bindingId: string): Delegation {
     const delegation = this.require(delegationId);
+    this.ensureNotTerminal(delegation);
     if (delegation.status !== "prepared")
       throw new Error("DELEGATION_NOT_PREPARED");
     delegation.bindingId = bindingId;
@@ -87,6 +92,7 @@ export class DelegationCoordinator {
 
   markRunning(delegationId: string): Delegation {
     const delegation = this.require(delegationId);
+    this.ensureNotTerminal(delegation);
     if (delegation.status !== "bound") throw new Error("DELEGATION_NOT_BOUND");
     delegation.status = "running";
     return { ...delegation };
@@ -94,14 +100,26 @@ export class DelegationCoordinator {
 
   acceptResult(delegationId: string, serializedResult: string) {
     const delegation = this.require(delegationId);
-    if (!delegation.bindingId) throw new Error("DELEGATION_NOT_BOUND");
+    this.ensureNotTerminal(delegation);
+    if (delegation.status !== "running")
+      throw new Error("INVALID_DELEGATION_STATE");
     try {
-      const result = parseAgentResult(serializedResult, delegation);
+      let result: AgentResult;
+      try {
+        result = parseAgentResult(serializedResult);
+      } catch {
+        result = repairAgentResult(serializedResult);
+      }
+      validateAgentResultIdentity(result, delegation);
       const action = this.mapResultLifecycle(delegation, result);
       delegation.status = result.status;
       return { result, action, delegation: { ...delegation } };
     } catch (error) {
       delegation.status = "protocol_error";
+      if (error instanceof Error && error.message === "PROTOCOL_PARSE_ERROR")
+        throw error;
+      if (error instanceof Error && error.message.startsWith("PROTOCOL_"))
+        throw new Error("PROTOCOL_PARSE_ERROR");
       throw error;
     }
   }
@@ -138,6 +156,9 @@ export class DelegationCoordinator {
 
   observeBindingLost(delegationId: string): Delegation {
     const delegation = this.require(delegationId);
+    this.ensureNotTerminal(delegation);
+    if (delegation.status !== "running")
+      throw new Error("INVALID_DELEGATION_STATE");
     delegation.status = "lost";
     return { ...delegation };
   }
@@ -151,5 +172,19 @@ export class DelegationCoordinator {
     const delegation = this.delegations.get(delegationId);
     if (!delegation) throw new Error("DELEGATION_NOT_FOUND");
     return delegation;
+  }
+
+  private ensureNotTerminal(delegation: Delegation) {
+    if (
+      [
+        "completed",
+        "failed",
+        "blocked",
+        "cancelled",
+        "lost",
+        "protocol_error",
+      ].includes(delegation.status)
+    )
+      throw new Error("DELEGATION_ALREADY_TERMINAL");
   }
 }

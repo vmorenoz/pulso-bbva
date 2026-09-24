@@ -1,12 +1,11 @@
 import { parseAgentResult } from "./parse";
+
 export const repairAgentResult = (source: string) => {
-  const candidate = source
-    .trim()
-    .replace(/^```(?:xml)?\s*/i, "")
-    .replace(/\s*```$/, "");
+  const match = /^\s*```(?:xml)?\s*\n?([\s\S]*?)\n?\s*```\s*$/i.exec(source);
+  if (!match) throw new Error("PROTOCOL_PARSE_ERROR");
   try {
-    return parseAgentResult(candidate);
+    return parseAgentResult(match[1]);
   } catch {
-    throw new Error("Protocol repair failed after one compact normalization");
+    throw new Error("PROTOCOL_PARSE_ERROR");
   }
 };
