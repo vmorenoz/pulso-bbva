@@ -1,15 +1,17 @@
 import { expect, test } from "bun:test";
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { agentDefinitions, agentIds } from "../src/agents/definitions";
+import { openCodeRuntime } from "../src/runtimes/opencode";
+import { vscodeCopilotRuntime } from "../src/runtimes/vscode-copilot";
 
 const source = join(import.meta.dir, "..");
 const frontmatter = (source: string) =>
   source.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
 
 test("agent definitions enforce the Pulso-only topology without fixed routes", async () => {
-  const agents = join(source, "agents");
   const pulso = frontmatter(
-    await readFile(join(agents, "pulso.agent.md"), "utf8"),
+    vscodeCopilotRuntime.renderAgent(agentDefinitions.pulso).content,
   );
   expect(pulso).toContain("user-invocable: true");
   expect(pulso).toContain("'agent'");
@@ -24,19 +26,37 @@ test("agent definitions enforce the Pulso-only topology without fixed routes", a
     "security-auditor",
   ]) {
     const content = frontmatter(
-      await readFile(join(agents, `${name}.agent.md`), "utf8"),
+      vscodeCopilotRuntime.renderAgent(
+        agentDefinitions[name as keyof typeof agentDefinitions],
+      ).content,
     );
     expect(content).toContain("agents: []");
     expect(content).toContain("user-invocable: false");
     expect(content).not.toContain("'agent'");
     expect(content).not.toContain("pulso/");
   }
-  const all = await Promise.all(
-    (await readdir(agents)).map((name) => readFile(join(agents, name), "utf8")),
+  const all = agentIds.map(
+    (id) => vscodeCopilotRuntime.renderAgent(agentDefinitions[id]).content,
   );
   expect(all.join("\n")).not.toMatch(
     /quickRoute|plannedRoute|defaultPipeline|alwaysPlanner|alwaysVerifier/,
   );
+});
+
+test("both runtimes render the same canonical semantic prompt and skill roster", () => {
+  for (const id of agentIds) {
+    const vscode = vscodeCopilotRuntime.renderAgent(
+      agentDefinitions[id],
+    ).content;
+    const opencode = openCodeRuntime.renderAgent(agentDefinitions[id]).content;
+    const body = (value: string) =>
+      value
+        .slice(value.indexOf("\n---\n") + 5)
+        .replace(/<runtime_contract>[\s\S]*?<\/runtime_contract>\n?/, "");
+    expect(body(vscode)).toBe(body(opencode));
+  }
+  expect(vscodeCopilotRuntime.capabilities).toBeDefined();
+  expect(agentDefinitions.pulso.skills).toEqual(agentDefinitions.pulso.skills);
 });
 
 test("all six skills retain valid metadata and avoid legacy control-plane dependencies", async () => {

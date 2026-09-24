@@ -2,7 +2,10 @@ import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { InstallationConflictError, installVscodeCustomizations } from "../src";
+import {
+  InstallationConflictError,
+  installVscodeCustomizations,
+} from "../../installer/src";
 
 test("workspace installation is idempotent and preserves foreign MCP servers", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "pulso-install-"));

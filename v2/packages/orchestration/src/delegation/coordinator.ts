@@ -10,6 +10,7 @@ import type {
   SpecialistId,
   TaskEnvelope,
 } from "../protocol/schemas";
+import { resultLifecycleAction } from "../protocol/schemas";
 import { serializeTaskEnvelope } from "../protocol/serialize";
 
 export type DelegationStatus =
@@ -129,26 +130,27 @@ export class DelegationCoordinator {
     result: AgentResult,
   ): LifecycleAction {
     if (!delegation.bindingId) throw new Error("DELEGATION_NOT_BOUND");
-    if (result.status === "completed")
+    const type = resultLifecycleAction[result.status];
+    if (type === "complete")
       return {
-        type: "complete",
+        type,
         bindingId: delegation.bindingId,
         artifacts: result.artifacts,
       };
-    if (result.status === "failed")
+    if (type === "fail")
       return {
-        type: "fail",
+        type,
         bindingId: delegation.bindingId,
         reason: reason(result),
       };
-    if (result.status === "cancelled")
+    if (type === "cancel")
       return {
-        type: "cancel",
+        type,
         bindingId: delegation.bindingId,
         reason: result.summary,
       };
     return {
-      type: "block",
+      type,
       bindingId: delegation.bindingId,
       reason: reason(result),
     };

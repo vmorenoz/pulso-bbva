@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
+import {
+  agentDefinitions,
+  agentIds,
+} from "../../../orchestration/src/agents/definitions";
+import { vscodeCopilotRuntime } from "../../../orchestration/src/runtimes/vscode-copilot";
 
 const manifestName = ".pulso-orchestration.json";
 const managedVersion = 1;
@@ -50,7 +55,7 @@ const readOptional = async (path: string) => {
 
 const managedFiles = async (source: string) => {
   const files: Array<{ target: string; content: string }> = [];
-  for (const directory of ["agents", "skills"]) {
+  for (const directory of ["skills"]) {
     const base = join(source, directory);
     const entries = await readdir(base, {
       recursive: true,
@@ -62,6 +67,13 @@ const managedFiles = async (source: string) => {
       const target = join(".github", directory, relative(base, sourcePath));
       files.push({ target, content: await readFile(sourcePath, "utf8") });
     }
+  }
+  for (const id of agentIds) {
+    const rendered = vscodeCopilotRuntime.renderAgent(agentDefinitions[id]);
+    files.push({
+      target: join(".github", "agents", rendered.path),
+      content: rendered.content,
+    });
   }
   return files;
 };

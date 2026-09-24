@@ -1,6 +1,7 @@
 import type {
   Assignment,
   Execution,
+  Work,
   WorkItem,
   WorkLease,
 } from "../../../../working-system/src/domain";
@@ -50,7 +51,12 @@ export interface WorkingSystemGateway {
   ): Promise<{ execution: Execution; lease: WorkLease }>;
   inspectItem(
     itemId: string,
-  ): Promise<{ items: WorkItem[]; assignments: Assignment[] }>;
+  ): Promise<{ items: WorkItem[]; assignments: Assignment[] } | undefined>;
+  inspectWork(workId: string): Promise<{
+    work?: Work;
+    items: WorkItem[];
+    assignments: Assignment[];
+  }>;
   snapshot(workId: string): Promise<{
     items: WorkItem[];
     assignments: Assignment[];

@@ -4,6 +4,7 @@ import type {
   ExecutionService,
   RecoveryService,
   Store,
+  Work,
   WorkItem,
   WorkLease,
   WorkService,
@@ -127,13 +128,29 @@ export class ExecutionCoordinator implements WorkingSystemGateway {
   async inspectItem(itemId: string) {
     const state = await this.store.read();
     const item = state.items.find((candidate) => candidate.id === itemId);
-    if (!item) throw new Error(`WorkItem not found: ${itemId}`);
+    if (!item) return undefined;
     return {
       items: [item] as WorkItem[],
       assignments: state.assignments.filter(
         (assignment) => assignment.workItemId === itemId,
       ),
     };
+  }
+
+  async inspectWork(workId: string) {
+    const state = await this.store.read();
+    const work = state.works.find((candidate) => candidate.id === workId);
+    const items = state.items.filter(
+      (candidate) => candidate.workId === workId,
+    );
+    const itemIds = new Set(items.map((item) => item.id));
+    return {
+      ...(work ? { work } : {}),
+      items: items as WorkItem[],
+      assignments: state.assignments.filter((assignment) =>
+        itemIds.has(assignment.workItemId),
+      ),
+    } as { work?: Work; items: WorkItem[]; assignments: Assignment[] };
   }
 
   async snapshot(workId: string) {

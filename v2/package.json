@@ -6,11 +6,16 @@
     "packages/*"
   ],
   "scripts": {
+    "install:v2": "npx --yes bun@1.4.2 run packages/installer/src/cli.ts",
+    "uninstall:v2": "npx --yes bun@1.4.2 run packages/installer/src/cli.ts uninstall",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "biome check .",
     "test": "bun test packages/*/test",
     "test:mcp": "bun test packages/capabilities-mcp/test/server.test.ts",
     "test:orchestration": "bun test packages/orchestration/test",
+    "test:runtime-renderers": "bun test packages/orchestration/test/customizations.test.ts packages/orchestration/test/runtime-renderers.test.ts",
+    "test:installer": "bun test packages/installer/test",
+    "test:installer:opencode": "bun test packages/installer/test/opencode-installer.test.ts",
     "test:integration": "bun test tests/integration",
     "test:e2e": "bun test tests/e2e",
     "test:runtime": "bun test packages/capabilities-mcp/test/runtime.test.ts",

@@ -4,6 +4,7 @@ import type {
   SpecialistId,
   TaskEnvelope,
 } from "./schemas";
+import { resultProtocol, taskProtocol } from "./schemas";
 
 export interface ContextBudget {
   warnAt?: number;
@@ -126,7 +127,7 @@ export const buildTaskEnvelope = (input: TaskContextBuildInput) => {
     ...(optional(priorResults) ? { priorResults } : {}),
   };
   const task: TaskEnvelope = {
-    protocol: "pulso-task/1",
+    protocol: taskProtocol.id,
     delegationId: input.delegationId,
     specialist: input.specialist,
     work: { workId: input.workId, workItemId: input.workItemId },
@@ -143,7 +144,7 @@ export const buildTaskEnvelope = (input: TaskContextBuildInput) => {
         }
       : {}),
     ...(optional(requestedEvidence) ? { requestedEvidence } : {}),
-    output: { contract: "pulso-result/1" },
+    output: { contract: resultProtocol.id },
   };
   return { task, warnings: contextWarnings(task, input.contextBudget) };
 };

@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { DelegationCoordinator, serializeAgentResult } from "../src";
+import {
+  DelegationCoordinator,
+  parseTaskEnvelope,
+  serializeAgentResult,
+} from "../src";
 
 const prepare = (coordinator: DelegationCoordinator, delegationId: string) =>
   coordinator.prepareDelegation({
@@ -178,4 +182,92 @@ test("repairs one outer fence before identity validation and rejects malformed i
       `\`\`\`xml\n${serializeAgentResult(mismatched)}\n\`\`\``,
     ),
   ).toThrow("WORK_ID_MISMATCH");
+});
+
+test("session reproduction correlates the serialized Task, Binding and valid Explorer result", () => {
+  const coordinator = new DelegationCoordinator();
+  const delegationId = "smoke-delegation-1";
+  const workId = "smoke-work-1";
+  const workItemId = "smoke-item-1";
+  const prepared = coordinator.prepareDelegation({
+    delegationId,
+    specialist: "explorer",
+    workId,
+    workItemId,
+    objective: "Read-only repository status review",
+    facts: ["Do not modify files"],
+  });
+  const externalExecutionId = prepared.delegation.delegationId;
+  const parsedTask = parseTaskEnvelope(prepared.serializedTask);
+  expect(externalExecutionId).toBe(delegationId);
+  expect(parsedTask).toMatchObject({
+    protocol: "pulso-task/1",
+    delegationId,
+    specialist: "explorer",
+    work: { workId, workItemId },
+    output: { contract: "pulso-result/1" },
+  });
+
+  coordinator.attachBinding(delegationId, "smoke-binding-1");
+  coordinator.markRunning(delegationId);
+  const accepted = coordinator.acceptResult(
+    delegationId,
+    serializeAgentResult({
+      protocol: "pulso-result/1",
+      delegationId: externalExecutionId,
+      specialist: "explorer",
+      workId,
+      workItemId,
+      status: "completed",
+      summary: "Repository status reviewed without changes",
+      specialistResult: {
+        kind: "explorer",
+        findings: [],
+        references: [],
+      },
+    }),
+  );
+  expect(accepted.result).toMatchObject({
+    protocol: "pulso-result/1",
+    delegationId,
+    specialist: "explorer",
+    workId,
+    workItemId,
+    status: "completed",
+    specialistResult: { kind: "explorer" },
+  });
+  expect(accepted.action).toMatchObject({
+    type: "complete",
+    bindingId: "smoke-binding-1",
+  });
+});
+
+test("legacy status and missing identity set protocol_error and yield no lifecycle action", () => {
+  for (const invalidResult of [
+    { ...resultFor("invalid-status", "completed"), status: "succeeded" },
+    (() => {
+      const { delegationId: _, ...missing } = resultFor(
+        "missing-identity",
+        "completed",
+      );
+      return missing;
+    })(),
+  ]) {
+    const coordinator = new DelegationCoordinator();
+    const id =
+      "delegationId" in invalidResult
+        ? invalidResult.delegationId
+        : "missing-identity";
+    prepare(coordinator, id);
+    coordinator.attachBinding(id, `binding-${id}`);
+    coordinator.markRunning(id);
+    const raw = `<pulso-result v="1"><payload>${JSON.stringify(invalidResult)}</payload></pulso-result>`;
+    const lifecycleActions: unknown[] = [];
+    expect(() => {
+      const accepted = coordinator.acceptResult(id, raw);
+      lifecycleActions.push(accepted.action);
+    }).toThrow();
+    expect(coordinator.get(id)?.status).toBe("protocol_error");
+    expect(lifecycleActions).toEqual([]);
+  }
 });

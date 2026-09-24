@@ -1,8 +1,10 @@
 import {
   type AgentResult,
   agentResultSchema,
+  resultProtocol,
   type TaskEnvelope,
   taskEnvelopeSchema,
+  taskProtocol,
 } from "./schemas";
 
 const encodeXml = (value: string) =>
@@ -17,10 +19,10 @@ const payload = (value: unknown) => encodeXml(JSON.stringify(value));
 
 export const serializeTaskEnvelope = (input: TaskEnvelope) => {
   const task = taskEnvelopeSchema.parse(input);
-  return `<pulso-task v="1"><payload>${payload(task)}</payload></pulso-task>`;
+  return `<${taskProtocol.tag} v="${taskProtocol.version}"><payload>${payload(task)}</payload></${taskProtocol.tag}>`;
 };
 
 export const serializeAgentResult = (input: AgentResult) => {
   const result = agentResultSchema.parse(input);
-  return `<pulso-result v="1"><payload>${payload(result)}</payload></pulso-result>`;
+  return `<${resultProtocol.tag} v="${resultProtocol.version}"><payload>${payload(result)}</payload></${resultProtocol.tag}>`;
 };

@@ -1,11 +1,15 @@
 import { expect, test } from "bun:test";
 import {
+  agentResultSchema,
+  agentResultStatuses,
   buildTaskEnvelope,
   parseAgentResult,
   parseTaskEnvelope,
   repairAgentResult,
+  resultProtocol,
   serializeAgentResult,
   serializeTaskEnvelope,
+  taskProtocol,
 } from "../src";
 
 const result = {
@@ -94,6 +98,22 @@ test("result identity and protocol versions are rejected explicitly", () => {
   expect(() => parseAgentResult(serialized.replace('v="1"', 'v="2"'))).toThrow(
     "PROTOCOL_VERSION_MISMATCH",
   );
+});
+
+test("the observed legacy status and missing delegation identity are rejected", () => {
+  const legacy = { ...result, status: "succeeded" };
+  expect(() => agentResultSchema.parse(legacy)).toThrow();
+  expect(agentResultStatuses).toEqual([
+    "completed",
+    "blocked",
+    "failed",
+    "cancelled",
+  ]);
+
+  const { delegationId: _, ...withoutDelegation } = result;
+  expect(() => agentResultSchema.parse(withoutDelegation)).toThrow();
+  expect(taskProtocol.id).toBe("pulso-task/1");
+  expect(resultProtocol.id).toBe("pulso-result/1");
 });
 
 test("repair only removes a single outer fence and malformed structures fail", () => {

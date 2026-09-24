@@ -1,14 +1,57 @@
 import { z } from "zod";
 
 const id = z.string().min(1);
-export const specialistIdSchema = z.enum([
+const taskTag = "pulso-task" as const;
+const resultTag = "pulso-result" as const;
+const taskProtocolVersion = 1 as const;
+const resultProtocolVersion = 1 as const;
+export const taskProtocol = {
+  tag: taskTag,
+  version: taskProtocolVersion,
+  id: `${taskTag}/${taskProtocolVersion}`,
+} as const;
+export const resultProtocol = {
+  tag: resultTag,
+  version: resultProtocolVersion,
+  id: `${resultTag}/${resultProtocolVersion}`,
+} as const;
+
+export const specialistIds = [
   "planner",
   "explorer",
   "executor",
   "verifier",
   "security-auditor",
-]);
+] as const;
+export const specialistIdSchema = z.enum(specialistIds);
 export type SpecialistId = z.infer<typeof specialistIdSchema>;
+export const agentResultStatuses = [
+  "completed",
+  "blocked",
+  "failed",
+  "cancelled",
+] as const;
+export const agentResultStatusSchema = z.enum(agentResultStatuses);
+export type AgentResultStatus = z.infer<typeof agentResultStatusSchema>;
+export const resultLifecycleAction = {
+  completed: "complete",
+  blocked: "block",
+  failed: "fail",
+  cancelled: "cancel",
+} as const satisfies Record<
+  AgentResultStatus,
+  "complete" | "block" | "fail" | "cancel"
+>;
+
+const expectedDelegationIdentityShape = {
+  delegationId: id,
+  specialist: specialistIdSchema,
+  workId: id,
+  workItemId: id,
+};
+export const expectedDelegationIdentitySchema = z
+  .object(expectedDelegationIdentityShape)
+  .strict();
 
 export const evidenceSchema = z
   .object({
@@ -29,10 +72,15 @@ const priorResultReferenceSchema = z
 
 export const taskEnvelopeSchema = z
   .object({
-    protocol: z.literal("pulso-task/1"),
-    delegationId: id,
-    specialist: specialistIdSchema,
-    work: z.object({ workId: id, workItemId: id }).strict(),
+    protocol: z.literal(taskProtocol.id),
+    delegationId: expectedDelegationIdentitySchema.shape.delegationId,
+    specialist: expectedDelegationIdentitySchema.shape.specialist,
+    work: z
+      .object({
+        workId: expectedDelegationIdentitySchema.shape.workId,
+        workItemId: expectedDelegationIdentitySchema.shape.workItemId,
+      })
+      .strict(),
     objective: z.string().min(1),
     context: z
       .object({
@@ -52,7 +100,7 @@ export const taskEnvelopeSchema = z
       .strict()
       .optional(),
     requestedEvidence: z.array(z.string().min(1)).optional(),
-    output: z.object({ contract: z.literal("pulso-result/1") }).strict(),
+    output: z.object({ contract: z.literal(resultProtocol.id) }).strict(),
   })
   .strict();
 
@@ -129,22 +177,27 @@ const securityAuditorPayloadSchema = z
   })
   .strict();
 
+export const specialistPayloadSchemas = {
+  planner: plannerPayloadSchema,
+  explorer: explorerPayloadSchema,
+  executor: executorPayloadSchema,
+  verifier: verifierPayloadSchema,
+  "security-auditor": securityAuditorPayloadSchema,
+} as const;
+
 export const specialistPayloadSchema = z.discriminatedUnion("kind", [
-  plannerPayloadSchema,
-  explorerPayloadSchema,
-  executorPayloadSchema,
-  verifierPayloadSchema,
-  securityAuditorPayloadSchema,
+  specialistPayloadSchemas.planner,
+  specialistPayloadSchemas.explorer,
+  specialistPayloadSchemas.executor,
+  specialistPayloadSchemas.verifier,
+  specialistPayloadSchemas["security-auditor"],
 ]);
 
-export const agentResultSchema = z
+export const agentResultFieldsSchema = z
   .object({
-    protocol: z.literal("pulso-result/1"),
-    delegationId: id,
-    specialist: specialistIdSchema,
-    workId: id,
-    workItemId: id,
-    status: z.enum(["completed", "blocked", "failed", "cancelled"]),
+    protocol: z.literal(resultProtocol.id),
+    ...expectedDelegationIdentitySchema.shape,
+    status: agentResultStatusSchema,
     summary: z.string().min(1),
     evidence: z.array(evidenceSchema).optional(),
     artifacts: z.array(artifactSchema).optional(),
@@ -155,22 +208,62 @@ export const agentResultSchema = z
     suggestedNextStep: z.string().min(1).optional(),
     specialistResult: specialistPayloadSchema,
   })
-  .strict()
-  .superRefine((result, context) => {
+  .strict();
+
+export const agentResultSchema = agentResultFieldsSchema.superRefine(
+  (result, context) => {
     if (result.specialist !== result.specialistResult.kind)
       context.addIssue({
         code: "custom",
         message: "SPECIALIST_MISMATCH",
         path: ["specialistResult", "kind"],
       });
-  });
+  },
+);
 
-export interface ExpectedDelegationIdentity {
-  delegationId: string;
-  specialist: SpecialistId;
-  workId: string;
-  workItemId: string;
-}
+type JsonObjectShape = {
+  properties?: Record<string, unknown>;
+  required?: string[];
+};
+const objectFieldContract = (schema: z.ZodObject<z.ZodRawShape>) => {
+  const jsonSchema = z.toJSONSchema(schema) as JsonObjectShape;
+  const fields = Object.keys(jsonSchema.properties ?? {});
+  const required = jsonSchema.required ?? [];
+  return {
+    required,
+    optional: fields.filter((field) => !required.includes(field)),
+  };
+};
+
+export const protocolContractMetadata = {
+  task: {
+    protocol: taskProtocol.id,
+    version: taskProtocol.version,
+    tag: taskProtocol.tag,
+    fields: objectFieldContract(taskEnvelopeSchema),
+    workFields: objectFieldContract(taskEnvelopeSchema.shape.work),
+    outputFields: objectFieldContract(taskEnvelopeSchema.shape.output),
+  },
+  result: {
+    protocol: resultProtocol.id,
+    version: resultProtocol.version,
+    tag: resultProtocol.tag,
+    fields: objectFieldContract(agentResultFieldsSchema),
+    identityFields: objectFieldContract(expectedDelegationIdentitySchema)
+      .required,
+    statuses: agentResultStatuses,
+    payloads: Object.fromEntries(
+      Object.entries(specialistPayloadSchemas).map(([specialist, schema]) => [
+        specialist,
+        objectFieldContract(schema),
+      ]),
+    ) as Record<SpecialistId, ReturnType<typeof objectFieldContract>>,
+  },
+} as const;
+
+export type ExpectedDelegationIdentity = z.infer<
+  typeof expectedDelegationIdentitySchema
+>;
 
 export type TaskEnvelope = z.infer<typeof taskEnvelopeSchema>;
 export type AgentResult = z.infer<typeof agentResultSchema>;

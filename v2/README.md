@@ -4,9 +4,9 @@ Portable, local-first work infrastructure. `@pulso/working-system` is the author
 
 Run `bun install`, then `bun run typecheck`, `bun test`, and `bun run build`. The sole MCP server starts with `bun run packages/capabilities-mcp/src/mcp/stdio.ts`; the administrative CLI is `bun run apps/cli/src/index.ts work list`.
 
-See `docs/architecture.md` and `docs/host-integration.md`.
+Agent definitions and runtime renderers live in `@pulso/orchestration`; `@pulso/installer` discovers and installs `vscode-copilot` and `opencode` in local or global scope. See `docs/runtime-architecture.md`, `docs/runtime-opencode.md`, `docs/installer-wizard.md`, `docs/opencode-model-profiles.md`, and `docs/architecture.md`.
 
-Future `@pulso/orchestration` is intentionally deferred. It will use MCP to call `@pulso/capabilities-mcp`, which uses the `@pulso/working-system` TypeScript API. Runtime lifecycle tools use only `bindingId` after bind; lease and fencing authority remain internal.
+Runtime lifecycle tools use only `bindingId` after bind; lease and fencing authority remain internal. Runtime-specific agent files are rendered from one canonical semantic definition; skills remain shared canonical assets.
 
 The implementation intentionally performs no network operation, telemetry, shell execution, or source-code upload. Operational state lives outside the workspace under the platform application-data directory.
 

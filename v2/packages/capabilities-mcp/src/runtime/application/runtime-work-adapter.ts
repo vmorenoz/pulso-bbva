@@ -38,6 +38,7 @@ export interface BindingRepository {
 
 export interface BindingInput {
   workItemId: string;
+  workId?: string;
   executorId: string;
   assigneeId?: string;
   runtimeReference: RuntimeExecutionReference;
@@ -117,8 +118,14 @@ export class RuntimeWorkAdapter {
           "RUNTIME_EXECUTION_ALREADY_BOUND",
           "Runtime execution binding is being created",
         );
+      if (input.workId && input.workId !== found.workId)
+        runtimeError(
+          "WORK_ITEM_WRONG_WORK",
+          `WorkItem '${input.workItemId}' belongs to Work '${found.workId}', not '${input.workId}'.`,
+        );
       return this.result(found);
     }
+    const item = await this.preflight(input);
     const bindingId = id();
     const reserved = await this.repository.reserve({
       bindingId,
@@ -137,6 +144,11 @@ export class RuntimeWorkAdapter {
           "RUNTIME_EXECUTION_ALREADY_BOUND",
           "Runtime execution binding is being created",
         );
+      if (input.workId && input.workId !== reserved.workId)
+        runtimeError(
+          "WORK_ITEM_WRONG_WORK",
+          `WorkItem '${input.workItemId}' belongs to Work '${reserved.workId}', not '${input.workId}'.`,
+        );
       return this.result(reserved);
     }
     let started: { execution: Execution; lease: WorkLease } | undefined;
@@ -151,7 +163,6 @@ export class RuntimeWorkAdapter {
         executorId: input.executorId,
         runtime: input.runtimeReference,
       });
-      const item = await this.workItem(input.workItemId);
       const binding: RuntimeExecutionBinding = {
         bindingId,
         runtime: input.runtimeReference,
@@ -180,19 +191,177 @@ export class RuntimeWorkAdapter {
       }
       await this.repository.removePending(bindingId);
       if (cause instanceof RuntimeWorkError) throw cause;
-      if (isWorkError(cause))
-        runtimeError(
-          cause.code === "INVALID_TRANSITION" ||
-            cause.code === "RECOVERY_REQUIRED"
-            ? "WORK_ITEM_NOT_EXECUTABLE"
-            : "EXECUTION_START_FAILED",
-          String(cause.code),
-        );
+      if (isWorkError(cause)) throw this.mapStartError(cause, input.workItemId);
       throw new RuntimeWorkError(
         "EXECUTION_START_FAILED",
         "Could not start Work execution",
         cause,
       );
+    }
+  }
+
+  private async preflight(input: BindingInput): Promise<WorkItem> {
+    const inspected = await this.work.inspectItem(input.workItemId);
+    const item = inspected?.items.find(
+      (candidate) => candidate.id === input.workItemId,
+    );
+    if (!item) {
+      const possibleWork = await this.work.inspectWork(input.workItemId);
+      if (!possibleWork.work)
+        throw new RuntimeWorkError(
+          "WORK_ITEM_NOT_FOUND",
+          `No WorkItem exists with id '${input.workItemId}'.`,
+          undefined,
+          {
+            entity: { type: "WorkItem", id: input.workItemId },
+            expected: "An existing WorkItem ID",
+            actual: "No WorkItem or Work with this ID",
+          },
+        );
+      throw new RuntimeWorkError(
+        "WORK_ID_USED_AS_WORK_ITEM_ID",
+        "pulso_runtime_bind expects a WorkItem ID, but the supplied ID belongs to a Work.",
+        undefined,
+        {
+          entity: { type: "Work", id: input.workItemId },
+          expected: "WorkItem ID",
+          actual: "Work ID",
+        },
+      );
+    }
+
+    if (input.workId && item.workId !== input.workId)
+      throw new RuntimeWorkError(
+        "WORK_ITEM_WRONG_WORK",
+        `WorkItem '${item.id}' belongs to a different Work than '${input.workId}'.`,
+        undefined,
+        {
+          entity: { type: "WorkItem", id: item.id },
+          expected: input.workId,
+          actual: item.workId,
+        },
+      );
+
+    const snapshot = await this.work.inspectWork(item.workId);
+    if (!snapshot.work)
+      throw new RuntimeWorkError(
+        "WORK_NOT_FOUND",
+        `No Work exists with id '${item.workId}'.`,
+        undefined,
+        { entity: { type: "Work", id: item.workId } },
+      );
+    const current =
+      snapshot.items.find((candidate) => candidate.id === item.id) ?? item;
+    const incompleteDependencies = current.dependencies.filter(
+      (dependencyId) =>
+        !snapshot.items.some(
+          (dependency) =>
+            dependency.id === dependencyId && dependency.status === "completed",
+        ),
+    );
+    if (incompleteDependencies.length > 0)
+      throw new RuntimeWorkError(
+        "DEPENDENCY_NOT_SATISFIED",
+        `WorkItem '${item.id}' has incomplete prerequisite WorkItems.`,
+        undefined,
+        {
+          entity: { type: "WorkItem", id: item.id },
+          expected: "All prerequisite WorkItems completed",
+          actual: `Incomplete WorkItem IDs: ${incompleteDependencies.join(", ")}`,
+        },
+      );
+
+    if (current.status !== "ready") {
+      const notReady = ["pending", "blocked", "waiting"].includes(
+        current.status,
+      );
+      throw new RuntimeWorkError(
+        notReady ? "WORK_ITEM_NOT_READY" : "WORK_ITEM_NOT_EXECUTABLE",
+        `WorkItem '${item.id}' has status '${current.status}' and cannot be bound for execution.`,
+        undefined,
+        {
+          entity: { type: "WorkItem", id: item.id },
+          expected: "ready",
+          actual: current.status,
+        },
+      );
+    }
+
+    const assignment = snapshot.assignments.find(
+      (candidate) =>
+        candidate.workItemId === item.id && candidate.status === "active",
+    );
+    const expectedAssignee = input.assigneeId ?? input.executorId;
+    if (
+      expectedAssignee !== input.executorId ||
+      (assignment && assignment.assigneeId !== input.executorId)
+    )
+      throw new RuntimeWorkError(
+        "ASSIGNMENT_INVALID",
+        `WorkItem '${item.id}' is not assigned to executor '${input.executorId}'.`,
+        undefined,
+        {
+          entity: { type: "WorkItem", id: item.id },
+          expected: input.executorId,
+          actual: assignment?.assigneeId ?? input.assigneeId ?? "unassigned",
+        },
+      );
+    return current;
+  }
+
+  private mapStartError(
+    cause: { code: string },
+    workItemId: string,
+  ): RuntimeWorkError {
+    const message = cause instanceof Error ? cause.message : cause.code;
+    const entity = { type: "WorkItem", id: workItemId };
+    switch (cause.code) {
+      case "ITEM_NOT_FOUND":
+        return new RuntimeWorkError("WORK_ITEM_NOT_FOUND", message, cause, {
+          entity,
+        });
+      case "WORK_NOT_FOUND":
+        return new RuntimeWorkError("WORK_NOT_FOUND", message, cause, {
+          entity: { type: "Work", id: workItemId },
+        });
+      case "INVALID_TRANSITION":
+        return new RuntimeWorkError("WORK_ITEM_NOT_READY", message, cause, {
+          entity,
+        });
+      case "RECOVERY_REQUIRED":
+      case "ACTIVE_LEASE_EXISTS":
+        return new RuntimeWorkError(
+          "WORK_ITEM_NOT_EXECUTABLE",
+          message,
+          cause,
+          { entity },
+        );
+      case "DEPENDENCY_NOT_SATISFIED":
+        return new RuntimeWorkError(
+          "DEPENDENCY_NOT_SATISFIED",
+          message,
+          cause,
+          { entity },
+        );
+      case "ASSIGNMENT_NOT_FOUND":
+        return new RuntimeWorkError("ASSIGNMENT_REQUIRED", message, cause, {
+          entity,
+        });
+      case "EXECUTOR_NOT_ASSIGNEE":
+        return new RuntimeWorkError("ASSIGNMENT_INVALID", message, cause, {
+          entity,
+        });
+      case "INVALID_INPUT":
+        return new RuntimeWorkError("INVALID_INPUT", message, cause, {
+          entity,
+        });
+      default:
+        return new RuntimeWorkError(
+          "EXECUTION_START_FAILED",
+          "Could not start Work execution",
+          cause,
+          { entity },
+        );
     }
   }
 
@@ -212,21 +381,24 @@ export class RuntimeWorkAdapter {
     if (assignment) {
       if (assignment.assigneeId !== expected || expected !== executorId)
         runtimeError(
-          "WORK_ITEM_NOT_EXECUTABLE",
+          "ASSIGNMENT_INVALID",
           "WorkItem assignment does not match executor",
         );
       return assignment;
     }
     if (expected !== executorId)
-      runtimeError("WORK_ITEM_NOT_EXECUTABLE", "Assignee must match executor");
+      runtimeError("ASSIGNMENT_INVALID", "Assignee must match executor");
     return this.work.assign(itemId, executorId);
   }
 
   private async workItem(itemId: string): Promise<WorkItem> {
     const snapshot = await this.workSnapshotByItem(itemId);
+    const items =
+      snapshot?.items ??
+      runtimeError("WORK_ITEM_NOT_FOUND", `WorkItem not found: ${itemId}`);
     return (
-      snapshot.items.find((item) => item.id === itemId) ??
-      runtimeError("WORK_ITEM_NOT_EXECUTABLE", "WorkItem not found")
+      items.find((item) => item.id === itemId) ??
+      runtimeError("WORK_ITEM_NOT_FOUND", "WorkItem not found")
     );
   }
 
@@ -478,7 +650,7 @@ export class RuntimeWorkAdapter {
     if (code === "EXECUTION_ALREADY_FINISHED")
       return new RuntimeWorkError("EXECUTION_NOT_ACTIVE", String(cause));
     return new RuntimeWorkError(
-      "EXECUTION_START_FAILED",
+      "INTERNAL_ERROR",
       "Work operation failed",
       cause,
     );
