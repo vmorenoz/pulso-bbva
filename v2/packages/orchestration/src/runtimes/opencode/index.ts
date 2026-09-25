@@ -10,8 +10,8 @@ export const OPENCODE_TASK_PROVIDER = "opencode" as const;
 
 const runtimeContract = (agent: AgentDefinition) =>
   agent.role === "primary"
-    ? `Invoke only OpenCode's native Task tool with subagent_type set to the selected canonical specialist ID. Use provider "${OPENCODE_TASK_PROVIDER}" and set externalExecutionId to the same fresh delegationId placed in the canonical TaskEnvelope. Task.prompt must contain exactly the generated serialized envelope, not bare JSON or additional fields. Validate the generated AgentResult contract before lifecycle; Task state completed is transport status only.`
-    : "OpenCode invokes this stateless specialist through its native Task tool; follow the generated communication_protocol exactly for its serialized input and output.";
+    ? `Invoke only OpenCode's native Task tool with subagent_type set to the selected canonical specialist ID. Use provider "${OPENCODE_TASK_PROVIDER}" and set externalExecutionId to the same fresh delegationId placed in the canonical TaskEnvelope. Task.prompt must contain exactly the generated serialized envelope, not bare JSON or additional fields. Omit unused optional Task fields and never send null. Task state completed is transport status only. If Task errors or the guard reports PULSO_PROTOCOL_INVALID_TASK/RESULT, call pulso_runtime_fail with a concise protocol/task error reason before responding.`
+    : "OpenCode invokes this stateless specialist through its native Task tool; follow the generated communication_protocol exactly, omit unused optional fields, and never send null for an omitted field.";
 
 const permissions = (agent: AgentDefinition) => {
   const result: Record<
@@ -58,6 +58,7 @@ const permissions = (agent: AgentDefinition) => {
 export const openCodeRuntime: RuntimeDefinition = {
   id: OPENCODE_TASK_PROVIDER,
   displayName: "OpenCode",
+  protocolEnforcement: { supported: true, mode: "plugin-hooks" },
   capabilities: {
     customAgents: true,
     subagents: true,
@@ -87,7 +88,7 @@ export const openCodeRuntime: RuntimeDefinition = {
     const contract = options.runtimeContract ?? runtimeContract(agent);
     return {
       path: `${agent.id}.md`,
-      content: `---\n${frontmatter.join("\n")}\n---\n${semanticPrompt(agent)}\n<runtime_contract>${contract}</runtime_contract>\n`,
+      content: `---\n${frontmatter.join("\n")}\n---\n${semanticPrompt(agent, { guarded: true })}\n<runtime_contract>${contract}</runtime_contract>\n`,
     };
   },
   renderSkill(skill: CanonicalSkill) {

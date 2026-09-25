@@ -40,6 +40,13 @@ export interface CapabilityProfile {
   deny: Capability[];
 }
 
+export interface SpecialistTaskContract {
+  purpose: string;
+  focus: string[];
+  produce: string[];
+  avoid: string[];
+}
+
 export interface AgentDefinition {
   id: AgentId;
   displayName: string;
@@ -48,8 +55,14 @@ export interface AgentDefinition {
   prompt: StructuredPromptDefinition;
   capabilities: CapabilityProfile;
   delegation?: { allowedSpecialists: AgentId[] };
+  taskContract?: SpecialistTaskContract;
   skills: SkillId[];
 }
+
+export type SpecialistDefinition = AgentDefinition & {
+  role: "specialist";
+  taskContract: SpecialistTaskContract;
+};
 
 export interface CanonicalSkill {
   id: SkillId;
@@ -69,6 +82,10 @@ export interface RuntimeCapabilities {
   perAgentModel: boolean;
   inheritedAgentModel: boolean;
 }
+
+export type ProtocolEnforcement =
+  | { mode: "plugin-hooks"; supported: true }
+  | { mode: "prompt-only"; supported: false };
 
 export interface RuntimeRenderOptions {
   runtimeContract?: string;
@@ -91,6 +108,7 @@ export interface RuntimeDefinition {
   id: RuntimeId;
   displayName: string;
   capabilities: RuntimeCapabilities;
+  protocolEnforcement: ProtocolEnforcement;
   renderAgent(
     agent: AgentDefinition,
     options?: RuntimeRenderOptions,

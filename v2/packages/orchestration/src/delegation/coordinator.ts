@@ -1,5 +1,5 @@
+import { assembleSpecialistPrompt } from "../prompting/specialist-prompt-assembler";
 import type { TaskContextBuildInput } from "../protocol/context-budget";
-import { buildTaskEnvelope } from "../protocol/context-budget";
 import {
   parseAgentResult,
   validateAgentResultIdentity,
@@ -11,7 +11,6 @@ import type {
   TaskEnvelope,
 } from "../protocol/schemas";
 import { resultLifecycleAction } from "../protocol/schemas";
-import { serializeTaskEnvelope } from "../protocol/serialize";
 
 export type DelegationStatus =
   | "prepared"
@@ -35,7 +34,14 @@ export interface Delegation {
 }
 
 export type LifecycleAction =
-  | { type: "complete"; bindingId: string; artifacts: AgentResult["artifacts"] }
+  | {
+      type: "complete";
+      bindingId: string;
+      artifacts: Extract<
+        AgentResult["specialistResult"],
+        { kind: "executor" }
+      >["artifacts"];
+    }
   | { type: "fail"; bindingId: string; reason: string }
   | { type: "cancel"; bindingId: string; reason?: string }
   | { type: "block"; bindingId: string; reason: string };
@@ -55,7 +61,16 @@ export type PrepareDelegationInput = Omit<
   createdAt?: string;
 };
 
-const reason = (result: AgentResult) => result.blockers?.[0] ?? result.summary;
+const reason = (result: AgentResult) => result.summary;
+const artifactsFor = (
+  result: AgentResult,
+): Extract<
+  AgentResult["specialistResult"],
+  { kind: "executor" }
+>["artifacts"] =>
+  result.specialistResult.kind === "executor"
+    ? result.specialistResult.artifacts
+    : undefined;
 
 export class DelegationCoordinator {
   private readonly delegations = new Map<string, Delegation>();
@@ -63,7 +78,8 @@ export class DelegationCoordinator {
   prepareDelegation(input: PrepareDelegationInput): PreparedDelegation {
     if (this.delegations.has(input.delegationId))
       throw new Error("DELEGATION_ID_ALREADY_EXISTS");
-    const { task, warnings } = buildTaskEnvelope(input);
+    const assembled = assembleSpecialistPrompt(input);
+    const { task, warnings } = assembled;
     const delegation: Delegation = {
       delegationId: input.delegationId,
       specialist: input.specialist,
@@ -76,7 +92,7 @@ export class DelegationCoordinator {
     return {
       delegation: { ...delegation },
       task,
-      serializedTask: serializeTaskEnvelope(task),
+      serializedTask: assembled.serializedTask,
       warnings,
     };
   }
@@ -135,7 +151,7 @@ export class DelegationCoordinator {
       return {
         type,
         bindingId: delegation.bindingId,
-        artifacts: result.artifacts,
+        artifacts: artifactsFor(result),
       };
     if (type === "fail")
       return {

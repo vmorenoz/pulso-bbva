@@ -16,12 +16,20 @@ const protocolSection = (content: string) =>
 
 test("runtime prompts render protocol instructions from canonical schema metadata", () => {
   for (const id of agentIds) {
-    const generated = renderAgentProtocolInstructions(id);
+    const generated = renderAgentProtocolInstructions(
+      id,
+      agentDefinitions[id].taskContract,
+    );
+    const guarded = renderAgentProtocolInstructions(
+      id,
+      agentDefinitions[id].taskContract,
+      { guarded: true },
+    );
     const openCode = openCodeRuntime.renderAgent(agentDefinitions[id]).content;
     const vscode = vscodeCopilotRuntime.renderAgent(
       agentDefinitions[id],
     ).content;
-    expect(protocolSection(openCode)).toBe(generated);
+    expect(protocolSection(openCode)).toBe(guarded);
     expect(protocolSection(vscode)).toBe(generated);
     expect(openCode.indexOf("<communication_protocol>")).toBeLessThan(
       openCode.indexOf("<mission>"),
@@ -53,13 +61,21 @@ test("OpenCode prompts expose only canonical versions, statuses and specialist p
     .map((id) => openCodeRuntime.renderAgent(agentDefinitions[id]).content)
     .join("\n");
   const pulsoInstructions = renderAgentProtocolInstructions("pulso");
+  const guardedPulsoInstructions = renderAgentProtocolInstructions(
+    "pulso",
+    undefined,
+    { guarded: true },
+  );
 
   expect(pulsoInstructions).toContain(protocolContractMetadata.task.protocol);
   expect(pulsoInstructions).toContain(protocolContractMetadata.result.protocol);
   for (const status of agentResultStatuses)
     expect(pulsoInstructions).toContain(status);
   for (const specialist of specialistIds) {
-    const instructions = renderAgentProtocolInstructions(specialist);
+    const instructions = renderAgentProtocolInstructions(
+      specialist,
+      agentDefinitions[specialist].taskContract,
+    );
     expect(instructions).toContain(specialist);
     for (const field of protocolContractMetadata.result.payloads[specialist]
       .required)
@@ -67,26 +83,36 @@ test("OpenCode prompts expose only canonical versions, statuses and specialist p
   }
 
   expect(rendered).not.toMatch(
-    /\bresponseFormat\b|\bsucceeded\b|\bsuccess\b|\bdone\b|\bok\b/,
+    /\bresponseFormat\b|\bsucceeded\b|\bdone\b|\bok\b/,
   );
-  expect(rendered).not.toContain("pulso-result/1 JSON:");
+  expect(rendered).not.toContain("pulso-result/2 JSON:");
   expect(rendered).toContain('provider "opencode"');
   expect(rendered).toContain(
     "externalExecutionId to the same fresh delegationId",
   );
-  expect(pulsoInstructions).toContain("not plain JSON");
-  expect(pulsoInstructions).toContain("Task selector never replaces it");
+  expect(pulsoInstructions).toContain("not bare JSON");
   expect(pulsoInstructions).toContain(
-    "Task state=completed only means the child call ended",
+    "Task specialist selector never replaces the required specialist field",
   );
-  expect(pulsoInstructions).toContain(
-    '"work":{"workId":"<actual Work ID>","workItemId":"<actual WorkItem ID>"}',
+  expect(openCodeRuntime.renderAgent(agentDefinitions.pulso).content).toContain(
+    "Task state completed is transport status only",
   );
-  const explorerInstructions = renderAgentProtocolInstructions("explorer");
-  expect(explorerInstructions).toContain("never a top-level explorer key");
+  expect(pulsoInstructions).toContain("work:{workId:string,workItemId:string}");
+  expect(guardedPulsoInstructions).toContain(
+    "installed OpenCode Protocol Guard validates",
+  );
+  expect(guardedPulsoInstructions.length).toBeLessThan(
+    pulsoInstructions.length,
+  );
+  const explorerInstructions = renderAgentProtocolInstructions(
+    "explorer",
+    agentDefinitions.explorer.taskContract,
+  );
   expect(explorerInstructions).toContain(
-    '"specialistResult":{"kind":"explorer","findings":[],"references":[]}',
+    "specialistResult must match explorer",
   );
+  expect(explorerInstructions).toContain("findings:{summary:string");
+  expect(explorerInstructions).not.toContain("severity:");
   const descriptions = agentIds.map((id) => agentDefinitions[id].description);
   expect(descriptions.every((description) => description.length > 0)).toBe(
     true,

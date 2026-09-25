@@ -3,8 +3,8 @@ import { z } from "zod";
 const id = z.string().min(1);
 const taskTag = "pulso-task" as const;
 const resultTag = "pulso-result" as const;
-const taskProtocolVersion = 1 as const;
-const resultProtocolVersion = 1 as const;
+const taskProtocolVersion = 2 as const;
+const resultProtocolVersion = 2 as const;
 export const taskProtocol = {
   tag: taskTag,
   version: taskProtocolVersion,
@@ -61,12 +61,11 @@ export const evidenceSchema = z
   })
   .strict();
 
-const priorResultReferenceSchema = z
+const taskDependencySchema = z
   .object({
-    delegationId: id,
-    specialist: specialistIdSchema,
+    workItemId: id,
     summary: z.string().min(1),
-    evidenceRefs: z.array(z.string().min(1)).optional(),
+    artifacts: z.array(evidenceSchema).optional(),
   })
   .strict();
 
@@ -86,10 +85,10 @@ export const taskEnvelopeSchema = z
       .object({
         facts: z.array(z.string().min(1)).optional(),
         references: z.array(evidenceSchema).optional(),
-        priorResults: z.array(priorResultReferenceSchema).optional(),
       })
       .strict()
       .optional(),
+    dependencies: z.array(taskDependencySchema).optional(),
     constraints: z.array(z.string().min(1)).optional(),
     acceptanceCriteria: z.array(z.string().min(1)).optional(),
     scope: z
@@ -111,11 +110,13 @@ const validationSchema = z
     note: z.string().min(1).optional(),
   })
   .strict();
-const findingSchema = z
+const securityFindingSchema = z
   .object({
     severity: z.enum(["low", "medium", "high", "critical"]),
     summary: z.string().min(1),
-    evidence: z.array(evidenceSchema).optional(),
+    evidence: z.array(evidenceSchema),
+    impact: z.string().min(1).optional(),
+    remediation: z.string().min(1).optional(),
   })
   .strict();
 const artifactSchema = z
@@ -129,51 +130,68 @@ const artifactSchema = z
 const plannerPayloadSchema = z
   .object({
     kind: z.literal("planner"),
-    proposedWorkItems: z.array(
+    steps: z.array(
       z
         .object({
-          title: z.string().min(1),
           objective: z.string().min(1),
+          dependencies: z.array(z.string().min(1)).optional(),
+          acceptanceCriteria: z.array(z.string().min(1)).optional(),
         })
         .strict(),
     ),
-    dependencies: z.array(z.string().min(1)).optional(),
     assumptions: z.array(z.string().min(1)).optional(),
     risks: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+const explorerFindingSchema = z
+  .object({
+    summary: z.string().min(1),
+    evidence: z.array(evidenceSchema).optional(),
   })
   .strict();
 const explorerPayloadSchema = z
   .object({
     kind: z.literal("explorer"),
-    findings: z.array(findingSchema),
-    references: z.array(evidenceSchema),
-    unknowns: z.array(z.string().min(1)).optional(),
+    findings: z.array(explorerFindingSchema),
+    references: z.array(evidenceSchema).optional(),
+    limitations: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+const executorChangeSchema = z
+  .object({
+    target: z.string().min(1),
+    summary: z.string().min(1),
   })
   .strict();
 const executorPayloadSchema = z
   .object({
     kind: z.literal("executor"),
-    changes: z.array(z.string().min(1)),
+    changes: z.array(executorChangeSchema),
     validations: z.array(validationSchema).optional(),
     artifacts: z.array(artifactSchema).optional(),
+    unresolved: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+const verifierCheckSchema = z
+  .object({
+    criterion: z.string().min(1),
+    result: z.enum(["pass", "fail"]),
+    evidence: z.array(evidenceSchema).optional(),
   })
   .strict();
 const verifierPayloadSchema = z
   .object({
     kind: z.literal("verifier"),
-    verdict: z.enum(["passed", "failed", "inconclusive"]),
-    criteria: z.array(z.string().min(1)),
-    regressions: z.array(z.string().min(1)).optional(),
-    findings: z.array(findingSchema).optional(),
+    verdict: z.enum(["pass", "fail", "partial"]),
+    checks: z.array(verifierCheckSchema),
+    failures: z.array(z.string().min(1)).optional(),
+    risks: z.array(z.string().min(1)).optional(),
   })
   .strict();
 const securityAuditorPayloadSchema = z
   .object({
     kind: z.literal("security-auditor"),
-    findings: z.array(findingSchema),
-    severity: z.enum(["low", "medium", "high", "critical", "none"]),
-    evidence: z.array(evidenceSchema).optional(),
-    mitigations: z.array(z.string().min(1)).optional(),
+    findings: z.array(securityFindingSchema),
   })
   .strict();
 
@@ -184,6 +202,8 @@ export const specialistPayloadSchemas = {
   verifier: verifierPayloadSchema,
   "security-auditor": securityAuditorPayloadSchema,
 } as const;
+/** Canonical result-contract schema set; each entry is the wire validator. */
+export type SpecialistResultContract = typeof specialistPayloadSchemas;
 
 export const specialistPayloadSchema = z.discriminatedUnion("kind", [
   specialistPayloadSchemas.planner,
@@ -199,13 +219,6 @@ export const agentResultFieldsSchema = z
     ...expectedDelegationIdentitySchema.shape,
     status: agentResultStatusSchema,
     summary: z.string().min(1),
-    evidence: z.array(evidenceSchema).optional(),
-    artifacts: z.array(artifactSchema).optional(),
-    validations: z.array(validationSchema).optional(),
-    findings: z.array(findingSchema).optional(),
-    blockers: z.array(z.string().min(1)).optional(),
-    risks: z.array(z.string().min(1)).optional(),
-    suggestedNextStep: z.string().min(1).optional(),
     specialistResult: specialistPayloadSchema,
   })
   .strict();
@@ -268,5 +281,5 @@ export type ExpectedDelegationIdentity = z.infer<
 export type TaskEnvelope = z.infer<typeof taskEnvelopeSchema>;
 export type AgentResult = z.infer<typeof agentResultSchema>;
 export type Evidence = z.infer<typeof evidenceSchema>;
-export type PriorResultReference = z.infer<typeof priorResultReferenceSchema>;
+export type TaskDependency = z.infer<typeof taskDependencySchema>;
 export type SpecialistPayload = z.infer<typeof specialistPayloadSchema>;

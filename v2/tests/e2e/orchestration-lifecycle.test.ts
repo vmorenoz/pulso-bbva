@@ -19,7 +19,11 @@ const call = async (
   client: Client,
   name: string,
   input: Record<string, unknown>,
-) => (await client.callTool({ name, arguments: input })) as ToolResult;
+) =>
+  (await client.callTool({
+    name: name.replace(/^pulso_/, ""),
+    arguments: input,
+  })) as ToolResult;
 
 const result = (
   delegationId: string,
@@ -27,18 +31,20 @@ const result = (
   workItemId: string,
   status: "completed" | "failed" | "blocked" | "cancelled",
 ) => ({
-  protocol: "pulso-result/1" as const,
+  protocol: "pulso-result/2" as const,
   delegationId,
   specialist: "executor" as const,
   workId,
   workItemId,
   status,
   summary: `${status} result`,
-  ...(status === "blocked" ? { blockers: ["human input"] } : {}),
-  ...(status === "completed"
-    ? { artifacts: [{ type: "report", uri: "file:///tmp/result.txt" }] }
-    : {}),
-  specialistResult: { kind: "executor" as const, changes: ["src/a.ts"] },
+  specialistResult: {
+    kind: "executor" as const,
+    changes: [{ target: "src/a.ts", summary: `${status} change` }],
+    ...(status === "completed"
+      ? { artifacts: [{ type: "report", uri: "file:///tmp/result.txt" }] }
+      : {}),
+  },
 });
 
 test("orchestration lifecycle actions operate through MCP without coordinator side effects", async () => {
@@ -68,7 +74,7 @@ test("orchestration lifecycle actions operate through MCP without coordinator si
       title: id,
       objective: "exercise orchestration lifecycle",
     });
-    const workId = created.structuredContent?.value?.id as string;
+    const workId = created.structuredContent?.value?.workId as string;
     const item = await call(client, "pulso_work_item", {
       operation: "create",
       workId,
@@ -76,7 +82,7 @@ test("orchestration lifecycle actions operate through MCP without coordinator si
       kind: "task",
       assigneeId: "executor",
     });
-    const workItemId = item.structuredContent?.value?.id as string;
+    const workItemId = item.structuredContent?.value?.workItemId as string;
     const bound = await call(client, "pulso_runtime_bind", {
       workItemId,
       executorId: "executor",

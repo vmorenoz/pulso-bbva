@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   applyEdits,
   modify,
@@ -70,6 +71,7 @@ export interface OpenCodeManifest {
   configEntries: Record<string, string>;
   modelProfile?: string;
   resolvedModels?: Record<AgentId, string | null>;
+  protocolGuard?: { path: string; sha256: string; version: 2 };
 }
 
 const digest = (value: string) =>
@@ -167,6 +169,33 @@ export const planOpenCodeInstall = async (
       sha256: digest(rendered.content),
     });
   }
+  const pluginBuild = await Bun.build({
+    entrypoints: [
+      fileURLToPath(
+        new URL(
+          "../../../orchestration/src/runtimes/opencode/protocol-guard/plugin.ts",
+          import.meta.url,
+        ),
+      ),
+    ],
+    target: "bun",
+    format: "esm",
+    minify: true,
+    write: false,
+  } as Parameters<typeof Bun.build>[0] & { write: false });
+  if (!pluginBuild.success || !pluginBuild.outputs[0])
+    throw new Error("OPENCODE_PROTOCOL_GUARD_BUILD_FAILED");
+  const guardPath = join(
+    options.scope === "local" ? join(root, ".opencode") : root,
+    "plugins",
+    "pulso-protocol-guard.js",
+  );
+  const guardContent = await pluginBuild.outputs[0].text();
+  assets.push({
+    path: guardPath,
+    content: guardContent,
+    sha256: digest(guardContent),
+  });
   const configRaw = await optionalRead(configPath);
   const config = configRaw ? parseJsonc(configRaw) : {};
   const mcp = (
@@ -247,16 +276,6 @@ export const applyOpenCodeInstall = async (
     if (lost.length)
       throw new Error(`MODEL_CATALOG_STALE:${[...new Set(lost)].join(",")}`);
   }
-  for (const asset of plan.fileMutations) {
-    const current = await optionalRead(asset.path);
-    if (current !== undefined && digest(current) !== asset.sha256)
-      throw new Error(`INSTALL_CONFLICT:${asset.path}`);
-  }
-  const configMutation = plan.configMutations[0];
-  if (!configMutation) throw new Error("INSTALL_CONFIG_MUTATION_MISSING");
-  const configRaw = (await optionalRead(configMutation.path)) ?? "{}\n";
-  const parsed = parseJsonc(configRaw);
-  const current = (parsed.mcp as Record<string, unknown> | undefined)?.pulso;
   const previousManifestPath =
     options.scope === "local"
       ? join(
@@ -272,6 +291,27 @@ export const applyOpenCodeInstall = async (
   const previous = previousRaw
     ? (JSON.parse(previousRaw) as OpenCodeManifest)
     : undefined;
+  if (
+    previous &&
+    (previous.version !== 1 ||
+      previous.runtime !== "opencode" ||
+      previous.scope !== options.scope)
+  )
+    throw new Error("INSTALL_MANIFEST_INVALID");
+  for (const asset of plan.fileMutations) {
+    const current = await optionalRead(asset.path);
+    if (
+      current !== undefined &&
+      digest(current) !== asset.sha256 &&
+      digest(current) !== previous?.files[asset.path]
+    )
+      throw new Error(`INSTALL_CONFLICT:${asset.path}`);
+  }
+  const configMutation = plan.configMutations[0];
+  if (!configMutation) throw new Error("INSTALL_CONFIG_MUTATION_MISSING");
+  const configRaw = (await optionalRead(configMutation.path)) ?? "{}\n";
+  const parsed = parseJsonc(configRaw);
+  const current = (parsed.mcp as Record<string, unknown> | undefined)?.pulso;
   if (
     current !== undefined &&
     digest(JSON.stringify(current)) !==
@@ -322,6 +362,17 @@ export const applyOpenCodeInstall = async (
             resolvedModels: options.modelConfig.agents,
           }
         : {}),
+      protocolGuard: {
+        path:
+          plan.fileMutations.find((asset) =>
+            asset.path.endsWith("/plugins/pulso-protocol-guard.js"),
+          )?.path ?? "",
+        sha256:
+          plan.fileMutations.find((asset) =>
+            asset.path.endsWith("/plugins/pulso-protocol-guard.js"),
+          )?.sha256 ?? "",
+        version: 2,
+      },
     };
     await atomicWrite(
       previousManifestPath,

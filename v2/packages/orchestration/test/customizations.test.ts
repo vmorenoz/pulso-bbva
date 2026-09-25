@@ -52,11 +52,53 @@ test("both runtimes render the same canonical semantic prompt and skill roster",
     const body = (value: string) =>
       value
         .slice(value.indexOf("\n---\n") + 5)
+        .replace(
+          /<communication_protocol>[\s\S]*?<\/communication_protocol>\n?/,
+          "<communication_protocol>shared</communication_protocol>\n",
+        )
+        .replaceAll("&lt;", "<")
+        .replaceAll("&gt;", ">")
         .replace(/<runtime_contract>[\s\S]*?<\/runtime_contract>\n?/, "");
     expect(body(vscode)).toBe(body(opencode));
+    if (id !== "pulso")
+      expect(
+        vscode.match(
+          /<communication_protocol>([\s\S]*?)<\/communication_protocol>/,
+        )?.[1],
+      ).toBe(
+        opencode.match(
+          /<communication_protocol>([\s\S]*?)<\/communication_protocol>/,
+        )?.[1],
+      );
+    else {
+      expect(vscode).toContain("pulso-result/2");
+      expect(opencode).toContain("installed OpenCode Protocol Guard validates");
+    }
   }
   expect(vscodeCopilotRuntime.capabilities).toBeDefined();
   expect(agentDefinitions.pulso.skills).toEqual(agentDefinitions.pulso.skills);
+});
+
+test("checked-in VS Code agents are generated from the canonical runtime renderer", async () => {
+  const installedRoot = join(source, "../../.github/agents");
+  for (const id of agentIds) {
+    const rendered = vscodeCopilotRuntime.renderAgent(agentDefinitions[id]);
+    const installed = await readFile(
+      join(installedRoot, rendered.path),
+      "utf8",
+    );
+    if (id === "pulso") {
+      expect(installed).toContain("pulso-task/2");
+      expect(installed).toContain("pulso-result/2");
+      expect(installed).toContain("every exit path must terminalize");
+      expect(installed).toContain("pulso_runtime_fail");
+    } else {
+      const normalized = installed
+        .replaceAll("&lt;", "<")
+        .replaceAll("&gt;", ">");
+      expect(normalized).toBe(rendered.content);
+    }
+  }
 });
 
 test("all six skills retain valid metadata and avoid legacy control-plane dependencies", async () => {

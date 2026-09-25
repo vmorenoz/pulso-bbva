@@ -574,6 +574,10 @@ const install = async (terminal: TerminalWizard): Promise<boolean> => {
   );
   if (activeRuntimes.includes("vscode-copilot"))
     console.log("Reinicia VS Code para cargar agentes, skills y MCP.");
+  if (activeRuntimes.includes("opencode"))
+    console.log(
+      "En OpenCode, usa /details para alternar el detalle de las tools.",
+    );
   return true;
 };
 

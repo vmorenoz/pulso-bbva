@@ -1,14 +1,14 @@
 import type {
   Evidence,
-  PriorResultReference,
   SpecialistId,
+  TaskDependency,
   TaskEnvelope,
 } from "./schemas";
 import { resultProtocol, taskProtocol } from "./schemas";
 
 export interface ContextBudget {
   warnAt?: number;
-  priorResultWarnAt?: number;
+  dependencySummaryWarnAt?: number;
   inlineSnippetWarnAt?: number;
 }
 
@@ -19,22 +19,28 @@ export const contextWarnings = (
   const warnings: string[] = [];
   const facts = task.context?.facts ?? [];
   const refs = task.context?.references ?? [];
-  const priorResultWarnAt = budget.priorResultWarnAt;
+  const dependencies = task.dependencies ?? [];
+  const dependencySummaryWarnAt = budget.dependencySummaryWarnAt;
   const inlineSnippetWarnAt = budget.inlineSnippetWarnAt;
-  if (budget.warnAt !== undefined && facts.length + refs.length > budget.warnAt)
+  if (
+    budget.warnAt !== undefined &&
+    facts.length + refs.length + dependencies.length > budget.warnAt
+  )
     warnings.push("context exceeds configured warning budget");
   if (
-    priorResultWarnAt !== undefined &&
-    task.context?.priorResults?.some(
-      (result) => result.summary.length > priorResultWarnAt,
+    dependencySummaryWarnAt !== undefined &&
+    dependencies.some(
+      (dependency) => dependency.summary.length > dependencySummaryWarnAt,
     )
   )
-    warnings.push("prior result exceeds configured warning budget");
+    warnings.push("dependency summary exceeds configured warning budget");
   if (
     inlineSnippetWarnAt !== undefined &&
-    [...facts, ...refs.map((ref) => ref.ref)].some(
-      (value) => value.length > inlineSnippetWarnAt,
-    )
+    [
+      ...facts,
+      ...refs.map((ref) => ref.ref),
+      ...dependencies.map((dependency) => dependency.summary),
+    ].some((value) => value.length > inlineSnippetWarnAt)
   )
     warnings.push("inline snippet exceeds configured warning budget");
   if (new Set(refs.map((ref) => ref.ref)).size !== refs.length)
@@ -48,7 +54,7 @@ type PrioritizedReference = Evidence & { priority?: number };
 export interface TaskContextInput {
   facts?: Array<string | PrioritizedValue>;
   references?: PrioritizedReference[];
-  priorResults?: PriorResultReference[];
+  dependencies?: TaskDependency[];
   constraints?: Array<string | PrioritizedValue>;
   acceptanceCriteria?: Array<string | PrioritizedValue>;
   scope?: { include?: string[]; exclude?: string[] };
@@ -100,11 +106,11 @@ const compactReferences = (references?: PrioritizedReference[]) => {
     );
 };
 
-const compactPriorResults = (results?: PriorResultReference[]) => {
+const compactDependencies = (dependencies?: TaskDependency[]) => {
   const seen = new Set<string>();
-  return (results ?? []).filter((result) => {
-    const key = `${result.delegationId}:${result.specialist}`;
-    if (!result.summary.trim() || seen.has(key)) return false;
+  return (dependencies ?? []).filter((dependency) => {
+    const key = dependency.workItemId;
+    if (!dependency.summary.trim() || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
@@ -115,7 +121,7 @@ const optional = <T>(values: T[]) => (values.length ? values : undefined);
 export const buildTaskEnvelope = (input: TaskContextBuildInput) => {
   const facts = compactValues(input.facts);
   const references = compactReferences(input.references);
-  const priorResults = compactPriorResults(input.priorResults);
+  const dependencies = compactDependencies(input.dependencies);
   const constraints = compactValues(input.constraints);
   const acceptanceCriteria = compactValues(input.acceptanceCriteria);
   const requestedEvidence = compactValues(input.requestedEvidence);
@@ -124,7 +130,6 @@ export const buildTaskEnvelope = (input: TaskContextBuildInput) => {
   const context = {
     ...(optional(facts) ? { facts } : {}),
     ...(optional(references) ? { references } : {}),
-    ...(optional(priorResults) ? { priorResults } : {}),
   };
   const task: TaskEnvelope = {
     protocol: taskProtocol.id,
@@ -133,6 +138,7 @@ export const buildTaskEnvelope = (input: TaskContextBuildInput) => {
     work: { workId: input.workId, workItemId: input.workItemId },
     objective: input.objective.trim(),
     ...(Object.keys(context).length ? { context } : {}),
+    ...(optional(dependencies) ? { dependencies } : {}),
     ...(optional(constraints) ? { constraints } : {}),
     ...(optional(acceptanceCriteria) ? { acceptanceCriteria } : {}),
     ...(include.length || exclude.length

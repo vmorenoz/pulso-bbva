@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import {
+  serializeAgentResult,
+  serializeTaskEnvelope,
+} from "../../orchestration/src/protocol/serialize";
 import type { CanonicalSkill } from "../../orchestration/src/runtimes/types";
 import type { OpenCodeDiscovery } from "../src/discovery/opencode";
 import {
@@ -49,14 +55,79 @@ test("local install preserves JSONC comments and unrelated MCP configuration, th
         .map((file) => file.path)
         .some((path) => path.includes(".opencode/agents/pulso.md")),
     ).toBe(true);
+    const guard = plan.fileMutations.find((file) =>
+      file.path.endsWith("/plugins/pulso-protocol-guard.js"),
+    );
+    expect(guard).toBeDefined();
+    expect(guard?.content).not.toContain("packages/orchestration/src");
     await applyOpenCodeInstall(options, plan);
+    if (!guard) throw new Error("OPENCODE_PROTOCOL_GUARD_ASSET_MISSING");
+    const installedPlugin = await import(pathToFileURL(guard.path).href);
+    const plugin = await installedPlugin.PulsoProtocolGuard();
+    const envelope = {
+      protocol: "pulso-task/2" as const,
+      delegationId: "external-dlg",
+      specialist: "explorer" as const,
+      work: { workId: "external-work", workItemId: "external-item" },
+      objective: "Test external bundled plugin",
+      output: { contract: "pulso-result/2" as const },
+    };
+    const expectedResult = {
+      protocol: "pulso-result/2" as const,
+      delegationId: "external-dlg",
+      specialist: "explorer" as const,
+      workId: "external-work",
+      workItemId: "external-item",
+      status: "completed" as const,
+      summary: "Valid external result",
+      specialistResult: {
+        kind: "explorer" as const,
+        findings: [],
+        references: [],
+      },
+    };
+    const hookCall = {
+      tool: "task",
+      sessionID: "external-session",
+      callID: "external-call",
+    };
+    await plugin["tool.execute.before"](hookCall, {
+      args: {
+        prompt: serializeTaskEnvelope(envelope),
+        subagent_type: "explorer",
+      },
+    });
+    await plugin["tool.execute.after"](hookCall, {
+      output: `<task id="child" state="completed"><task_result>${serializeAgentResult(expectedResult)}</task_result></task>`,
+    });
+    await plugin.dispose();
+    const manifest = JSON.parse(
+      await readFile(
+        join(workspace, ".opencode", ".pulso-manifest.json"),
+        "utf8",
+      ),
+    );
+    expect(manifest.protocolGuard.sha256).toBe(guard?.sha256);
+    const unrelatedPlugin = join(
+      workspace,
+      ".opencode",
+      "plugins",
+      "foreign.js",
+    );
+    await writeFile(
+      unrelatedPlugin,
+      "export const Foreign = async () => ({})\n",
+    );
     const installed = await readFile(config, "utf8");
     expect(installed).toContain("// Keep user MCP configuration");
     expect(installed).toContain('"other"');
     expect(installed).toContain('"pulso"');
     expect(installed).toContain('"command": [');
+    const repeatedPlan = await planOpenCodeInstall(options);
+    await applyOpenCodeInstall(options, repeatedPlan);
     const result = await uninstallOpenCode({ scope: "local", workspace });
     expect(result.conflicts).toEqual([]);
+    expect(await readFile(unrelatedPlugin, "utf8")).toContain("Foreign");
     expect(await readFile(config, "utf8")).toContain('"other"');
   }));
 
@@ -72,6 +143,13 @@ test("global OpenCode plan uses only the official user-level asset locations", a
     expect(
       plan.fileMutations.some((asset) =>
         asset.path.includes("/.config/opencode/agents/pulso.md"),
+      ),
+    ).toBe(true);
+    expect(
+      plan.fileMutations.some((asset) =>
+        asset.path.includes(
+          "/.config/opencode/plugins/pulso-protocol-guard.js",
+        ),
       ),
     ).toBe(true);
     expect(
@@ -129,6 +207,61 @@ test("modified managed files conflict and model disappearance aborts before writ
     } finally {
       await rm(other, { recursive: true, force: true });
     }
+  }));
+
+test("modified protocol guard is a conflict and remains untouched", async () =>
+  withTemp(async (workspace) => {
+    const options = {
+      scope: "local" as const,
+      workspace,
+      executable: "/bin/opencode",
+      mcpCommand: ["node", "mcp.js"],
+      skills,
+    };
+    const plan = await planOpenCodeInstall(options);
+    await applyOpenCodeInstall(options, plan);
+    const plugin = plan.fileMutations.find((asset) =>
+      asset.path.endsWith("/plugins/pulso-protocol-guard.js"),
+    );
+    if (!plugin) throw new Error("OPENCODE_PROTOCOL_GUARD_ASSET_MISSING");
+    await writeFile(plugin.path, "// user customization\n");
+    await expect(planOpenCodeInstall(options)).rejects.toThrow(
+      "INSTALL_CONFLICT",
+    );
+    expect(await readFile(plugin.path, "utf8")).toContain("user customization");
+  }));
+
+test("updates a hash-matching prior Pulso-managed agent/plugin asset safely", async () =>
+  withTemp(async (workspace) => {
+    const options = {
+      scope: "local" as const,
+      workspace,
+      executable: "/bin/opencode",
+      mcpCommand: ["node", "mcp.js"],
+      skills,
+    };
+    const initial = await planOpenCodeInstall(options);
+    await applyOpenCodeInstall(options, initial);
+    const managed = initial.fileMutations.find((asset) =>
+      asset.path.endsWith("/agents/pulso.md"),
+    );
+    if (!managed) throw new Error("OPENCODE_MANAGED_AGENT_MISSING");
+    const oldContent = "previous Pulso-managed renderer output\n";
+    await writeFile(managed.path, oldContent);
+    const manifestPath = join(workspace, ".opencode", ".pulso-manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.files[managed.path] = createHash("sha256")
+      .update(oldContent)
+      .digest("hex");
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const upgrade = await planOpenCodeInstall(options);
+    await applyOpenCodeInstall(options, upgrade);
+    const upgradedAsset = upgrade.fileMutations.find(
+      (asset) => asset.path === managed.path,
+    );
+    if (!upgradedAsset) throw new Error("OPENCODE_UPGRADE_ASSET_MISSING");
+    expect(await readFile(managed.path, "utf8")).toBe(upgradedAsset.content);
   }));
 
 test("model reconfiguration updates agents without reinstalling skills or changing MCP configuration", async () =>

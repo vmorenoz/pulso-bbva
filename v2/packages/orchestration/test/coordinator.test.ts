@@ -18,18 +18,20 @@ const resultFor = (
   id: string,
   status: "completed" | "failed" | "blocked" | "cancelled",
 ) => ({
-  protocol: "pulso-result/1" as const,
+  protocol: "pulso-result/2" as const,
   delegationId: id,
   specialist: "executor" as const,
   workId: `work-${id}`,
   workItemId: `item-${id}`,
   status,
   summary: `${status} work`,
-  ...(status === "blocked" ? { blockers: ["human input"] } : {}),
-  ...(status === "completed"
-    ? { artifacts: [{ type: "report", uri: "file:///tmp/report.txt" }] }
-    : {}),
-  specialistResult: { kind: "executor" as const, changes: ["src/a.ts"] },
+  specialistResult: {
+    kind: "executor" as const,
+    changes: [{ target: "src/a.ts", summary: `${status} change` }],
+    ...(status === "completed"
+      ? { artifacts: [{ type: "report", uri: "file:///tmp/report.txt" }] }
+      : {}),
+  },
 });
 
 test("a direct Executor delegation completes without Planner or Verifier", () => {
@@ -201,11 +203,11 @@ test("session reproduction correlates the serialized Task, Binding and valid Exp
   const parsedTask = parseTaskEnvelope(prepared.serializedTask);
   expect(externalExecutionId).toBe(delegationId);
   expect(parsedTask).toMatchObject({
-    protocol: "pulso-task/1",
+    protocol: "pulso-task/2",
     delegationId,
     specialist: "explorer",
     work: { workId, workItemId },
-    output: { contract: "pulso-result/1" },
+    output: { contract: "pulso-result/2" },
   });
 
   coordinator.attachBinding(delegationId, "smoke-binding-1");
@@ -213,7 +215,7 @@ test("session reproduction correlates the serialized Task, Binding and valid Exp
   const accepted = coordinator.acceptResult(
     delegationId,
     serializeAgentResult({
-      protocol: "pulso-result/1",
+      protocol: "pulso-result/2",
       delegationId: externalExecutionId,
       specialist: "explorer",
       workId,
@@ -223,12 +225,11 @@ test("session reproduction correlates the serialized Task, Binding and valid Exp
       specialistResult: {
         kind: "explorer",
         findings: [],
-        references: [],
       },
     }),
   );
   expect(accepted.result).toMatchObject({
-    protocol: "pulso-result/1",
+    protocol: "pulso-result/2",
     delegationId,
     specialist: "explorer",
     workId,

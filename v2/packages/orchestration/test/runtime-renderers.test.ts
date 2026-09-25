@@ -32,6 +32,12 @@ test("runtime renderer parity retains one canonical semantic prompt", () => {
   const semanticBody = (text: string) =>
     text
       .slice(text.indexOf("\n---\n") + 5)
+      .replace(
+        /<communication_protocol>[\s\S]*?<\/communication_protocol>\n?/,
+        "<communication_protocol>shared</communication_protocol>\n",
+      )
+      .replaceAll("&lt;", "<")
+      .replaceAll("&gt;", ">")
       .replace(/<runtime_contract>[\s\S]*?<\/runtime_contract>\n?/, "");
   for (const id of agentIds) {
     expect(

@@ -135,6 +135,24 @@ const tool =
       return failure(e, x);
     }
   };
+const workReference = (work: {
+  id: string;
+  status: string;
+  version: number;
+}) => ({
+  workId: work.id,
+  status: work.status,
+  version: work.version,
+});
+const workItemReference = (item: {
+  id: string;
+  status: string;
+  version: number;
+}) => ({
+  workItemId: item.id,
+  status: item.status,
+  version: item.version,
+});
 const kind = z.string().min(1);
 const workItemOperationSchema = z.discriminatedUnion("operation", [
   z.object({
@@ -281,10 +299,10 @@ const workTransitionInputSchema = z.object({
 export const createMcpServer = (runtime: CapabilitiesRuntime) => {
   const server = new McpServer({ name: "pulso-work", version: "0.1.0" });
   server.registerTool(
-    "pulso_work_create",
+    "work_create",
     {
       description:
-        "WHAT: Creates a top-level Work container representing an objective; a Work is not directly executable and is different from a WorkItem. WHEN: Use to start tracking a new objective. PREREQUISITES: Provide a non-empty title and objective. You may create initial independent WorkItems inline; create dependency chains later with pulso_work_item when their WorkItem IDs are available. RETURNS: The new Work ID and status, any inline WorkItems with their IDs, plus a next step when no WorkItems were created. DO NOT USE WHEN: You need to execute or delegate work directly; create a WorkItem with pulso_work_item first. Use pulso_work_transition for Work lifecycle changes.",
+        "Create a tracked objective with optional independent WorkItems. A Work is a container; bind a ready WorkItem to execute it.",
       inputSchema: z.object({
         title: z
           .string()
@@ -318,7 +336,7 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
                 .array(z.string())
                 .optional()
                 .describe(
-                  "Must be empty for inline initial WorkItems; create dependency links later with pulso_work_item using existing WorkItem IDs from this Work.",
+                  "Leave empty for inline items; add dependencies after item creation.",
                 ),
               assigneeId: z
                 .string()
@@ -331,7 +349,7 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
           )
           .optional()
           .describe(
-            "Optional initial WorkItems. Omit only when you will create them later with pulso_work_item.",
+            "Optional independent executable items created with this Work.",
           ),
       }),
     },
@@ -344,26 +362,19 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
         ? (await runtime.work.snapshot(work.id)).items
         : [];
       return {
-        ...work,
-        workId: work.id,
-        items: items.map((item) => ({
-          ...item,
-          workItemId: item.id,
-          workId: item.workId,
-        })),
+        ...workReference(work),
+        items: items.map(workItemReference),
         ...(x.items?.length
           ? {}
-          : {
-              next: "Create a WorkItem with pulso_work_item before binding an external execution.",
-            }),
+          : { next: "Create a ready WorkItem before binding." }),
       };
     }),
   );
   server.registerTool(
-    "pulso_work_get",
+    "work_get",
     {
       description:
-        "WHAT: Reads authoritative Work, WorkItem, dependency, assignment, Artifact, Execution, Lease and event state after Work recovery. WHEN: Use to find IDs, check status/prerequisites, or recover Work state after uncertainty. PREREQUISITES: Supply a Work ID, or omit it to select the active/latest Work when one exists. RETURNS: summary lists counts, ready nextItems, active/blocked/waiting items and running executions; full includes WorkItems with IDs/dependencies/status plus assignments, Artifacts, Executions, Leases and events; events returns history; executions returns execution/lease lifecycle. Use pulso_runtime_status for Binding state. DO NOT USE WHEN: You need to mutate state; use the matching Work, WorkItem, or runtime lifecycle tool.",
+        "Read Work state. With no Work, returns an empty summary. Request full, events, or executions only when needed.",
       inputSchema: z.object({
         workId: z
           .string()
@@ -393,28 +404,38 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
       if (x.view === "executions")
         return { executions: s.executions, leases: s.leases };
       return {
-        work: s.work,
+        work: workReference(s.work),
         counts: s.items.reduce<Record<string, number>>((counts, item) => {
           counts[item.status] = (counts[item.status] ?? 0) + 1;
           return counts;
         }, {}),
-        activeItems: s.items.filter((i) => i.status === "in_progress"),
-        blockedItems: s.items.filter((i) => i.status === "blocked"),
-        waitingItems: s.items.filter((i) => i.status === "waiting"),
-        recoveryRequiredItems: s.items.filter(
-          (i) => i.status === "recovery_required",
-        ),
-        nextItems: s.items.filter((i) => i.status === "ready"),
-        activeExecutions: s.executions.filter((e) => e.status === "running"),
-        activeLeases: s.leases.filter((l) => l.status === "active"),
+        activeItems: s.items
+          .filter((i) => i.status === "in_progress")
+          .map(workItemReference),
+        blockedItems: s.items
+          .filter((i) => i.status === "blocked")
+          .map(workItemReference),
+        waitingItems: s.items
+          .filter((i) => i.status === "waiting")
+          .map(workItemReference),
+        recoveryRequiredItems: s.items
+          .filter((i) => i.status === "recovery_required")
+          .map(workItemReference),
+        nextItems: s.items
+          .filter((i) => i.status === "ready")
+          .map(workItemReference),
+        activeExecutions: s.executions
+          .filter((e) => e.status === "running")
+          .map((e) => ({ workItemId: e.workItemId, status: e.status })),
+        activeLeaseCount: s.leases.filter((l) => l.status === "active").length,
       };
     }),
   );
   server.registerTool(
-    "pulso_work_update",
+    "work_update",
     {
       description:
-        "WHAT: Updates only descriptive fields on a Work using optimistic version checking. WHEN: Use to correct its title or objective. PREREQUISITES: Provide the Work ID and current version when available. RETURNS: The updated Work. DO NOT USE WHEN: Changing lifecycle state or editing a WorkItem; use pulso_work_transition or pulso_work_item instead.",
+        "Update a Work title or objective using its current version.",
       inputSchema: z.object({
         workId: z
           .string()
@@ -433,13 +454,15 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
           .describe("Current Work version for optimistic concurrency."),
       }),
     },
-    tool((x) => runtime.work.updateWork(x.workId, x)),
+    tool(async (x) =>
+      workReference(await runtime.work.updateWork(x.workId, x)),
+    ),
   );
   server.registerTool(
-    "pulso_work_item",
+    "work_item",
     {
       description:
-        "WHAT: Creates or manages executable, trackable WorkItems inside a Work. WHEN: Create a WorkItem before delegating/executing; use other operations to edit or assign one. PREREQUISITES: Create the parent Work first; for create, provide its Work ID. RETURNS: Create prominently returns workItemId (the WorkItem ID), parent workId and status; this WorkItem ID is required by pulso_runtime_bind. DO NOT USE WHEN: You need to change Work lifecycle or an active external execution; use pulso_work_transition or the matching pulso_runtime_* tool.",
+        "Create, edit, assign, or unassign WorkItems. Create an item before binding it.",
       inputSchema: workItemInputSchema,
     },
     tool(async (x) => {
@@ -456,24 +479,36 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
       const operation = parsed.data;
       if (operation.operation === "create") {
         const item = await runtime.work.addItem(operation);
-        return { ...item, workItemId: item.id, workId: item.workId };
+        return workItemReference(item);
       }
       if (operation.operation === "update")
-        return runtime.work.updateItem(operation.itemId, operation);
-      if (operation.operation === "unassign")
-        return runtime.work.unassign(operation.itemId);
-      return runtime.work.assign(
+        return workItemReference(
+          await runtime.work.updateItem(operation.itemId, operation),
+        );
+      if (operation.operation === "unassign") {
+        const assignment = await runtime.work.unassign(operation.itemId);
+        return {
+          workItemId: operation.itemId,
+          status: assignment.status,
+        };
+      }
+      const assignment = await runtime.work.assign(
         operation.itemId,
         operation.assigneeId,
         operation.operation === "reassign",
       );
+      return {
+        workItemId: operation.itemId,
+        assigneeId: assignment.assigneeId,
+        status: assignment.status,
+      };
     }),
   );
   server.registerTool(
-    "pulso_work_transition",
+    "work_transition",
     {
       description:
-        "WHAT: Changes Work or WorkItem lifecycle through validated semantic transitions. WHEN: Use for non-runtime control such as starting/completing a Work, blocking/waiting/resuming an unbound WorkItem, or preparing an eligible retry. PREREQUISITES: Supply the exact Work or WorkItem ID, allowed transition and current version. RETURNS: The updated entity. DO NOT USE WHEN: Completing, failing, cancelling, blocking or waiting an active externally-bound execution; use its pulso_runtime_* lifecycle tool with bindingId instead.",
+        "Apply a permitted non-runtime transition to a Work or WorkItem.",
       inputSchema: workTransitionInputSchema,
     },
     tool(async (x) => {
@@ -490,20 +525,32 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
               "A transition allowed for the selected target and current status",
           },
         );
-      return runtime.work.transition(
+      const updated = await runtime.work.transition(
         parsed.data.target,
         parsed.data.id,
         parsed.data.transition,
         parsed.data.reason,
         parsed.data.version,
       );
+      return parsed.data.target === "work"
+        ? workReference(
+            updated as { id: string; status: string; version: number },
+          )
+        : workItemReference(
+            updated as {
+              id: string;
+              workId: string;
+              status: string;
+              version: number;
+            },
+          );
     }),
   );
   server.registerTool(
-    "pulso_work_artifact",
+    "work_artifact",
     {
       description:
-        "WHAT: Registers a reference to a meaningful Artifact produced or used by tracked Work. WHEN: Use after producing a durable report, patch, or other relevant output. PREREQUISITES: The Work must exist; an optional WorkItem ID must belong to it; URI must be a supported file or HTTP(S) reference. RETURNS: The immutable Artifact reference. DO NOT USE WHEN: Uploading full source content, temporary files, or irrelevant logs; store only the URI and concise description.",
+        "Register a durable artifact reference on its owning Work or WorkItem.",
       inputSchema: z.object({
         workId: z
           .string()
@@ -534,30 +581,25 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
           ),
       }),
     },
-    tool((x) => runtime.work.artifact(x)),
+    tool(async (x) => {
+      const artifact = await runtime.work.artifact(x);
+      return { artifactId: artifact.id, type: artifact.type };
+    }),
   );
   const bindingView = (binding: {
     bindingId: string;
-    runtime: { provider: string; executionId: string; sessionId?: string };
-    workId: string;
-    workItemId: string;
-    createdAt: string;
     expiresAt: string;
     status: string;
   }) => ({
     bindingId: binding.bindingId,
-    runtime: binding.runtime,
-    workId: binding.workId,
-    workItemId: binding.workItemId,
-    createdAt: binding.createdAt,
     expiresAt: binding.expiresAt,
     status: binding.status,
   });
   server.registerTool(
-    "pulso_runtime_bind",
+    "runtime_bind",
     {
       description:
-        "WHAT: Binds an external specialist/runtime invocation to an existing executable WorkItem. WHEN: Call immediately before invoking the specialist or external execution that will perform the WorkItem. PREREQUISITES: The WorkItem must exist, be ready, have completed prerequisites, and match the active assignee; if unassigned, this operation assigns executorId. Pass a WorkItem ID, NOT the parent Work ID. RETURNS: bindingId, workItemId and active status. Use bindingId for pulso_runtime_complete/fail/cancel/block/wait/status and heartbeat. DO NOT USE WHEN: No WorkItem exists, the WorkItem is not ready, or you only have a Work ID; create/select a WorkItem first. Do not manage executionId, leaseId or fencingToken yourself.",
+        "Start a runtime execution for a ready WorkItem. Use the returned bindingId for every lifecycle action.",
       inputSchema: z.object({
         workItemId: z
           .string()
@@ -567,41 +609,26 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
         workId: z
           .string()
           .optional()
-          .describe(
-            "Optional expected parent Work ID; when supplied, the WorkItem must belong to it.",
-          ),
+          .describe("Optional expected parent Work ID."),
         executorId: z
           .string()
           .min(1)
-          .describe(
-            "Opaque identity of the specialist/runtime executor that will perform this WorkItem.",
-          ),
+          .describe("Specialist identity that will execute the WorkItem."),
         assigneeId: z
           .string()
           .min(1)
           .optional()
-          .describe(
-            "Optional expected assignee identity. If provided, it must equal executorId and the active assignment.",
-          ),
-        provider: z
-          .string()
-          .min(1)
-          .describe(
-            "Stable provider name for the active runtime's native specialist execution.",
-          ),
+          .describe("Optional expected active assignee identity."),
+        provider: z.string().min(1).describe("Runtime provider name."),
         externalExecutionId: z
           .string()
           .min(1)
-          .describe(
-            "Stable identifier generated by orchestration for this specialist invocation/delegation; reuse it only to retry/correlate this same invocation.",
-          ),
+          .describe("Fresh delegation ID used to correlate this invocation."),
         sessionId: z
           .string()
           .min(1)
           .optional()
-          .describe(
-            "Optional host session ID that contains the specialist invocation.",
-          ),
+          .describe("Optional host session ID for diagnostics."),
         metadata: z
           .record(z.string(), z.string())
           .optional()
@@ -628,10 +655,10 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
     ),
   );
   server.registerTool(
-    "pulso_runtime_heartbeat",
+    "runtime_heartbeat",
     {
       description:
-        "WHAT: Renews an active external execution's lifecycle. WHEN: Use while the bound execution is still running and needs more time. PREREQUISITES: Requires the bindingId returned by pulso_runtime_bind. RETURNS: The current Binding status and expiry. DO NOT USE WHEN: You have a Work ID or WorkItem ID instead of bindingId, or the execution is terminal; use the relevant lifecycle/status tool.",
+        "Renew an active runtime lease when more execution time is needed.",
       inputSchema: z.object({
         bindingId: z
           .string()
@@ -645,10 +672,10 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
     ),
   );
   server.registerTool(
-    "pulso_runtime_complete",
+    "runtime_complete",
     {
       description:
-        "WHAT: Completes the active external execution and records its result on tracked work. WHEN: Use only after the specialist/external execution has finished successfully and its pulso-result has been validated. PREREQUISITES: Requires bindingId returned by pulso_runtime_bind. RETURNS: Completed Binding and linked WorkItem status. DO NOT USE WHEN: You have a Work ID or WorkItem ID instead of bindingId, or the execution failed, was cancelled, blocked, or is waiting; use the matching pulso_runtime_* tool.",
+        "Complete a bound execution only after validating its specialist result.",
       inputSchema: z.object({
         bindingId: z
           .string()
@@ -668,10 +695,9 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
     ),
   );
   server.registerTool(
-    "pulso_runtime_fail",
+    "runtime_fail",
     {
-      description:
-        "WHAT: Records that the bound external execution failed. WHEN: Use after the specialist/external execution returns a failure. PREREQUISITES: Requires bindingId returned by pulso_runtime_bind and a concise failure reason. RETURNS: Failed Binding and linked WorkItem status. DO NOT USE WHEN: You have a Work ID or WorkItem ID instead of bindingId, or the execution succeeded, was cancelled, blocked, or is waiting; use the matching pulso_runtime_* tool.",
+      description: "Fail a bound execution with a concise operational reason.",
       inputSchema: z.object({
         bindingId: z
           .string()
@@ -689,10 +715,9 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
     ),
   );
   server.registerTool(
-    "pulso_runtime_cancel",
+    "runtime_cancel",
     {
-      description:
-        "WHAT: Cancels the bound external execution. WHEN: Use when the invocation is intentionally stopped without success/failure. PREREQUISITES: Requires bindingId returned by pulso_runtime_bind. RETURNS: Cancelled Binding and linked WorkItem status. DO NOT USE WHEN: You have a Work ID or WorkItem ID instead of bindingId, or the execution succeeded, failed, is blocked, or is waiting; use the matching pulso_runtime_* tool.",
+      description: "Cancel a bound execution when it is intentionally stopped.",
       inputSchema: z.object({
         bindingId: z
           .string()
@@ -711,9 +736,9 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
   );
   for (const target of ["blocked", "waiting"] as const) {
     server.registerTool(
-      `pulso_runtime_${target === "blocked" ? "block" : "wait"}`,
+      `runtime_${target === "blocked" ? "block" : "wait"}`,
       {
-        description: `WHAT: Suspends the active external execution as ${target}. WHEN: Use when the execution cannot currently proceed and must be resumed later (wait) or is blocked on a condition (block). PREREQUISITES: Requires bindingId returned by pulso_runtime_bind. RETURNS: Suspended Binding and linked WorkItem status. DO NOT USE WHEN: You have a Work ID or WorkItem ID instead of bindingId, or the execution completed, failed, or was cancelled; use the matching pulso_runtime_* tool.`,
+        description: `${target === "blocked" ? "Block" : "Wait on"} a bound execution that needs external input before it can proceed.`,
         inputSchema: z.object({
           bindingId: z
             .string()
@@ -734,10 +759,9 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
     );
   }
   server.registerTool(
-    "pulso_runtime_status",
+    "runtime_status",
     {
-      description:
-        "WHAT: Reads a Binding, its linked WorkItem and execution lifecycle without exposing internal authority details. WHEN: Use for recovery, uncertainty after a host/runtime interruption, or to check whether an execution is still authoritative. PREREQUISITES: Requires bindingId returned by pulso_runtime_bind. RETURNS: Binding status and linked Work/WorkItem IDs. DO NOT USE WHEN: You have a Work ID or WorkItem ID instead of bindingId, or only an externalExecutionId; recover the bindingId first.",
+      description: "Read and reconcile the status of a bound execution.",
       inputSchema: z.object({
         bindingId: z
           .string()
