@@ -23,6 +23,8 @@ type CapabilityError = {
 const recoveries: Record<string, string> = {
   WORK_NOT_FOUND:
     "Use pulso_work_get to find a Work ID, or create the Work first.",
+  WORK_ACTIVE_OBJECTIVE:
+    "Complete or otherwise terminalize the current Work before starting a new objective.",
   WORK_ITEM_NOT_FOUND:
     "Create or retrieve a WorkItem, then pass its WorkItem ID.",
   WORK_ID_USED_AS_WORK_ITEM_ID:
@@ -144,6 +146,7 @@ const workReference = (work: {
   status: work.status,
   version: work.version,
 });
+const terminalWorkStatuses = new Set(["completed", "failed", "cancelled"]);
 const workItemReference = (item: {
   id: string;
   status: string;
@@ -302,7 +305,7 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
     "work_create",
     {
       description:
-        "Create a tracked objective with optional independent WorkItems. A Work is a container; bind a ready WorkItem to execute it.",
+        "Ensure a Work exists for the current objective. Reuse the active Work by default; set newObjective only for a clearly different objective.",
       inputSchema: z.object({
         title: z
           .string()
@@ -316,6 +319,17 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
           .describe(
             "Outcome this Work tracks. A Work itself is not executable; execution happens on a WorkItem.",
           ),
+        newObjective: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Explicitly start a different objective. The current Work must be terminalized first.",
+          ),
+        reason: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Optional reason for explicitly starting a new objective."),
         items: z
           .array(
             z.object({
@@ -354,8 +368,30 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
       }),
     },
     tool(async (x) => {
+      const works = await runtime.work.list(runtime.workspaceId);
+      const current = [...works]
+        .reverse()
+        .find((work) => !terminalWorkStatuses.has(work.status));
+      if (current && x.newObjective) {
+        throw new RuntimeWorkError(
+          "WORK_ACTIVE_OBJECTIVE",
+          "A Work objective is still active in this workspace.",
+          undefined,
+          {
+            entity: { type: "Work", id: current.id },
+            actual: current.status,
+            expected: "completed, failed, or cancelled",
+          },
+        );
+      }
+      if (current)
+        return {
+          ...workReference(current),
+          reused: true,
+        };
+      const { newObjective: _newObjective, reason: _reason, ...input } = x;
       const work = await runtime.work.create({
-        ...x,
+        ...input,
         workspaceId: runtime.workspaceId,
       });
       const items = x.items?.length
@@ -363,6 +399,7 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
         : [];
       return {
         ...workReference(work),
+        reused: false,
         items: items.map(workItemReference),
         ...(x.items?.length
           ? {}
@@ -374,7 +411,7 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
     "work_get",
     {
       description:
-        "Read Work state. With no Work, returns an empty summary. Request full, events, or executions only when needed.",
+        "Resolve current/recent Work before creating one. With no Work, returns an empty summary; request full, events, or executions only when needed.",
       inputSchema: z.object({
         workId: z
           .string()
@@ -393,11 +430,8 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
     tool(async (x) => {
       await runtime.recovery.recover();
       const works = await runtime.work.list(runtime.workspaceId);
-      const id =
-        x.workId ??
-        works.find((w) => w.status === "active")?.id ??
-        works.at(-1)?.id;
-      if (!id) throw new PulsoError("WORK_NOT_FOUND", "No work in workspace");
+      const id = x.workId ?? works.find((w) => w.status === "active")?.id;
+      if (!id) return { work: null };
       const s = await runtime.work.snapshot(id);
       if (x.view === "full") return s;
       if (x.view === "events") return s.events;
@@ -462,7 +496,7 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
     "work_item",
     {
       description:
-        "Create, edit, assign, or unassign WorkItems. Create an item before binding it.",
+        "Create a bounded WorkItem under the current objective for implementation, investigation, fixes, verification, documentation, or commit steps.",
       inputSchema: workItemInputSchema,
     },
     tool(async (x) => {

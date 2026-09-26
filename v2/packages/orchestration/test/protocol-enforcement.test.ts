@@ -67,19 +67,10 @@ test("result enforcement rejects missing specialist, identity mismatches, and pa
   };
   const wire = serializeAgentResult(result);
   const invalid = [
-    wire.replace("&quot;specialist&quot;:&quot;explorer&quot;,", ""),
-    wire.replace(
-      "&quot;delegationId&quot;:&quot;dlg-1&quot;",
-      "&quot;delegationId&quot;:&quot;dlg-other&quot;",
-    ),
-    wire.replace(
-      "&quot;workItemId&quot;:&quot;item-1&quot;",
-      "&quot;workItemId&quot;:&quot;item-other&quot;",
-    ),
-    wire.replace(
-      "&quot;kind&quot;:&quot;explorer&quot;",
-      "&quot;kind&quot;:&quot;executor&quot;",
-    ),
+    wire.replace('"specialist":"explorer",', ""),
+    wire.replace('"delegationId":"dlg-1"', '"delegationId":"dlg-other"'),
+    wire.replace('"workItemId":"item-1"', '"workItemId":"item-other"'),
+    wire.replace('"kind":"explorer"', '"kind":"executor"'),
   ];
   for (const source of invalid)
     expect(() => enforcer.validateResult(source, expected)).toThrow(

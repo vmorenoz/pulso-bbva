@@ -59,6 +59,22 @@ test("agent result round trips every common and specialized field", () => {
   expect(parseAgentResult(serializeAgentResult(result))).toEqual(result);
 });
 
+test("v2 audit wire is raw JSON, tag-safe, and reads legacy v2 payloads", () => {
+  const wire = serializeAgentResult({
+    ...result,
+    summary: "literal </pulso-result> & <tag>",
+  });
+  expect(wire).not.toContain("<payload>");
+  expect(wire).not.toContain("&quot;");
+  expect(wire).toContain("\\u003C/pulso-result>");
+  expect(parseAgentResult(wire).summary).toContain("</pulso-result>");
+
+  const legacy = `<pulso-result v="2"><payload>${JSON.stringify(result)
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")}</payload></pulso-result>`;
+  expect(parseAgentResult(legacy)).toEqual(result);
+});
+
 test("result identity and protocol versions are rejected explicitly", () => {
   const serialized = serializeAgentResult(result);
   const expected = {

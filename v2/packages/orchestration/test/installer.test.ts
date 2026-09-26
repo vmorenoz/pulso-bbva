@@ -27,7 +27,7 @@ test("workspace installation is idempotent and preserves foreign MCP servers", a
     });
     expect(
       await readFile(join(workspace, ".github/agents/pulso.agent.md"), "utf8"),
-    ).toContain("only human-facing orchestrator");
+    ).toContain("tools: ['agent', 'pulso/*']");
     expect(
       await readFile(
         join(workspace, ".github/skills/bbva-apx/SKILL.md"),

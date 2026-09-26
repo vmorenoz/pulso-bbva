@@ -8,7 +8,7 @@ import {
   taskProtocol,
 } from "./schemas";
 
-const decodeXml = (value: string) =>
+const decodeLegacyXml = (value: string) =>
   value
     .replaceAll("&quot;", '"')
     .replaceAll("&apos;", "'")
@@ -20,13 +20,21 @@ const parsePayload = (
   source: string,
   protocol: typeof taskProtocol | typeof resultProtocol,
 ) => {
-  const match = new RegExp(
-    `^\\s*<${protocol.tag} v="([^"]+)"><payload>([\\s\\S]*)</payload></${protocol.tag}>\\s*$`,
-  ).exec(source);
-  if (match?.[1] !== String(protocol.version))
+  const version = new RegExp(`^\\s*<${protocol.tag} v="([^"]+)">`).exec(
+    source,
+  )?.[1];
+  if (version !== String(protocol.version))
     throw new Error("PROTOCOL_VERSION_MISMATCH");
+  const rawMatch = new RegExp(
+    `^\\s*<${protocol.tag} v="${protocol.version}">([\\s\\S]*)</${protocol.tag}>\\s*$`,
+  ).exec(source);
+  const legacyMatch = new RegExp(
+    `^\\s*<${protocol.tag} v="${protocol.version}"><payload>([\\s\\S]*)</payload></${protocol.tag}>\\s*$`,
+  ).exec(source);
+  const body = legacyMatch ? decodeLegacyXml(legacyMatch[1]) : rawMatch?.[1];
+  if (body === undefined) throw new Error("PROTOCOL_MALFORMED");
   try {
-    return JSON.parse(decodeXml(match[2]));
+    return JSON.parse(body);
   } catch {
     throw new Error("PROTOCOL_MALFORMED");
   }

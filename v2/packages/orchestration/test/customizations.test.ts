@@ -18,6 +18,10 @@ test("agent definitions enforce the Pulso-only topology without fixed routes", a
   expect(pulso).toContain(
     "['Planner', 'Explorer', 'Executor', 'Verifier', 'Security Auditor']",
   );
+  expect(pulso).toContain("tools: ['agent', 'pulso/*']");
+  expect(pulso).not.toMatch(
+    /['"](?:read|grep|glob|list|edit|write|apply_patch|bash|todowrite|todoread|terminal|search)['"]/i,
+  );
   for (const name of [
     "planner",
     "explorer",
@@ -79,6 +83,17 @@ test("both runtimes render the same canonical semantic prompt and skill roster",
   expect(agentDefinitions.pulso.skills).toEqual(agentDefinitions.pulso.skills);
 });
 
+test("Pulso policy anchors continuity and explicit-only commits", () => {
+  const rendered = openCodeRuntime.renderAgent(agentDefinitions.pulso).content;
+  expect(rendered).toContain("Work continuity defaults to reuse");
+  expect(rendered).toContain(
+    "Request a new Work only when the user's objective actually changes",
+  );
+  expect(rendered).toContain("only when the user explicitly requests a commit");
+  expect(rendered).toContain("Git identity is unavailable");
+  expect(rendered).toContain("There are no predefined routes");
+});
+
 test("checked-in VS Code agents are generated from the canonical runtime renderer", async () => {
   const installedRoot = join(source, "../../.github/agents");
   for (const id of agentIds) {
@@ -90,7 +105,9 @@ test("checked-in VS Code agents are generated from the canonical runtime rendere
     if (id === "pulso") {
       expect(installed).toContain("pulso-task/2");
       expect(installed).toContain("pulso-result/2");
-      expect(installed).toContain("every exit path must terminalize");
+      expect(installed).toContain(
+        "Validate the result before recording artifacts or lifecycle",
+      );
       expect(installed).toContain("pulso_runtime_fail");
     } else {
       const normalized = installed

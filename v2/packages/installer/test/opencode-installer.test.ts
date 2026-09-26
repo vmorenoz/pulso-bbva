@@ -164,6 +164,36 @@ test("global OpenCode plan uses only the official user-level asset locations", a
     );
   }));
 
+test("generated OpenCode Pulso asset materializes effective denies and exact Task allowlist", async () =>
+  withTemp(async (workspace) => {
+    const plan = await planOpenCodeInstall({
+      scope: "local",
+      workspace,
+      executable: "/bin/opencode",
+      mcpCommand: ["node", "mcp.js"],
+      skills: [],
+    });
+    const pulso = plan.fileMutations.find((asset) =>
+      asset.path.endsWith("/agents/pulso.md"),
+    )?.content;
+    expect(pulso).toBeDefined();
+    for (const key of [
+      "read",
+      "edit",
+      "glob",
+      "grep",
+      "bash",
+      "todowrite",
+      "skill",
+      "webfetch",
+    ])
+      expect(pulso).toContain(`${key}: deny`);
+    expect(pulso).toContain('"*": deny');
+    expect(pulso).toContain('"planner": allow');
+    expect(pulso).toContain('"security-auditor": allow');
+    expect(pulso).toContain("pulso_*: allow");
+  }));
+
 test("modified managed files conflict and model disappearance aborts before writing", async () =>
   withTemp(async (workspace) => {
     const options = {

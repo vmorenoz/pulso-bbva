@@ -18,7 +18,7 @@ const permissions = (agent: AgentDefinition) => {
     string,
     "allow" | "deny" | Record<string, "allow" | "deny">
   > = {};
-  for (const capability of agent.capabilities.allow) {
+  const add = (capability: string, effect: "allow" | "deny") => {
     const action =
       capability === "search"
         ? "glob"
@@ -29,23 +29,25 @@ const permissions = (agent: AgentDefinition) => {
             : capability === "mcp"
               ? "pulso_*"
               : capability;
-    result[action] = "allow";
-    if (capability === "search") result.grep = "allow";
-  }
-  for (const capability of agent.capabilities.deny) {
-    const action =
-      capability === "search"
-        ? "glob"
-        : capability === "shell"
-          ? "bash"
-          : capability === "delegate"
-            ? "task"
-            : capability === "mcp"
-              ? "pulso_*"
-              : capability;
-    result[action] = "deny";
-    if (capability === "search") result.grep = "deny";
-  }
+    result[action] = effect;
+    if (capability === "search") result.grep = effect;
+  };
+  // OpenCode 1.18.32 supports these permission keys. Keep the primary agent's
+  // host-native tool surface explicitly denied before adding its allowlist.
+  if (agent.role === "primary")
+    for (const key of [
+      "read",
+      "edit",
+      "glob",
+      "grep",
+      "bash",
+      "todowrite",
+      "skill",
+      "webfetch",
+    ])
+      result[key] = "deny";
+  for (const capability of agent.capabilities.deny) add(capability, "deny");
+  for (const capability of agent.capabilities.allow) add(capability, "allow");
   if (agent.role === "primary") {
     const taskRules: Record<string, "allow" | "deny"> = { "*": "deny" };
     for (const id of agent.delegation?.allowedSpecialists ?? [])

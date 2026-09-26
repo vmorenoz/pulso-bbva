@@ -3,6 +3,10 @@ import type {
   ExpectedDelegationIdentity,
   TaskEnvelope,
 } from "../../../protocol/schemas";
+import {
+  serializeAgentResult,
+  serializeTaskEnvelope,
+} from "../../../protocol/serialize";
 
 type HookInput = {
   tool: string;
@@ -45,6 +49,9 @@ export const PulsoProtocolGuard = async () => {
         task = enforcer.validateTask(prompt);
         if (output.args.subagent_type !== task.specialist)
           throw new Error("SUBAGENT_SPECIALIST_MISMATCH");
+        // Accept legacy v2 on input, but ensure child execution receives only
+        // the canonical audit wire.
+        output.args.prompt = serializeTaskEnvelope(task);
       } catch (error) {
         throw new Error(
           `PULSO_PROTOCOL_INVALID_TASK: ${error instanceof Error ? error.message : String(error)}`,
@@ -81,7 +88,14 @@ export const PulsoProtocolGuard = async () => {
       try {
         if (typeof output.output !== "string")
           throw new Error("RESULT_TEXT_MISSING");
-        enforcer.validateResult(extractTaskResult(output.output), expected);
+        const resultWire = extractTaskResult(output.output);
+        const result = enforcer.validateResult(resultWire, expected);
+        // Canonicalize legacy result transport after all validation and exact
+        // identity checks have succeeded.
+        output.output = output.output.replace(
+          resultWire,
+          serializeAgentResult(result),
+        );
       } catch (error) {
         throw new Error(
           `PULSO_PROTOCOL_INVALID_RESULT: ${expected.specialist} result rejected (${error instanceof Error ? error.message : String(error)}). Delegation was not accepted.`,

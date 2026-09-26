@@ -32,6 +32,8 @@ export interface StructuredPromptDefinition {
   delegation_policy?: string;
   context_policy?: string;
   work_tracking?: string;
+  continuity_policy?: string;
+  commit_policy?: string;
   constraints?: string;
 }
 

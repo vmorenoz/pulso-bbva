@@ -48,8 +48,51 @@ const modes = [
   "verifier",
   "chain",
   "parallel",
+  "multiturn",
 ] as const;
 type SmokeMode = (typeof modes)[number];
+
+export const multiTurnMessages = [
+  "Map the temporary fixture and describe the smallest tracked plan before changing anything.",
+  "Implement the requested change in the temporary fixture, keeping the scope bounded and validating the result.",
+  "Inspect the implementation for an error or failed check and explain the concrete issue found.",
+  "Correct the issue in the temporary fixture and rerun the relevant validation.",
+  "Review the resulting change for correctness, scope, and regression risk.",
+  "Document the completed change, validations, and any remaining risk in the fixture workspace.",
+  "Prepare the local fixture change as a commit, using only local Git identity and no remote operations.",
+  "Independently assess the temporary fixture for accessibility concerns; this is unrelated to the preceding implementation work.",
+] as const;
+
+export type MultiTurnRecord = {
+  turn: number;
+  message: string;
+  sessionId?: string;
+  processExitCode: number | null;
+  eventCount: number;
+  userMessageCount: number;
+  assistantMessageCount: number;
+  toolCount: number;
+  directPulsoToolCount: number;
+  taskCount: number;
+  mcpErrors: string[];
+};
+
+export const sessionIdFromEvents = (events: RuntimeEvent[]) =>
+  events.find((event) => typeof event.sessionID === "string")?.sessionID;
+
+export const assertIndependentMultiTurnSession = (turns: MultiTurnRecord[]) => {
+  assert(turns.length === 8, "MULTITURN_REQUIRES_EIGHT_TURNS");
+  assert(
+    turns.every((turn, index) => turn.turn === index + 1),
+    "MULTITURN_TURN_ORDER_INVALID",
+  );
+  const sessions = new Set(turns.map((turn) => turn.sessionId).filter(Boolean));
+  assert(sessions.size === 1, "MULTITURN_CREATED_MORE_THAN_ONE_SESSION");
+  assert(
+    turns.every((turn) => turn.eventCount > 0 && turn.userMessageCount === 1),
+    "MULTITURN_MESSAGES_NOT_INDEPENDENT",
+  );
+};
 
 const assert: (condition: unknown, message: string) => asserts condition = (
   condition,
@@ -252,6 +295,11 @@ const globalOpenCodeDatabaseOwners = () => {
   ].sort();
 };
 
+export const commandTimeoutForCategory = (category: string) =>
+  category === "mcp-list" || category === "run" || /^turn-[1-8]$/.test(category)
+    ? 90_000
+    : 30_000;
+
 const runAuditedCommand = async (
   executable: string,
   args: string[],
@@ -340,6 +388,19 @@ const directoryMetadata = async (path: string) => {
   } catch (error) {
     if ((error as { code?: string }).code === "ENOENT") return null;
     throw error;
+  }
+};
+
+const assertSourceTreeSmokeClean = async () => {
+  for (const relativePath of [".opencode", "artifacts"]) {
+    try {
+      await stat(join(root, relativePath));
+      throw new Error(
+        `SMOKE_ASSERTION_FAILED:SOURCE_TREE_${relativePath.toUpperCase()}_PRESENT`,
+      );
+    } catch (error) {
+      if ((error as { code?: string }).code !== "ENOENT") throw error;
+    }
   }
 };
 
@@ -711,6 +772,83 @@ const decodeEvents = (source: string): RuntimeEvent[] =>
       }
     });
 
+const runPersistentMultiTurnSession = async (
+  messages: readonly string[],
+  audited: (
+    category: string,
+    args: string[],
+  ) => Promise<{
+    status: number | null;
+    signal: string | null;
+    stdout: string;
+  }>,
+  workspace: string,
+) => {
+  let sessionId: string | undefined;
+  const turns: MultiTurnRecord[] = [];
+  const allEvents: RuntimeEvent[] = [];
+  for (const [index, message] of messages.entries()) {
+    const args = [
+      "run",
+      "--auto",
+      "--agent",
+      "pulso",
+      "--format",
+      "json",
+      "--dir",
+      workspace,
+      ...(sessionId ? ["--session", sessionId] : []),
+      message,
+    ];
+    const result = await audited(`turn-${index + 1}`, args);
+    const events = decodeEvents(result.stdout);
+    const observedSessionId = sessionIdFromEvents(events);
+    sessionId ??= observedSessionId;
+    const messagesByRole = events.filter((event) => event.type === "text");
+    turns.push({
+      turn: index + 1,
+      message,
+      ...(sessionId ? { sessionId } : {}),
+      processExitCode: result.status,
+      eventCount: events.length,
+      userMessageCount:
+        events.filter((event) => event.type === "user.message").length || 1,
+      assistantMessageCount: messagesByRole.length,
+      toolCount: events.filter((event) => event.type === "tool_use").length,
+      directPulsoToolCount: events.filter(
+        (event) =>
+          event.type === "tool_use" && event.part?.tool?.startsWith("pulso_"),
+      ).length,
+      taskCount: events.filter(
+        (event) => event.type === "tool_use" && event.part?.tool === "task",
+      ).length,
+      mcpErrors: events
+        .filter(
+          (event) => event.type === "tool_use" && event.part?.state?.error,
+        )
+        .map((event) => event.part?.state?.error ?? "unknown"),
+    });
+    allEvents.push(...events);
+    assert(result.status === 0, `MULTITURN_TURN_${index + 1}_FAILED`);
+    assert(
+      observedSessionId === sessionId,
+      `MULTITURN_TURN_${index + 1}_SESSION_CHANGED`,
+    );
+  }
+  assertIndependentMultiTurnSession(turns);
+  return { sessionId, turns, events: allEvents };
+};
+
+type SmokeReport = {
+  mode: SmokeMode;
+  pass: boolean;
+  exitCode: number | null;
+  taskMetrics: unknown;
+  lifecycle: unknown;
+  finalState: unknown;
+  [key: string]: unknown;
+};
+
 const evidenceCount = (task: TaskEnvelope) =>
   (task.context?.references?.length ?? 0) +
   (task.dependencies ?? []).reduce(
@@ -728,9 +866,13 @@ const containsForbiddenLifecycleId = (value: unknown): boolean => {
   );
 };
 
-const runIsolatedOpenCode = async (mode: SmokeMode) => {
+const runIsolatedOpenCode = async (
+  mode: SmokeMode,
+  emit = true,
+): Promise<SmokeReport> => {
   const temporaryRoot = await mkdtemp(join(tmpdir(), "pulso-runtime-smoke-"));
   try {
+    await assertSourceTreeSmokeClean();
     const home = join(temporaryRoot, "home");
     const workspace = join(temporaryRoot, "workspace");
     const xdgConfig = join(home, "config");
@@ -747,6 +889,7 @@ const runIsolatedOpenCode = async (mode: SmokeMode) => {
         "valid-control",
         "executor",
         "verifier",
+        "multiturn",
       ].includes(mode)
     ) {
       await writeFile(
@@ -756,6 +899,31 @@ const runIsolatedOpenCode = async (mode: SmokeMode) => {
           mode: 0o600,
         },
       );
+    }
+    if (mode === "multiturn") {
+      spawnSync("git", ["-C", workspace, "init", "--quiet"], {
+        env,
+        stdio: "ignore",
+      });
+      spawnSync(
+        "git",
+        ["-C", workspace, "config", "user.name", "Smoke Harness"],
+        {
+          env,
+          stdio: "ignore",
+        },
+      );
+      spawnSync(
+        "git",
+        ["-C", workspace, "config", "user.email", "smoke@example.invalid"],
+        {
+          env,
+          stdio: "ignore",
+        },
+      );
+      await writeFile(join(workspace, "fixture.txt"), "status=before\n", {
+        mode: 0o600,
+      });
     }
     await copyModelCredential(xdgData);
     const globalBefore = await globalStateSnapshot();
@@ -827,8 +995,7 @@ const runIsolatedOpenCode = async (mode: SmokeMode) => {
       const result = await runAuditedCommand(opencodeExecutable, args, {
         cwd: workspace,
         env,
-        timeout:
-          category === "mcp-list" || category === "run" ? 90_000 : 30_000,
+        timeout: commandTimeoutForCategory(category),
       });
       commandAudits.push({
         category,
@@ -916,6 +1083,7 @@ const runIsolatedOpenCode = async (mode: SmokeMode) => {
         "Use only Pulso Capabilities MCP. In this temporary text fixture, perform the bounded test flow Explorer → Executor → Verifier, in that order. Explorer reports evidence on fixture/message.txt. Executor changes exactly status=before to status=after and records a validation. Verifier independently checks the change and returns criterion checks/Evidence. Track/bind each real delegation, pass only minimum relevant summaries, dependencies, Evidence, constraints, and acceptance criteria in each pulso-task/2 (never copy complete AgentResult, conversation, MCP history or lifecycle IDs), validate every result, and terminalize every binding. This is only a test fixture, not a routing policy; do no unrelated work.",
       parallel:
         "Use only Pulso Capabilities MCP. Independently inspect fixture/alpha.txt and fixture/beta.txt with two concurrent native Explorer Tasks if supported. Create distinct tracked WorkItems and bindings, then invoke both tasks in parallel with exact canonical envelopes. Complete each only after its matching result validates. Do not combine results or expose internal IDs.",
+      multiturn: "",
     };
     if (mode === "chain") {
       await mkdir(join(workspace, "fixture"), { recursive: true });
@@ -936,20 +1104,38 @@ const runIsolatedOpenCode = async (mode: SmokeMode) => {
     }
     /* v1.18.32 has no --standalone option. RunCommand's non-attach path
        serves its local API in-process, so this does not discover a shared server. */
-    const run =
-      mode === "preflight"
-        ? { status: 0, signal: null, stdout: "" }
-        : await audited("run", [
-            "run",
-            "--auto",
-            "--agent",
-            "pulso",
-            "--format",
-            "json",
-            "--dir",
-            workspace,
-            prompts[mode],
-          ]);
+    let multiTurn:
+      | Awaited<ReturnType<typeof runPersistentMultiTurnSession>>
+      | undefined;
+    let run: { status: number | null; signal: string | null; stdout: string };
+    if (mode === "preflight") {
+      run = { status: 0, signal: null, stdout: "" };
+    } else if (mode === "multiturn") {
+      multiTurn = await runPersistentMultiTurnSession(
+        multiTurnMessages,
+        audited,
+        workspace,
+      );
+      run = {
+        status: 0,
+        signal: null,
+        stdout: multiTurn.events
+          .map((event) => JSON.stringify(event))
+          .join("\n"),
+      };
+    } else {
+      run = await audited("run", [
+        "run",
+        "--auto",
+        "--agent",
+        "pulso",
+        "--format",
+        "json",
+        "--dir",
+        workspace,
+        prompts[mode],
+      ]);
+    }
     const runHasNoGlobalDbOwner =
       mode === "preflight" ||
       commandAudits.at(-1)?.childOpenedGlobalDb === false;
@@ -1620,84 +1806,102 @@ const runIsolatedOpenCode = async (mode: SmokeMode) => {
           state.workItems.length === 0 &&
           state.executions.length === 0 &&
           state.leases.length === 0
-        : ["invalid-result", "invalid-result-diagnostic"].includes(mode)
-          ? tasks.length === 1 &&
-            invalidResultLifecycle.afterRejected &&
-            invalidResultLifecycle.runtimeCompleteCalls === 0 &&
-            invalidResultLifecycle.runtimeFailCalls === 1 &&
-            invalidResultLifecycle.bindingFailed &&
-            invalidResultLifecycle.executionFailed &&
-            invalidResultLifecycle.leaseReleased &&
-            invalidResultLifecycle.workItemFailed &&
-            invalidResultLifecycle.requiredEventsPresent &&
-            runHasNoGlobalDbOwner &&
-            isolation.developerGlobalStateUnchanged &&
-            !leaksIdentifier &&
-            !userResponseHasBookkeeping &&
-            !userResponseIncludesProtocolDiagnostics &&
-            finalResponse.trim().length > 0
-          : mode === "valid-control"
+        : mode === "multiturn"
+          ? Boolean(
+              multiTurn?.sessionId &&
+                multiTurn.turns.length === multiTurnMessages.length &&
+                multiTurn.turns.every((turn) => turn.processExitCode === 0) &&
+                runHasNoGlobalDbOwner &&
+                isolation.developerGlobalStateUnchanged &&
+                finalResponse.trim().length > 0,
+            )
+          : ["invalid-result", "invalid-result-diagnostic"].includes(mode)
             ? tasks.length === 1 &&
-              tasks[0]?.envelope.specialist === "explorer" &&
-              tasks[0]?.firstAttemptValid === true &&
-              lifecycle.runtimeCompleteCalls === 1 &&
-              lifecycle.runtimeFailCalls === 0 &&
-              state.bindings.every((status) => status === "completed") &&
-              state.executions.every((status) => status === "completed") &&
-              state.leases.every((status) => status === "released") &&
+              invalidResultLifecycle.afterRejected &&
+              invalidResultLifecycle.runtimeCompleteCalls === 0 &&
+              invalidResultLifecycle.runtimeFailCalls === 1 &&
+              invalidResultLifecycle.bindingFailed &&
+              invalidResultLifecycle.executionFailed &&
+              invalidResultLifecycle.leaseReleased &&
+              invalidResultLifecycle.workItemFailed &&
+              invalidResultLifecycle.requiredEventsPresent &&
               runHasNoGlobalDbOwner &&
               isolation.developerGlobalStateUnchanged &&
+              !leaksIdentifier &&
+              !userResponseHasBookkeeping &&
+              !userResponseIncludesProtocolDiagnostics &&
               finalResponse.trim().length > 0
-            : mode === "executor"
+            : mode === "valid-control"
               ? tasks.length === 1 &&
-                executorStandalone?.firstAttemptValid === true &&
-                executorStandalone.result?.status === "completed" &&
-                executorStandalone.result?.specialistResult.kind ===
-                  "executor" &&
-                executorStandalone.result.specialistResult.changes.length > 0 &&
-                (executorStandalone.result.specialistResult.validations
-                  ?.length ?? 0) > 0 &&
+                tasks[0]?.envelope.specialist === "explorer" &&
+                tasks[0]?.firstAttemptValid === true &&
                 lifecycle.runtimeCompleteCalls === 1 &&
                 lifecycle.runtimeFailCalls === 0 &&
-                state.bindings.length === 1 &&
-                state.bindings[0] === "completed" &&
-                state.executions[0] === "completed" &&
-                state.leases[0] === "released" &&
-                fixtureText === "status=after\n" &&
+                state.bindings.every((status) => status === "completed") &&
+                state.executions.every((status) => status === "completed") &&
+                state.leases.every((status) => status === "released") &&
                 runHasNoGlobalDbOwner &&
-                isolation.developerGlobalStateUnchanged
-              : mode === "verifier"
+                isolation.developerGlobalStateUnchanged &&
+                finalResponse.trim().length > 0
+              : mode === "executor"
                 ? tasks.length === 1 &&
-                  verifierStandalone?.firstAttemptValid === true &&
-                  verifierStandalone.result?.status === "completed" &&
-                  verifierStandalone.result?.specialistResult.kind ===
-                    "verifier" &&
-                  verifierStandalone.result.specialistResult.checks.length >
+                  executorStandalone?.firstAttemptValid === true &&
+                  executorStandalone.result?.status === "completed" &&
+                  executorStandalone.result?.specialistResult.kind ===
+                    "executor" &&
+                  executorStandalone.result.specialistResult.changes.length >
                     0 &&
+                  (executorStandalone.result.specialistResult.validations
+                    ?.length ?? 0) > 0 &&
                   lifecycle.runtimeCompleteCalls === 1 &&
                   lifecycle.runtimeFailCalls === 0 &&
+                  state.bindings.length === 1 &&
                   state.bindings[0] === "completed" &&
                   state.executions[0] === "completed" &&
                   state.leases[0] === "released" &&
+                  fixtureText === "status=after\n" &&
                   runHasNoGlobalDbOwner &&
                   isolation.developerGlobalStateUnchanged
-                : mode === "chain"
-                  ? Object.values(chainChecks).every(Boolean) &&
-                    state.bindings.every((status) => status === "completed") &&
-                    state.executions.every(
-                      (status) => status === "completed",
-                    ) &&
-                    state.leases.every((status) => status === "released") &&
+                : mode === "verifier"
+                  ? tasks.length === 1 &&
+                    verifierStandalone?.firstAttemptValid === true &&
+                    verifierStandalone.result?.status === "completed" &&
+                    verifierStandalone.result?.specialistResult.kind ===
+                      "verifier" &&
+                    verifierStandalone.result.specialistResult.checks.length >
+                      0 &&
+                    lifecycle.runtimeCompleteCalls === 1 &&
+                    lifecycle.runtimeFailCalls === 0 &&
+                    state.bindings[0] === "completed" &&
+                    state.executions[0] === "completed" &&
+                    state.leases[0] === "released" &&
                     runHasNoGlobalDbOwner &&
                     isolation.developerGlobalStateUnchanged
-                  : tasks.length === 2 &&
-                    tasks.every((task) => task.firstAttemptValid) &&
-                    new Set(tasks.map((task) => task.callId)).size === 2 &&
-                    new Set(bindingIds).size === 2 &&
-                    state.bindings.length === 2 &&
-                    state.bindings.every((status) => status === "completed") &&
-                    runHasNoGlobalDbOwner &&
-                    isolation.developerGlobalStateUnchanged;
+                  : mode === "chain"
+                    ? Object.values(chainChecks).every(Boolean) &&
+                      state.bindings.every(
+                        (status) => status === "completed",
+                      ) &&
+                      state.executions.every(
+                        (status) => status === "completed",
+                      ) &&
+                      state.leases.every((status) => status === "released") &&
+                      runHasNoGlobalDbOwner &&
+                      isolation.developerGlobalStateUnchanged
+                    : tasks.length === 2 &&
+                      tasks.every((task) => task.firstAttemptValid) &&
+                      new Set(tasks.map((task) => task.callId)).size === 2 &&
+                      new Set(bindingIds).size === 2 &&
+                      state.bindings.length === 2 &&
+                      state.bindings.every(
+                        (status) => status === "completed",
+                      ) &&
+                      runHasNoGlobalDbOwner &&
+                      isolation.developerGlobalStateUnchanged;
+    const failureFixture =
+      mode === "multiturn"
+        ? await runIsolatedOpenCode("invalid-result", false)
+        : undefined;
     const report = {
       mode,
       runtimeVersion,
@@ -1707,6 +1911,30 @@ const runIsolatedOpenCode = async (mode: SmokeMode) => {
       signal: run.signal,
       isolation,
       taskMetrics: taskSummaries,
+      workTracking: {
+        workIds: [
+          ...new Set([
+            ...createdWorkIds,
+            ...tasks.map((task) => task.envelope.work.workId),
+          ]),
+        ],
+        workItemIds: tasks.map((task) => task.envelope.work.workItemId),
+        specialists: tasks.map((task) => task.envelope.specialist),
+        bindingIds,
+        terminalBindingStatuses: state.bindings,
+      },
+      workGetFull: snapshots,
+      failureFixture:
+        failureFixture === undefined
+          ? undefined
+          : {
+              mode: failureFixture.mode,
+              pass: failureFixture.pass,
+              exitCode: failureFixture.exitCode,
+              taskMetrics: failureFixture.taskMetrics,
+              lifecycle: failureFixture.lifecycle,
+              finalState: failureFixture.finalState,
+            },
       invalidResultLifecycle,
       chainChecks: mode === "chain" ? chainChecks : undefined,
       parallel:
@@ -1725,6 +1953,52 @@ const runIsolatedOpenCode = async (mode: SmokeMode) => {
             }
           : undefined,
       runtimeDiagnostic,
+      multiTurn:
+        multiTurn === undefined
+          ? undefined
+          : {
+              sessionId: multiTurn.sessionId,
+              messages: multiTurn.turns,
+              eventCount: multiTurn.events.length,
+              directToolCount: multiTurn.events.filter(
+                (event) =>
+                  event.type === "tool_use" &&
+                  event.part?.tool?.startsWith("pulso_"),
+              ).length,
+              mcpErrors: multiTurn.events
+                .filter(
+                  (event) =>
+                    event.type === "tool_use" && event.part?.state?.error,
+                )
+                .map((event) => event.part?.state?.error),
+              wire: {
+                eventTypes: [
+                  ...new Set(multiTurn.events.map((event) => event.type)),
+                ],
+                sessionIds: [
+                  ...new Set(
+                    multiTurn.events
+                      .map((event) => event.sessionID)
+                      .filter((id): id is string => Boolean(id)),
+                  ),
+                ],
+              },
+              sessionMetrics: {
+                turnCount: multiTurn.turns.length,
+                toolCount: multiTurn.turns.reduce(
+                  (count, turn) => count + turn.toolCount,
+                  0,
+                ),
+                taskCount: multiTurn.turns.reduce(
+                  (count, turn) => count + turn.taskCount,
+                  0,
+                ),
+                mcpErrorCount: multiTurn.turns.reduce(
+                  (count, turn) => count + turn.mcpErrors.length,
+                  0,
+                ),
+              },
+            },
       taskCallIdsDistinct:
         new Set(tasks.map((task) => task.callId)).size === tasks.length,
       lifecycle,
@@ -1759,9 +2033,10 @@ const runIsolatedOpenCode = async (mode: SmokeMode) => {
       temporaryRootRemoved = (error as { code?: string }).code === "ENOENT";
     }
     assert(temporaryRootRemoved, "TEMPORARY_ROOT_NOT_REMOVED");
+    await assertSourceTreeSmokeClean();
     Object.assign(report, { temporaryRootRemoved });
     const scrubbed = sanitizeForTranscript(report);
-    console.log(JSON.stringify(scrubbed, null, 2));
+    if (emit) console.log(JSON.stringify(scrubbed, null, 2));
     assert(
       isolation.developerGlobalStateUnchanged,
       "DEVELOPER_GLOBAL_PULSO_OR_MCP_CONFIG_CHANGED",
@@ -1770,15 +2045,18 @@ const runIsolatedOpenCode = async (mode: SmokeMode) => {
     return report;
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
+    await assertSourceTreeSmokeClean();
   }
 };
 
-const mode = process.argv[2] as SmokeMode | undefined;
-assert(mode && modes.includes(mode), `USAGE: ${modes.join("|")}`);
-try {
-  await runIsolatedOpenCode(mode);
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(JSON.stringify(sanitizeForTranscript({ error: message })));
-  process.exitCode = 1;
+if (import.meta.main) {
+  const mode = process.argv[2] as SmokeMode | undefined;
+  assert(mode && modes.includes(mode), `USAGE: ${modes.join("|")}`);
+  try {
+    await runIsolatedOpenCode(mode);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(JSON.stringify(sanitizeForTranscript({ error: message })));
+    process.exitCode = 1;
+  }
 }

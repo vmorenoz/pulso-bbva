@@ -93,12 +93,50 @@ test("failed, blocked and cancelled results map once without retry selection", (
   }
 });
 
+test("produces the terminal action before preparing subsequent delegation work", () => {
+  const coordinator = new DelegationCoordinator();
+  prepare(coordinator, "first");
+  coordinator.attachBinding("first", "binding-first");
+  coordinator.markRunning("first");
+
+  const order: string[] = [];
+  const accepted = coordinator.acceptResult(
+    "first",
+    serializeAgentResult(resultFor("first", "completed")),
+  );
+  order.push(`terminal:${accepted.action.type}`);
+  prepare(coordinator, "second");
+  order.push("delegation:second");
+
+  expect(order).toEqual(["terminal:complete", "delegation:second"]);
+  expect(accepted.delegation.status).toBe("completed");
+});
+
 test("lost bindings are observed without replacing lower-layer recovery", () => {
   const coordinator = new DelegationCoordinator();
   prepare(coordinator, "lost");
   coordinator.attachBinding("lost", "binding-lost");
   coordinator.markRunning("lost");
   expect(coordinator.observeBindingLost("lost").status).toBe("lost");
+});
+
+test("a LEASE_EXPIRED observation permits one runtime status check without a terminal action", () => {
+  const coordinator = new DelegationCoordinator();
+  prepare(coordinator, "expired");
+  coordinator.attachBinding("expired", "binding-expired");
+  coordinator.markRunning("expired");
+
+  const runtimeStatusChecks = [coordinator.get("expired")];
+  const observed = coordinator.observeBindingLost("expired");
+
+  expect(runtimeStatusChecks).toHaveLength(1);
+  expect(observed.status).toBe("lost");
+  expect(() =>
+    coordinator.acceptResult(
+      "expired",
+      serializeAgentResult(resultFor("expired", "completed")),
+    ),
+  ).toThrow("DELEGATION_ALREADY_TERMINAL");
 });
 
 test("rejects results before running without consuming the delegation", () => {

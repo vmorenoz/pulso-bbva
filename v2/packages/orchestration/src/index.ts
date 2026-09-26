@@ -1,5 +1,6 @@
 export * from "./capabilities/contract";
 export * from "./delegation/coordinator";
+export * from "./policy/work-continuity";
 export * from "./prompting/specialist-prompt-assembler";
 export * from "./protocol/context-budget";
 export * from "./protocol/enforcement";

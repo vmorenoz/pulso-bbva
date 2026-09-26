@@ -51,7 +51,7 @@ const renderSchemaShape = (schema: JsonSchemaNode): string => {
 const taskEnvelopeContract = () => {
   const { task } = protocolContractMetadata;
   return [
-    `Task.prompt MUST use <${task.tag} v="${task.version}"><payload>XML-escaped JSON</payload></${task.tag}>, not bare JSON or a separate output declaration. Its JSON payload must match ${renderSchemaShape(zodJsonSchema(taskEnvelopeSchema))}.`,
+    `Task.prompt MUST use <${task.tag} v="${task.version}">raw tag-safe JSON</${task.tag}>, not bare JSON, a payload wrapper, XML entities, or a separate output declaration. Its JSON must match ${renderSchemaShape(zodJsonSchema(taskEnvelopeSchema))}.`,
     `The Task specialist selector never replaces the required specialist field. dependencies are compact upstream WorkItem references with summary and optional artifacts, never full AgentResults. Omit unused optional fields; do not send null. In particular, scope is an object with optional include/exclude string arrays, not a string. Do not add bindingId, execution IDs, or lease fields.`,
   ].join(" ");
 };
@@ -64,7 +64,7 @@ const resultContract = (
   const payloadSchema = specialistPayloadSchemas[specialist];
   return [
     `Task purpose: ${task.purpose} Focus on ${task.focus.join(", ")}. Return ${task.produce.join(", ")}; avoid ${task.avoid.join(", ")}.`,
-    `Return only ${result.protocol}, not plain JSON or the host's task status: <${result.tag} v="${result.version}"><payload>XML-escaped JSON</payload></${result.tag}>. Required root fields: ${fields(result.fields.required)}.`,
+    `Return only ${result.protocol}, not plain JSON or the host's task status: <${result.tag} v="${result.version}">raw tag-safe JSON</${result.tag}>. Do not use a payload wrapper or HTML entities. Required root fields: ${fields(result.fields.required)}.`,
     `specialistResult must match ${specialist}: ${renderSchemaShape(zodJsonSchema(payloadSchema))}. Evidence is {kind:file|symbol|command|test|artifact|url,ref:string,note?:string}. Allowed status values: ${result.statuses.join(", ")}; never use aliases. Do not invent fields or include Binding/Lease IDs.`,
   ].join(" ");
 };

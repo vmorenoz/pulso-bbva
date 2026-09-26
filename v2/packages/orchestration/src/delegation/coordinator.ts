@@ -128,9 +128,11 @@ export class DelegationCoordinator {
         result = repairAgentResult(serializedResult);
       }
       validateAgentResultIdentity(result, delegation);
+      // Build the terminal action before changing state.  Callers can therefore
+      // dispatch the returned lifecycle operation before doing any follow-up
+      // delegation work, while an accepted result is consumed exactly once.
       const action = this.mapResultLifecycle(delegation, result);
-      delegation.status = result.status;
-      return { result, action, delegation: { ...delegation } };
+      return this.terminalize(delegation, result, action);
     } catch (error) {
       delegation.status = "protocol_error";
       if (error instanceof Error && error.message === "PROTOCOL_PARSE_ERROR")
@@ -139,6 +141,15 @@ export class DelegationCoordinator {
         throw new Error("PROTOCOL_PARSE_ERROR");
       throw error;
     }
+  }
+
+  private terminalize(
+    delegation: Delegation,
+    result: AgentResult,
+    action: LifecycleAction,
+  ) {
+    delegation.status = result.status;
+    return { result, action, delegation: { ...delegation } };
   }
 
   mapResultLifecycle(
