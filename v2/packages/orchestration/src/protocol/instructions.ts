@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AgentId, SpecialistTaskContract } from "../runtimes/types";
+import { renderExample } from "./examples";
 import {
   protocolContractMetadata,
   resultLifecycleAction,
@@ -104,8 +105,17 @@ const pulsoResultRules = (guarded: boolean) => {
 export const renderAgentProtocolInstructions = (
   agent: AgentId,
   taskContract?: SpecialistTaskContract,
-  options: { guarded?: boolean } = {},
+  options: {
+    guarded?: boolean;
+    runtimeMode?: "managed-opencode" | "legacy-mcp";
+  } = {},
 ): string => {
+  if (agent === "pulso" && options.runtimeMode === "managed-opencode")
+    return [
+      "OpenCode native management generates Work and execution identities; never construct delegationId, binding, lease, execution, or runtime lifecycle calls yourself.",
+      "Use pulso_native_work, pulso_native_prepare, pulso_native_status and the exact native Task arguments returned by prepare. The adapter validates and finalizes the specialist result before it is returned.",
+      taskEnvelopeContract(),
+    ].join(" ");
   if (agent === "pulso")
     return [
       "For each material delegation, create a fresh unique delegationId before binding and use that exact value as externalExecutionId. Use the runtime contract's provider and invoke only the selected canonical specialist through the native Task capability.",
@@ -113,10 +123,11 @@ export const renderAgentProtocolInstructions = (
       pulsoResultRules(options.guarded === true),
     ].join(" ");
 
+  const specialist = agent as Exclude<AgentId, "pulso">;
   return [
     `Treat the received serialized ${protocolContractMetadata.task.protocol} payload as the task authority; preserve its delegationId, specialist, and nested Work identity exactly. Do not infer or invent bindingId, Execution, lease, or fencing details.`,
     resultContract(
-      agent,
+      specialist,
       taskContract ?? {
         purpose: `Complete the delegated ${agent} task.`,
         focus: ["objective", "relevant scope and context"],
@@ -125,5 +136,6 @@ export const renderAgentProtocolInstructions = (
       },
     ),
     "Return only the serialized AgentResult; do not add prose or convert status values to synonyms.",
+    renderExample(specialist),
   ].join(" ");
 };

@@ -46,6 +46,7 @@ test("MCP server registers tools and applies work operations through the public 
 
   const tools = await client.listTools();
   expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+    "doctor",
     "runtime_bind",
     "runtime_block",
     "runtime_cancel",
@@ -99,6 +100,11 @@ test("MCP server registers tools and applies work operations through the public 
   const emptyWork = await call(client, "pulso_work_get", {});
   expect(emptyWork).toMatchObject({
     structuredContent: { ok: true, value: { work: null } },
+  });
+  const doctor = await call(client, "pulso_doctor", {});
+  expect(doctor.structuredContent?.value).toMatchObject({
+    buildId: "development",
+    capabilities: true,
   });
   const agentToolView = tools.tools.map(
     ({ name, description, inputSchema }) => ({
@@ -218,9 +224,9 @@ test("MCP server registers tools and applies work operations through the public 
     result: "complete",
   });
   expect(completed.structuredContent?.value?.status).toBe("completed");
-  const noActiveWork = await call(client, "pulso_work_get", {});
-  expect(noActiveWork).toMatchObject({
-    structuredContent: { ok: true, value: { work: null } },
+  const activeWork = await call(client, "pulso_work_get", {});
+  expect(activeWork).toMatchObject({
+    structuredContent: { ok: true, value: { work: { status: "active" } } },
   });
   const zombie = await call(client, "pulso_runtime_heartbeat", {
     bindingId,
@@ -280,13 +286,7 @@ test("MCP server registers tools and applies work operations through the public 
     isError: true,
     structuredContent: { ok: false, error: { code: "WORK_NOT_FOUND" } },
   });
-  const transition = await call(client, "pulso_work_transition", {
-    target: "work",
-    id: workId,
-    transition: "start",
-    version: 2,
-  });
-  expect(transition.structuredContent?.value?.status).toBe("active");
+  expect((await runtime.work.snapshot(workId)).work.status).toBe("active");
   const state = await call(client, "pulso_work_get", { workId, view: "full" });
   expect(state.structuredContent?.value?.artifacts).toHaveLength(1);
 
@@ -294,7 +294,7 @@ test("MCP server registers tools and applies work operations through the public 
   runtime.close();
 });
 
-test("work_create is continuation-safe and requires explicit terminalization for a new objective", async () => {
+test("work_create resolves legacy selection conservatively and preserves new objectives", async () => {
   const runtime = bootstrapCapabilities(process.cwd(), {
     dataDir: `/tmp/pulso-mcp-continuity-${crypto.randomUUID()}`,
   });
@@ -342,23 +342,34 @@ test("work_create is continuation-safe and requires explicit terminalization for
   ).toBe(true);
   expect(await runtime.work.list(runtime.workspaceId)).toHaveLength(1);
 
-  const conflict = await call(client, "pulso_work_create", {
+  const second = await call(client, "pulso_work_create", {
     title: "Continuity B",
     objective: "Start an unrelated objective",
     newObjective: true,
     reason: "The user changed objectives",
   });
-  expect(conflict).toMatchObject({
-    isError: true,
-    structuredContent: {
-      ok: false,
-      error: {
-        code: "WORK_ACTIVE_OBJECTIVE",
-        recovery: expect.stringContaining("terminalize"),
-      },
-    },
+  const workB = second.structuredContent?.value?.workId as string;
+  expect(second.structuredContent?.value).toMatchObject({
+    workId: workB,
+    reused: false,
   });
-  expect(await runtime.work.list(runtime.workspaceId)).toHaveLength(1);
+  expect(workB).not.toBe(workA);
+  expect(await runtime.work.list(runtime.workspaceId)).toHaveLength(2);
+  const ambiguous = await call(client, "pulso_work_get", {});
+  expect(ambiguous.structuredContent?.error).toMatchObject({
+    code: "WORK_AMBIGUOUS",
+  });
+  const reused = await call(client, "pulso_work_create", {
+    title: "Follow-up",
+    objective: "Keep one objective across follow-ups",
+  });
+  expect(reused.structuredContent?.error?.code).toBe("WORK_AMBIGUOUS");
+  const reuseWithItems = await call(client, "pulso_work_create", {
+    title: "Follow-up",
+    objective: "Keep one objective across follow-ups",
+    items: [{ title: "ignored", kind: "task" }],
+  });
+  expect(reuseWithItems.structuredContent?.error?.code).toBe("WORK_AMBIGUOUS");
 
   const completed = await call(client, "pulso_work_transition", {
     target: "work",
@@ -367,18 +378,31 @@ test("work_create is continuation-safe and requires explicit terminalization for
     version: 2,
   });
   expect(completed.structuredContent?.value?.status).toBe("completed");
-  const second = await call(client, "pulso_work_create", {
-    title: "Continuity B",
-    objective: "Start an unrelated objective",
-    newObjective: true,
+  const singleReuseWithItems = await call(client, "pulso_work_create", {
+    title: "Follow-up",
+    objective: "Keep one objective across follow-ups",
+    items: [{ title: "must not be attached", kind: "task" }],
   });
-  const workB = second.structuredContent?.value?.workId as string;
-  expect(workB).not.toBe(workA);
-  expect(second.structuredContent?.value).toMatchObject({
+  expect(singleReuseWithItems.structuredContent?.error?.code).toBe(
+    "WORK_REUSE_WITH_ITEMS",
+  );
+  const singleReuse = await call(client, "pulso_work_create", {
+    title: "Different caller title",
+    objective: "Different caller objective",
+  });
+  expect(singleReuse.structuredContent?.value).toMatchObject({
     workId: workB,
-    reused: false,
+    objective: "Start an unrelated objective",
+    reused: true,
   });
-  expect(await runtime.work.list(runtime.workspaceId)).toHaveLength(2);
+  const explicitB = await call(client, "pulso_work_get", { workId: workB });
+  expect(
+    (
+      explicitB.structuredContent?.value?.work as
+        | { workId?: string }
+        | undefined
+    )?.workId,
+  ).toBe(workB);
 
   await client.close();
   runtime.close();

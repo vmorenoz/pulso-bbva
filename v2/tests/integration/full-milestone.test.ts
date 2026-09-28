@@ -46,6 +46,7 @@ test("runs the complete work-system milestone scenario", async () => {
     research.id,
     "executor-a",
   );
+  expect((await runtime.work.snapshot(work.id)).work.status).toBe("active");
   await runtime.execution.heartbeat(
     researchExecution.executionId,
     researchExecution.leaseId,
@@ -144,7 +145,6 @@ test("runs the complete work-system milestone scenario", async () => {
     reviewExecution.executionId,
     reviewExecution.leaseId,
   );
-  await runtime.work.transition("work", work.id, "start");
   await runtime.work.transition("work", work.id, "complete");
   runtime.close();
 

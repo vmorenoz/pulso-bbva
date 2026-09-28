@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface McpBundleBuildDiagnostic {
   level: string;
@@ -182,4 +183,41 @@ export const formatMcpBundleBuildException = (error: unknown) => {
     details,
     "Verify the workspace dependencies are installed before retrying.",
   ].join("\n");
+};
+
+/** Builds the exact MCP asset whose build ID is activated by the OpenCode manifest. */
+export const buildMcpBundle = async (buildId: string) => {
+  const installerEntry = fileURLToPath(import.meta.url);
+  const mcpEntrypoint = fileURLToPath(
+    new URL("../../capabilities-mcp/src/mcp/stdio.ts", import.meta.url),
+  );
+  return withMcpBundleDependencies({
+    installerEntry,
+    build: async (temporaryDependencyRoot) => {
+      let build: Awaited<ReturnType<typeof Bun.build>>;
+      try {
+        build = await Bun.build({
+          entrypoints: [mcpEntrypoint],
+          target: "bun",
+          format: "esm",
+          write: false,
+          define: { __PULSO_BUILD_ID__: JSON.stringify(buildId) },
+          plugins: [
+            installerDependencyPlugin(installerEntry, temporaryDependencyRoot),
+          ],
+        } as Parameters<typeof Bun.build>[0] & { write: false });
+      } catch (error) {
+        throw new Error(formatMcpBundleBuildException(error), { cause: error });
+      }
+      if (!build.success)
+        throw new Error(formatMcpBundleBuildFailure(build.logs));
+      const output = build.outputs[0];
+      if (!output) throw new Error("INSTALL_MCP_BUNDLE_MISSING");
+      try {
+        return await output.text();
+      } catch (error) {
+        throw new Error(formatMcpBundleBuildException(error), { cause: error });
+      }
+    },
+  });
 };

@@ -184,4 +184,111 @@ describe("work machine", () => {
     await execution.complete(resumed.executionId, resumed.leaseId);
     expect((await work.snapshot(created.id)).items[0].status).toBe("completed");
   });
+  test("starts a pending parent atomically and preserves external execution identity", async () => {
+    const store = new MemoryStore();
+    const work = new WorkService(store, clock);
+    const execution = new ExecutionService(store, work, clock, 1_000);
+    const created = await work.create({
+      workspaceId: "x",
+      title: "x",
+      objective: "x",
+    });
+    const item = await work.addItem({
+      workId: created.id,
+      title: "item",
+      kind: "task",
+      assigneeId: "executor",
+    });
+    const started = await execution.start(item.id, "executor", {
+      externalExecutionRef: { provider: "opencode", id: "delegation-1" },
+    });
+    const snapshot = await work.snapshot(created.id);
+    expect(snapshot.work.status).toBe("active");
+    expect(snapshot.executions[0]?.externalExecutionRef).toEqual({
+      provider: "opencode",
+      id: "delegation-1",
+    });
+    expect(snapshot.events.map((event) => event.type)).toContain(
+      "work.started",
+    );
+    await execution.complete(started.executionId, started.leaseId);
+  });
+
+  test("does not activate a parent when execution preconditions fail", async () => {
+    const store = new MemoryStore();
+    const work = new WorkService(store, clock);
+    const execution = new ExecutionService(store, work, clock, 1_000);
+    const created = await work.create({
+      workspaceId: "x",
+      title: "x",
+      objective: "x",
+    });
+    const item = await work.addItem({
+      workId: created.id,
+      title: "item",
+      kind: "task",
+      assigneeId: "assigned",
+    });
+    await expect(execution.start(item.id, "other")).rejects.toMatchObject({
+      code: "EXECUTOR_NOT_ASSIGNEE",
+    });
+    expect((await work.snapshot(created.id)).work.status).toBe("pending");
+  });
+
+  test("protects terminal and paused Work parents from incompatible changes", async () => {
+    const store = new MemoryStore();
+    const work = new WorkService(store, clock);
+    const execution = new ExecutionService(store, work, clock, 1_000);
+    const created = await work.create({
+      workspaceId: "x",
+      title: "x",
+      objective: "x",
+    });
+    const item = await work.addItem({
+      workId: created.id,
+      title: "item",
+      kind: "task",
+      assigneeId: "executor",
+    });
+    const started = await execution.start(item.id, "executor");
+    await expect(
+      work.transition("work", created.id, "block"),
+    ).rejects.toMatchObject({
+      code: "WORK_HAS_ACTIVE_EXECUTION",
+    });
+    await expect(
+      work.transition("work", created.id, "cancel"),
+    ).rejects.toMatchObject({
+      code: "WORK_HAS_ACTIVE_EXECUTION",
+    });
+    await execution.suspend(started.executionId, started.leaseId, "blocked");
+    await work.transition("work", created.id, "block");
+    await expect(execution.start(item.id, "executor")).rejects.toMatchObject({
+      code: "WORK_RESUME_REQUIRED",
+    });
+    await work.transition("work", created.id, "resume");
+    await work.transition("item", item.id, "resume");
+    const retried = await execution.start(item.id, "executor");
+    await execution.complete(retried.executionId, retried.leaseId);
+    await work.transition("work", created.id, "complete");
+    await expect(
+      work.addItem({ workId: created.id, title: "late", kind: "task" }),
+    ).rejects.toMatchObject({ code: "WORK_NOT_MODIFIABLE" });
+  });
+
+  test("serializes MemoryStore transactions without losing updates", async () => {
+    const store = new MemoryStore();
+    await Promise.all(
+      ["one", "two"].map((title) =>
+        new WorkService(store, clock).create({
+          workspaceId: "x",
+          title,
+          objective: title,
+        }),
+      ),
+    );
+    expect((await store.read()).works.map((work) => work.title).sort()).toEqual(
+      ["one", "two"],
+    );
+  });
 });

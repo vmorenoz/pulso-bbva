@@ -49,36 +49,42 @@ const makeAdapter = (system: ReturnType<typeof makeSystem>, path?: string) => {
 
 class MemoryBindings {
   private rows: RuntimeExecutionBinding[] = [];
-  async reserve(input: {
-    bindingId: string;
-    runtime: RuntimeExecutionBinding["runtime"];
-    workItemId: string;
-    createdAt: string;
-  }) {
+  async reserve(input: Parameters<BindingRepository["reserve"]>[0]) {
     const existing = this.rows.find(
       (row) =>
         row.runtime.provider === input.runtime.provider &&
         row.runtime.executionId === input.runtime.executionId,
     );
     if (existing) return existing;
-    this.rows.push({
-      bindingId: input.bindingId,
-      runtime: input.runtime,
-      workId: "",
-      workItemId: input.workItemId,
+    const binding: RuntimeExecutionBinding = {
+      ...input,
       executionId: "",
       leaseId: "",
       fencingToken: 0,
-      createdAt: input.createdAt,
       expiresAt: "",
       status: "creating",
-    });
-    return undefined;
+      version: 1,
+    };
+    this.rows.push(binding);
+    return structuredClone(binding);
   }
-  async finalize(binding: RuntimeExecutionBinding) {
-    this.rows[
-      this.rows.findIndex((row) => row.bindingId === binding.bindingId)
-    ] = structuredClone(binding);
+  async finalize(binding: RuntimeExecutionBinding, creationToken: string) {
+    const index = this.rows.findIndex(
+      (row) =>
+        row.bindingId === binding.bindingId &&
+        row.status === "creating" &&
+        row.creationToken === creationToken,
+    );
+    if (index < 0) throw new Error("BINDING_RESERVATION_LOST");
+    const finalized = {
+      ...binding,
+      status: "active" as const,
+      creationToken: undefined,
+      creationExpiresAt: undefined,
+      version: binding.version + 1,
+    };
+    this.rows[index] = structuredClone(finalized);
+    return structuredClone(finalized);
   }
   async get(id: string) {
     return this.rows.find((row) => row.bindingId === id);
@@ -93,16 +99,71 @@ class MemoryBindings {
   async list() {
     return structuredClone(this.rows);
   }
-  async updateStatus(id: string, status: RuntimeExecutionBinding["status"]) {
+  async updateHeartbeat(id: string, expiresAt: string, version: number) {
     const row = this.rows.find((candidate) => candidate.bindingId === id);
     if (!row) throw new Error("missing");
-    row.status = status;
+    if (row.status !== "active" || row.version !== version)
+      throw new Error("BINDING_CAS_CONFLICT");
+    row.expiresAt = expiresAt;
+    row.version++;
     return structuredClone(row);
   }
-  async removePending(id: string) {
+  async updateStatus(
+    id: string,
+    status: RuntimeExecutionBinding["status"],
+    version: number,
+    terminalResult?: string,
+  ) {
+    const row = this.rows.find((candidate) => candidate.bindingId === id);
+    if (!row) throw new Error("missing");
+    if (row.status !== "active" || row.version !== version)
+      throw new Error("BINDING_CAS_CONFLICT");
+    row.status = status;
+    row.terminalResult = terminalResult;
+    row.version++;
+    return structuredClone(row);
+  }
+  async markPendingLost(
+    id: string,
+    creationToken: string,
+    version: number,
+    diagnostic: string,
+  ) {
+    const row = this.rows.find((candidate) => candidate.bindingId === id);
+    if (
+      row?.status !== "creating" ||
+      row.creationToken !== creationToken ||
+      row.version !== version
+    )
+      throw new Error("BINDING_RESERVATION_LOST");
+    row.status = "lost";
+    row.terminalResult = diagnostic;
+    row.creationToken = undefined;
+    row.creationExpiresAt = undefined;
+    row.version++;
+    return structuredClone(row);
+  }
+  async recordPendingDiagnostic(
+    id: string,
+    creationToken: string,
+    diagnostic: string,
+  ) {
+    const row = this.rows.find((candidate) => candidate.bindingId === id);
+    if (row?.status !== "creating" || row.creationToken !== creationToken)
+      return false;
+    row.terminalResult = diagnostic;
+    row.version++;
+    return true;
+  }
+  async removePending(id: string, creationToken: string) {
+    const length = this.rows.length;
     this.rows = this.rows.filter(
-      (row) => row.bindingId !== id || row.status !== "creating",
+      (row) =>
+        row.bindingId !== id ||
+        row.status !== "creating" ||
+        row.creationToken !== creationToken,
     );
+    return this.rows.length !== length;
   }
 }
 
@@ -279,6 +340,89 @@ describe("runtime-work adapter", () => {
     expect((await system.work.snapshot(work.id)).leases[0].status).toBe(
       "released",
     );
+  });
+
+  test("does not share an external runtime reference across identities", async () => {
+    const system = makeSystem();
+    const work = await system.work.create({
+      workspaceId: "test",
+      title: "work",
+      objective: "objective",
+    });
+    const item = await system.work.addItem({
+      workId: work.id,
+      title: "item",
+      kind: "task",
+      assigneeId: "runtime",
+    });
+    const { adapter } = makeAdapter(system);
+    const first = await adapter.bind({
+      workItemId: item.id,
+      executorId: "runtime",
+      runtimeReference: {
+        provider: "test-runtime",
+        executionId: "same",
+        sessionId: "session-a",
+      },
+    });
+    await expect(
+      adapter.bind({
+        workItemId: item.id,
+        executorId: "runtime",
+        runtimeReference: {
+          provider: "test-runtime",
+          executionId: "same",
+          sessionId: "session-b",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "RUNTIME_EXECUTION_CONFLICT" });
+    await adapter.complete(first.bindingId, "done");
+    await expect(
+      adapter.bind({
+        workItemId: item.id,
+        executorId: "runtime",
+        runtimeReference: {
+          provider: "test-runtime",
+          executionId: "same",
+          sessionId: "session-a",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "RUNTIME_EXECUTION_TERMINAL" });
+  });
+
+  test("rejects MCP lifecycle writes and heartbeats for native-managed bindings", async () => {
+    const system = makeSystem();
+    const work = await system.work.create({
+      workspaceId: "test",
+      title: "work",
+      objective: "objective",
+    });
+    const item = await system.work.addItem({
+      workId: work.id,
+      title: "item",
+      kind: "task",
+      assigneeId: "runtime",
+    });
+    const { adapter } = makeAdapter(system);
+    const binding = await adapter.bind({
+      workItemId: item.id,
+      executorId: "runtime",
+      managedBy: "opencode-native",
+      runtimeReference: { provider: "opencode", executionId: "delegation" },
+    });
+    await expect(
+      adapter.complete(binding.bindingId, "done"),
+    ).rejects.toMatchObject({
+      code: "BINDING_MANAGED_BY_NATIVE",
+    });
+    await expect(adapter.heartbeat(binding.bindingId)).rejects.toMatchObject({
+      code: "BINDING_MANAGED_BY_NATIVE",
+    });
+    system.clock.date = new Date("2026-01-01T00:00:00.500Z");
+    expect((await adapter.heartbeatNative(binding.bindingId)).status).toBe(
+      "active",
+    );
+    expect((await adapter.get(binding.bindingId)).status).toBe("active");
   });
 
   test("fail and explicit cancel are distinct Work outcomes", async () => {

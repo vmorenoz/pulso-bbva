@@ -149,12 +149,19 @@ test("orchestration lifecycle actions operate through MCP without coordinator si
     ).action;
     await execute(action);
     const snapshot = await runtime.work.snapshot(delegation.workId);
-    expect(snapshot.items[0]?.status).toBe(status);
-    expect(snapshot.executions[0]?.status).toBe(
-      status === "blocked" ? "abandoned" : status,
+    const item = snapshot.items.find(
+      (candidate) => candidate.id === delegation.workItemId,
     );
-    expect(snapshot.executions).toHaveLength(1);
-    expect(snapshot.leases[0]?.status).toBe("released");
+    const execution = snapshot.executions.find(
+      (candidate) => candidate.workItemId === delegation.workItemId,
+    );
+    const lease = snapshot.leases.find(
+      (candidate) => candidate.workItemId === delegation.workItemId,
+    );
+    expect(item?.status).toBe(status);
+    expect(execution?.status).toBe(status === "blocked" ? "abandoned" : status);
+    expect(execution).toBeDefined();
+    expect(lease?.status).toBe("released");
     expect(snapshot.events.length).toBeGreaterThan(0);
   }
 
@@ -191,9 +198,18 @@ test("orchestration lifecycle actions operate through MCP without coordinator si
   );
   expect(coordinator.observeBindingLost("host-loss").status).toBe("lost");
   const lostSnapshot = await runtime.work.snapshot(lost.workId);
-  expect(lostSnapshot.items[0]?.status).toBe("recovery_required");
-  expect(lostSnapshot.executions[0]?.status).toBe("abandoned");
-  expect(lostSnapshot.leases[0]?.status).toBe("expired");
+  expect(
+    lostSnapshot.items.find((item) => item.id === lost.workItemId)?.status,
+  ).toBe("recovery_required");
+  expect(
+    lostSnapshot.executions.find(
+      (execution) => execution.workItemId === lost.workItemId,
+    )?.status,
+  ).toBe("abandoned");
+  expect(
+    lostSnapshot.leases.find((lease) => lease.workItemId === lost.workItemId)
+      ?.status,
+  ).toBe("expired");
 
   await client.close();
   runtime.close();

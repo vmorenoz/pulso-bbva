@@ -13,7 +13,7 @@ import { SqliteBindingStore } from "./runtime/bindings/sqlite-binding-store";
 export interface CapabilitiesRuntime extends WorkingSystem {
   runtimeAdapter: RuntimeWorkAdapter;
   runtimeBindings: SqliteBindingStore;
-  doctor(): Record<string, boolean | number>;
+  doctor(): Record<string, boolean | number | string>;
 }
 
 export const bootstrapCapabilities = (
@@ -23,6 +23,7 @@ export const bootstrapCapabilities = (
     clock?: Clock;
     leaseTtlMs?: number;
     heartbeatPolicy?: Partial<HeartbeatPolicy>;
+    buildId?: string;
   } = {},
 ): CapabilitiesRuntime => {
   const workingSystem = bootstrapWorkingSystem(workspace, options);
@@ -57,7 +58,7 @@ export const bootstrapCapabilities = (
       runtimeAdapterStorage: runtimeBindings.diagnostics().database,
       runtimeBindingSchema: runtimeBindings.diagnostics().schema,
       runtimeWorkGateway: true,
-      singleMcpEntrypoint: true,
+      buildId: options.buildId ?? "development",
     }),
     close: () => {
       runtimeBindings.close();

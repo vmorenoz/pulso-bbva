@@ -117,6 +117,32 @@ test("serializes a SQLite lease race", async () => {
   right.close();
 });
 
+test("releases the SQLite transaction queue when BEGIN IMMEDIATE fails", async () => {
+  const dir = join(tmpdir(), `pulso-${crypto.randomUUID()}`);
+  mkdirSync(dir);
+  const path = join(dir, "work.db");
+  const store = new SqliteStore(path);
+  const holder = new Database(path);
+  try {
+    holder.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
+    await expect(store.transaction(() => undefined)).rejects.toMatchObject({
+      code: "CONCURRENT_TRANSACTION",
+    });
+    holder.exec("COMMIT");
+    await expect(
+      store.transaction(() => "subsequent transaction"),
+    ).resolves.toBe("subsequent transaction");
+  } finally {
+    try {
+      holder.exec("ROLLBACK");
+    } catch {
+      // The holder has already committed in the successful test path.
+    }
+    holder.close();
+    store.close();
+  }
+});
+
 test("rolls back partial state and event changes", async () => {
   const dir = join(tmpdir(), `pulso-${crypto.randomUUID()}`);
   mkdirSync(dir);
@@ -162,6 +188,108 @@ test("upgrades a schema migration record from the previous shape", () => {
   );
   legacy.close();
   const store = new SqliteStore(path);
-  expect(store.diagnostics()).toMatchObject({ schema: true, schemaVersion: 4 });
+  expect(store.diagnostics()).toMatchObject({ schema: true, schemaVersion: 5 });
+  store.close();
+});
+
+test("upgrades a v4 database in place without losing existing Work rows", async () => {
+  const dir = join(tmpdir(), `pulso-${crypto.randomUUID()}`);
+  mkdirSync(dir);
+  const path = join(dir, "work.db");
+  const legacy = new Database(path);
+  legacy.exec(`
+    CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+    INSERT INTO schema_migrations VALUES (4, '2026-01-01T00:00:00.000Z');
+    CREATE TABLE works (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      objective TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT,
+      version INTEGER NOT NULL
+    );
+    INSERT INTO works VALUES (
+      'legacy-work', 'workspace', 'legacy title', 'legacy objective',
+      'pending', '2026-01-01T00:00:00.000Z', NULL, NULL, 1
+    );
+  `);
+  legacy.close();
+  const store = new SqliteStore(path);
+  const snapshot = await new WorkService(store).snapshot("legacy-work");
+  expect(snapshot.work).toMatchObject({
+    id: "legacy-work",
+    title: "legacy title",
+    objective: "legacy objective",
+  });
+  expect(store.diagnostics()).toMatchObject({ schemaVersion: 5 });
+  store.close();
+});
+
+test("persists idempotent creation receipts atomically", async () => {
+  const dir = join(tmpdir(), `pulso-${crypto.randomUUID()}`);
+  mkdirSync(dir);
+  const store = new SqliteStore(join(dir, "work.db"));
+  const work = new WorkService(store);
+  const operation = { operationKey: "work:create:1", inputHash: "input-a" };
+  const first = await work.create(
+    { workspaceId: "workspace", title: "work", objective: "objective" },
+    operation,
+  );
+  const replay = await work.create(
+    { workspaceId: "workspace", title: "work", objective: "objective" },
+    operation,
+  );
+  expect(replay.id).toBe(first.id);
+  await expect(
+    work.create(
+      { workspaceId: "workspace", title: "different", objective: "objective" },
+      { ...operation, inputHash: "input-b" },
+    ),
+  ).rejects.toMatchObject({ code: "OPERATION_CONFLICT" });
+  await expect(
+    store.transaction((state) => {
+      state.operationReceipts.push({
+        operationKey: "rolled-back",
+        inputHash: "x",
+        entityKind: "work",
+        entityId: first.id,
+      });
+      throw new Error("receipt rollback");
+    }),
+  ).rejects.toThrow("receipt rollback");
+  expect((await store.read()).operationReceipts).toHaveLength(1);
+  store.close();
+});
+
+test("rolls back a failed idempotent Work creation with its receipt", async () => {
+  const dir = join(tmpdir(), `pulso-${crypto.randomUUID()}`);
+  mkdirSync(dir);
+  const store = new SqliteStore(join(dir, "work.db"));
+  const work = new WorkService(store);
+  await expect(
+    work.create(
+      {
+        workspaceId: "workspace",
+        title: "invalid work",
+        objective: "objective",
+        items: [
+          {
+            title: "invalid item",
+            kind: "task",
+            dependencies: ["missing-item"],
+          },
+        ],
+      },
+      { operationKey: "work:invalid", inputHash: "input" },
+    ),
+  ).rejects.toMatchObject({ code: "ITEM_NOT_FOUND" });
+  expect(await store.read()).toMatchObject({
+    works: [],
+    items: [],
+    operationReceipts: [],
+  });
   store.close();
 });

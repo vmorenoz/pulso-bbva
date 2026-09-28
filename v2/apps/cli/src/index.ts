@@ -8,7 +8,7 @@ try {
   if (scope === "doctor") {
     const checks = runtime.doctor();
     const ok = Object.entries(checks)
-      .filter(([name]) => name !== "schemaVersion")
+      .filter(([name]) => name !== "schemaVersion" && name !== "buildId")
       .every(([, value]) => value === true);
     console.log(
       JSON.stringify({ ok, workspaceId: runtime.workspaceId, checks }, null, 2),

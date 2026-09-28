@@ -11,6 +11,6 @@
     }
   },
   "files": {
-    "includes": ["**", "!**/dist"]
+    "includes": ["**", "!**/dist", "!**/.pulso-evidence"]
   }
 }

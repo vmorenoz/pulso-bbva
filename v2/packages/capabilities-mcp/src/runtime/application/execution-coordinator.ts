@@ -32,6 +32,12 @@ export class ExecutionCoordinator implements WorkingSystemGateway {
     const started = await this.executionService.start(
       input.workItemId,
       input.executorId,
+      {
+        externalExecutionRef: {
+          provider: input.runtime.provider,
+          id: input.runtime.executionId,
+        },
+      },
     );
     const state = await this.store.read();
     const execution = state.executions.find(
@@ -123,6 +129,20 @@ export class ExecutionCoordinator implements WorkingSystemGateway {
     if (!lease)
       throw new Error(`Lease not found for execution: ${executionId}`);
     return { execution, lease };
+  }
+
+  async findExecutionsByRuntime(runtime: RuntimeExecutionReference) {
+    const state = await this.store.read();
+    return state.executions
+      .filter(
+        (execution) =>
+          execution.externalExecutionRef?.provider === runtime.provider &&
+          execution.externalExecutionRef.id === runtime.executionId,
+      )
+      .map((execution) => ({
+        execution,
+        lease: state.leases.find((lease) => lease.executionId === execution.id),
+      }));
   }
 
   async inspectItem(itemId: string) {

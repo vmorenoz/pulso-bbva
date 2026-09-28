@@ -20,16 +20,18 @@ test("runtime prompts render protocol instructions from canonical schema metadat
       id,
       agentDefinitions[id].taskContract,
     );
-    const guarded = renderAgentProtocolInstructions(
+    const managed = renderAgentProtocolInstructions(
       id,
       agentDefinitions[id].taskContract,
-      { guarded: true },
+      { runtimeMode: "managed-opencode" },
     );
     const openCode = openCodeRuntime.renderAgent(agentDefinitions[id]).content;
     const vscode = vscodeCopilotRuntime.renderAgent(
       agentDefinitions[id],
     ).content;
-    expect(protocolSection(openCode)).toBe(guarded);
+    expect(protocolSection(openCode)).toBe(
+      id === "pulso" ? managed : generated,
+    );
     expect(protocolSection(vscode)).toBe(generated);
     expect(openCode.indexOf("<communication_protocol>")).toBeLessThan(
       openCode.indexOf("<mission>"),
@@ -66,6 +68,11 @@ test("OpenCode prompts expose only canonical versions, statuses and specialist p
     undefined,
     { guarded: true },
   );
+  const managedPulsoInstructions = renderAgentProtocolInstructions(
+    "pulso",
+    undefined,
+    { runtimeMode: "managed-opencode" },
+  );
 
   expect(pulsoInstructions).toContain(protocolContractMetadata.task.protocol);
   expect(pulsoInstructions).toContain(protocolContractMetadata.result.protocol);
@@ -86,23 +93,21 @@ test("OpenCode prompts expose only canonical versions, statuses and specialist p
     /\bresponseFormat\b|\bsucceeded\b|\bdone\b|\bok\b/,
   );
   expect(rendered).not.toContain("pulso-result/2 JSON:");
-  expect(rendered).toContain('provider "opencode"');
-  expect(rendered).toContain(
-    "externalExecutionId to the same fresh delegationId",
-  );
+  expect(rendered).toContain("pulso_native_");
+  expect(rendered).not.toContain("fresh unique delegationId before binding");
   expect(pulsoInstructions).toContain("not bare JSON");
   expect(pulsoInstructions).toContain(
     "Task specialist selector never replaces the required specialist field",
   );
   expect(openCodeRuntime.renderAgent(agentDefinitions.pulso).content).toContain(
-    "Task state completed is transport status only",
+    "OpenCode native management generates Work",
+  );
+  expect(managedPulsoInstructions).toContain(
+    "never construct delegationId, binding, lease, execution, or runtime lifecycle calls",
   );
   expect(pulsoInstructions).toContain("work:{workId:string,workItemId:string}");
   expect(guardedPulsoInstructions).toContain(
     "installed OpenCode Protocol Guard validates",
-  );
-  expect(guardedPulsoInstructions.length).toBeLessThan(
-    pulsoInstructions.length,
   );
   const explorerInstructions = renderAgentProtocolInstructions(
     "explorer",

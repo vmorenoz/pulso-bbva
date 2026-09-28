@@ -59,7 +59,7 @@ test("agent result round trips every common and specialized field", () => {
   expect(parseAgentResult(serializeAgentResult(result))).toEqual(result);
 });
 
-test("v2 audit wire is raw JSON, tag-safe, and reads legacy v2 payloads", () => {
+test("v2 audit wire is raw JSON, tag-safe, and rejects legacy payload wrappers", () => {
   const wire = serializeAgentResult({
     ...result,
     summary: "literal </pulso-result> & <tag>",
@@ -72,7 +72,7 @@ test("v2 audit wire is raw JSON, tag-safe, and reads legacy v2 payloads", () => 
   const legacy = `<pulso-result v="2"><payload>${JSON.stringify(result)
     .replaceAll("&", "&amp;")
     .replaceAll('"', "&quot;")}</payload></pulso-result>`;
-  expect(parseAgentResult(legacy)).toEqual(result);
+  expect(() => parseAgentResult(legacy)).toThrow("PROTOCOL_MALFORMED");
 });
 
 test("result identity and protocol versions are rejected explicitly", () => {
@@ -120,7 +120,7 @@ test("repair only removes a single outer fence and malformed structures fail", (
   ).toEqual(result);
   expect(() =>
     repairAgentResult('```xml\n<pulso-result v="1">bad</pulso-result>\n```'),
-  ).toThrow("PROTOCOL_PARSE_ERROR");
+  ).toThrow("PROTOCOL_VERSION_MISMATCH");
 });
 
 test("specialist payloads are discriminated by ResultContract v2", () => {

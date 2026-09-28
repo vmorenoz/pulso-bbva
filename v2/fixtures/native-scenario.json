@@ -1,0 +1,70 @@
+{
+  "name": "OC-01 - fixture conocida y continuidad A/B",
+  "notes": "Contenido ficticio exclusivamente para un directorio temporal. No tocar el repositorio real ni hacer commit.",
+  "files": {
+    "package.json": "{\n  \"name\": \"pulso-oc01-fixture\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"bun test\"\n  }\n}\n",
+    "src/total.ts": "export function total(values: number[]): number {\n  return values.reduce((sum, value) => sum + value, 0);\n}\n",
+    "tests/total.test.ts": "import { expect, test } from \"bun:test\";\nimport { total } from \"../src/total\";\ntest(\"sums positive amounts\", () => expect(total([2, 3])).toBe(5));\ntest(\"empty total\", () => expect(total([])).toBe(0));\n",
+    "src/auth.ts": "export type User = { id: string; role: \"user\" | \"admin\" };\nexport type Invoice = { ownerId: string };\n// Policy: only the owner or an admin may read an invoice.\nexport function canReadInvoice(user: User | undefined, invoice: Invoice): boolean {\n  return user !== undefined;\n}\n",
+    "README.md": "# OC-01 fixture\nProyecto sintético de pruebas. total suma importes. canReadInvoice debe permitir únicamente al propietario o a un administrador.\n"
+  },
+  "messages": [
+    {
+      "turn": 1,
+      "text": "Objetivo A: revisar y mejorar el contrato de total. Trabajaremos este mismo objetivo en varios mensajes; no cierres su Work hasta que te lo indique. Por ahora investiga src/total.ts sin modificarlo y explica su comportamiento actual.",
+      "expectedWork": "A"
+    },
+    {
+      "turn": 2,
+      "text": "Continúa el objetivo A. Revisa las pruebas existentes de total e identifica qué comprueban y qué no has ejecutado. No modifiques nada todavía.",
+      "expectedWork": "A"
+    },
+    {
+      "turn": 3,
+      "text": "Decisión para el mismo objetivo A: total debe rechazar cualquier importe negativo con Error(\"NEGATIVE_AMOUNT\"), mantener el resultado de los positivos y devolver cero para una lista vacía. Conserva esa decisión; todavía no implementes.",
+      "expectedWork": "A"
+    },
+    {
+      "turn": 4,
+      "text": "Para el objetivo A, encarga a Planner un plan mínimo y cerrado para ese contrato, con archivos y criterios concretos. Sin rutas obligatorias de agentes ni implementación todavía.",
+      "expectedWork": "A"
+    },
+    {
+      "turn": 5,
+      "text": "Implementa ahora el plan del objetivo A únicamente en src/total.ts y tests/total.test.ts. Agrega un caso negativo que compruebe NEGATIVE_AMOUNT. Ejecuta las pruebas. No hagas commit ni cierres el Work.",
+      "expectedWork": "A"
+    },
+    {
+      "turn": 6,
+      "text": "Sigue en A. Pide a Verifier una comprobación independiente del contrato y de las pruebas ejecutadas; no debe corregir código. Distingue su veredicto del estado del objetivo.",
+      "expectedWork": "A"
+    },
+    {
+      "turn": 7,
+      "text": "Continúa en A y resume lo demostrado, sus límites y el estado real. No cierres el Work todavía ni crees otro objetivo para responder.",
+      "expectedWork": "A"
+    },
+    {
+      "turn": 8,
+      "text": "Nuevo objetivo B, independiente de A: encarga a Security Auditor una revisión estática de canReadInvoice en src/auth.ts frente a la política owner o admin. No cambies ese archivo ni ejecutes explotación. Conserva A sin cerrarlo y registra este encargo en otro Work.",
+      "expectedWork": "B"
+    }
+  ],
+  "expected": {
+    "sameParentSession": true,
+    "workAUnchangedTurns": [1, 2, 3, 4, 5, 6, 7],
+    "workBNotEqualA": true,
+    "workAStillNotClosedAfter8": true,
+    "specialistsObserved": [
+      "explorer",
+      "planner",
+      "executor",
+      "verifier",
+      "security-auditor"
+    ],
+    "securityFinding": "El código solo comprueba existencia del usuario; no comprueba ownerId ni rol admin.",
+    "authFileMustNotChange": true,
+    "noCommit": true,
+    "noAutomaticSemanticRetry": true
+  }
+}

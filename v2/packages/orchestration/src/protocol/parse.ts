@@ -8,14 +8,6 @@ import {
   taskProtocol,
 } from "./schemas";
 
-const decodeLegacyXml = (value: string) =>
-  value
-    .replaceAll("&quot;", '"')
-    .replaceAll("&apos;", "'")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&amp;", "&");
-
 const parsePayload = (
   source: string,
   protocol: typeof taskProtocol | typeof resultProtocol,
@@ -28,10 +20,7 @@ const parsePayload = (
   const rawMatch = new RegExp(
     `^\\s*<${protocol.tag} v="${protocol.version}">([\\s\\S]*)</${protocol.tag}>\\s*$`,
   ).exec(source);
-  const legacyMatch = new RegExp(
-    `^\\s*<${protocol.tag} v="${protocol.version}"><payload>([\\s\\S]*)</payload></${protocol.tag}>\\s*$`,
-  ).exec(source);
-  const body = legacyMatch ? decodeLegacyXml(legacyMatch[1]) : rawMatch?.[1];
+  const body = rawMatch?.[1];
   if (body === undefined) throw new Error("PROTOCOL_MALFORMED");
   try {
     return JSON.parse(body);

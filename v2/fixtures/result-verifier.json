@@ -1,0 +1,27 @@
+{
+  "protocol": "pulso-result/2",
+  "delegationId": "example-delegation",
+  "specialist": "verifier",
+  "workId": "example-work",
+  "workItemId": "example-item",
+  "status": "completed",
+  "summary": "EJEMPLO DE FORMATO: no describe trabajo ejecutado.",
+  "specialistResult": {
+    "kind": "verifier",
+    "verdict": "partial",
+    "checks": [
+      {
+        "criterion": "EJEMPLO: el contrato inspeccionado define el campo requerido.",
+        "result": "pass",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "fixture/example.ts:1",
+            "note": "Evidencia ficticia; no reutilizar como comprobación real."
+          }
+        ]
+      }
+    ],
+    "risks": ["EJEMPLO: ejecución live no comprobada; se omite de checks."]
+  }
+}

@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { PulsoError } from "../../../working-system/src";
+import { resolveLegacyCurrentWork } from "../application/current-work";
 import type { CapabilitiesRuntime } from "../bootstrap";
 import { RuntimeWorkError } from "../runtime/errors";
 
@@ -146,7 +147,6 @@ const workReference = (work: {
   status: work.status,
   version: work.version,
 });
-const terminalWorkStatuses = new Set(["completed", "failed", "cancelled"]);
 const workItemReference = (item: {
   id: string;
   status: string;
@@ -302,10 +302,19 @@ const workTransitionInputSchema = z.object({
 export const createMcpServer = (runtime: CapabilitiesRuntime) => {
   const server = new McpServer({ name: "pulso-work", version: "0.1.0" });
   server.registerTool(
+    "doctor",
+    {
+      description:
+        "Report the loaded Pulso build and the authoritative workspace/storage identity.",
+      inputSchema: z.object({}),
+    },
+    tool(async () => runtime.doctor()),
+  );
+  server.registerTool(
     "work_create",
     {
       description:
-        "Ensure a Work exists for the current objective. Reuse the active Work by default; set newObjective only for a clearly different objective.",
+        "Ensure a Work exists for the current objective. Reuse the sole selectable Work by default; set newObjective only for a clearly different objective.",
       inputSchema: z.object({
         title: z
           .string()
@@ -323,7 +332,7 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
           .boolean()
           .default(false)
           .describe(
-            "Explicitly start a different objective. The current Work must be terminalized first.",
+            "Explicitly start a different objective without changing existing Works.",
           ),
         reason: z
           .string()
@@ -369,26 +378,23 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
     },
     tool(async (x) => {
       const works = await runtime.work.list(runtime.workspaceId);
-      const current = [...works]
-        .reverse()
-        .find((work) => !terminalWorkStatuses.has(work.status));
-      if (current && x.newObjective) {
-        throw new RuntimeWorkError(
-          "WORK_ACTIVE_OBJECTIVE",
-          "A Work objective is still active in this workspace.",
-          undefined,
-          {
-            entity: { type: "Work", id: current.id },
-            actual: current.status,
-            expected: "completed, failed, or cancelled",
-          },
-        );
-      }
-      if (current)
+      const current = x.newObjective
+        ? undefined
+        : resolveLegacyCurrentWork(works);
+      if (current) {
+        if (x.items?.length)
+          throw new RuntimeWorkError(
+            "WORK_REUSE_WITH_ITEMS",
+            "Create WorkItems with work_item instead of attaching them to a reused Work.",
+            undefined,
+            { entity: { type: "Work", id: current.id } },
+          );
         return {
           ...workReference(current),
+          objective: current.objective,
           reused: true,
         };
+      }
       const { newObjective: _newObjective, reason: _reason, ...input } = x;
       const work = await runtime.work.create({
         ...input,
@@ -430,9 +436,9 @@ export const createMcpServer = (runtime: CapabilitiesRuntime) => {
     tool(async (x) => {
       await runtime.recovery.recover();
       const works = await runtime.work.list(runtime.workspaceId);
-      const id = x.workId ?? works.find((w) => w.status === "active")?.id;
-      if (!id) return { work: null };
-      const s = await runtime.work.snapshot(id);
+      const selected = resolveLegacyCurrentWork(works, x.workId);
+      if (!selected) return { work: null };
+      const s = await runtime.work.snapshot(selected.id);
       if (x.view === "full") return s;
       if (x.view === "events") return s.events;
       if (x.view === "executions")

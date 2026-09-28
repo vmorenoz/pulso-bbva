@@ -35,7 +35,7 @@ export const specialistTaskContracts: Record<
     produce: [
       "concise findings with supporting Evidence",
       "useful references",
-      "limitations when relevant",
+      "root-level limitations when relevant",
     ],
     avoid: [
       "modifying files or Work",
@@ -60,10 +60,16 @@ export const specialistTaskContracts: Record<
   verifier: {
     purpose:
       "Independently verify the delegated criteria and report a verification verdict.",
-    focus: ["acceptance criteria", "checks", "evidence", "failures", "risks"],
+    focus: [
+      "acceptance criteria",
+      "executed checks",
+      "evidence",
+      "failures",
+      "unexecuted criteria in risks",
+    ],
     produce: [
       "pass, fail, or partial verdict",
-      "criterion checks with evidence where available",
+      "criterion checks only for pass/fail evidence; unexecuted criteria in risks",
     ],
     avoid: [
       "changing lifecycle status",

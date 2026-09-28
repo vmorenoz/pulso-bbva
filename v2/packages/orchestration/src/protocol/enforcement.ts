@@ -65,30 +65,32 @@ const enforcer: ProtocolEnforcer = {
     try {
       return parseAgentResult(source, expected);
     } catch (initialError) {
+      if (!/^\s*```(?:xml)?\s*\n?[\s\S]*\n?\s*```\s*$/i.test(source))
+        throw resultError(initialError);
       try {
         const repaired = repairAgentResult(source);
         return validateAgentResultIdentity(repaired, expected);
       } catch (error) {
-        const cause =
-          error instanceof Error && error.message === "PROTOCOL_PARSE_ERROR"
-            ? initialError
-            : error;
-        const code =
-          cause instanceof Error && cause.message.startsWith("PROTOCOL_")
-            ? cause.message
-            : cause instanceof Error &&
-                /(?:DELEGATION_ID|SPECIALIST|WORK_ID|WORK_ITEM_ID)_MISMATCH/.test(
-                  cause.message,
-                )
-              ? cause.message.split(":")[0]
-              : protocolIssueCode(cause, "result");
-        throw new Error(
-          `AGENT_RESULT_INVALID:${code}: ${summarizeValidationError(cause)}`,
-          { cause },
-        );
+        throw resultError(error);
       }
     }
   },
+};
+
+const resultError = (cause: unknown) => {
+  const code =
+    cause instanceof Error && cause.message.startsWith("PROTOCOL_")
+      ? cause.message
+      : cause instanceof Error &&
+          /(?:DELEGATION_ID|SPECIALIST|WORK_ID|WORK_ITEM_ID)_MISMATCH/.test(
+            cause.message,
+          )
+        ? cause.message.split(":")[0]
+        : protocolIssueCode(cause, "result");
+  return new Error(
+    `AGENT_RESULT_INVALID:${code}: ${summarizeValidationError(cause)}`,
+    { cause },
+  );
 };
 
 const taskIdentityCode = (key: keyof ExpectedTaskIdentity) =>

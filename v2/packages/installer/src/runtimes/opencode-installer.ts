@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   applyEdits,
@@ -27,6 +27,10 @@ export interface PlannedAsset {
   content: string;
   sha256: string;
 }
+export interface HashedSource {
+  path: string;
+  sha256: string;
+}
 export interface PlannedConfigMutation {
   path: string;
   key: string;
@@ -39,6 +43,8 @@ export interface RuntimeInstallPlan {
   assets: PlannedAsset[];
   config: PlannedConfigMutation[];
   modelConfig?: ResolvedAgentModelConfig;
+  buildId?: string;
+  sourceHashes?: HashedSource[];
 }
 export interface InstallationWarning {
   code: string;
@@ -60,18 +66,36 @@ export interface OpenCodeInstallOptions {
   version?: string;
   modelConfig?: ResolvedAgentModelConfig;
   skills: CanonicalSkill[];
-  discovery?: OpenCodeDiscovery;
+  discovery?: Pick<OpenCodeDiscovery, "models">;
 }
 export interface OpenCodeManifest {
-  version: 1;
+  version: 1 | 2 | 3 | 4 | 5;
   runtime: "opencode";
   scope: InstallScope;
   runtimeVersion?: string;
   files: Record<string, string>;
+  assetHashes?: HashedSource[];
+  sourceHashes?: HashedSource[];
   configEntries: Record<string, string>;
   modelProfile?: string;
   resolvedModels?: Record<AgentId, string | null>;
-  protocolGuard?: { path: string; sha256: string; version: 2 };
+  buildId: string;
+  nativeBridge: {
+    path: string;
+    sha256: string;
+    version: "1.18.32";
+    role: "native-bridge";
+  };
+  mcp?: {
+    path: string;
+    sha256: string;
+    buildId: string;
+  };
+}
+
+export interface OpenCodeInstallPublicationHooks {
+  beforeActivation?(): Promise<void> | void;
+  afterBridgePublish?(): Promise<void> | void;
 }
 
 const digest = (value: string) =>
@@ -84,6 +108,8 @@ const optionalRead = async (path: string) => {
     throw error;
   }
 };
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const parseJsonc = (source: string) => {
   const errors: ParseError[] = [];
   const value = parse(source, errors, {
@@ -112,6 +138,205 @@ const atomicWrite = async (path: string, content: string) => {
     throw error;
   }
 };
+const nativeBridgePath = (manifest: unknown) => {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest))
+    return undefined;
+  const bridge = (manifest as Record<string, unknown>).nativeBridge;
+  if (!bridge || typeof bridge !== "object" || Array.isArray(bridge))
+    return undefined;
+  const path = (bridge as Record<string, unknown>).path;
+  return typeof path === "string" && path.length ? path : undefined;
+};
+const guardPathForScope = (root: string, scope: InstallScope) =>
+  join(
+    scope === "local" ? join(root, ".opencode") : root,
+    "plugins",
+    "pulso-protocol-guard.js",
+  );
+const managedBridgePlugin = "./plugins/pulso-protocol-guard.js";
+const configPathForScope = (root: string, scope: InstallScope) =>
+  join(scope === "local" ? join(root, ".opencode") : root, "opencode.json");
+const manifestPathForScope = (root: string, scope: InstallScope) =>
+  join(
+    scope === "local" ? join(root, ".opencode") : root,
+    ".pulso-manifest.json",
+  );
+const configEntryKey = (path: string, key: "plugin" | "mcp.pulso") =>
+  `${path}#${key}`;
+const managedConfigHash = (
+  manifest: OpenCodeManifest | undefined,
+  path: string,
+  key: "plugin" | "mcp.pulso",
+) => {
+  if (!manifest) return undefined;
+  const current = manifest.configEntries[configEntryKey(path, key)];
+  if (current) return current;
+  const legacy = manifest.configEntries[path];
+  if (!legacy) return undefined;
+  return manifest.version === 1
+    ? key === "mcp.pulso"
+      ? legacy
+      : undefined
+    : key === "plugin"
+      ? legacy
+      : undefined;
+};
+const managedConfigEntry = (
+  manifest: OpenCodeManifest,
+  entry: string,
+): { path: string; key: "plugin" | "mcp.pulso" } => {
+  const separator = entry.lastIndexOf("#");
+  const key = entry.slice(separator + 1);
+  if (separator > 0 && (key === "plugin" || key === "mcp.pulso"))
+    return { path: entry.slice(0, separator), key };
+  return {
+    path: entry,
+    key: manifest.version === 1 ? "mcp.pulso" : "plugin",
+  } as const;
+};
+const validManifestVersion = (
+  version: unknown,
+): version is OpenCodeManifest["version"] =>
+  version === 1 ||
+  version === 2 ||
+  version === 3 ||
+  version === 4 ||
+  version === 5;
+const bridgeRegistrations = async (path: string) => {
+  const source = await optionalRead(path);
+  if (!source) return [] as string[];
+  const config = parseJsonc(source);
+  if (config.plugin !== undefined && !Array.isArray(config.plugin))
+    throw new Error("OPENCODE_PLUGIN_CONFIG_INVALID");
+  if (
+    Array.isArray(config.plugin) &&
+    !config.plugin.every((entry) => typeof entry === "string")
+  )
+    throw new Error("OPENCODE_PLUGIN_CONFIG_INVALID");
+  return (Array.isArray(config.plugin) ? config.plugin : []).filter(
+    (entry): entry is string =>
+      typeof entry === "string" &&
+      (entry === managedBridgePlugin ||
+        entry.endsWith("/plugins/pulso-protocol-guard.js")),
+  );
+};
+
+const assertNoDuplicateNativeBridge = async (
+  options: Pick<OpenCodeInstallOptions, "scope" | "workspace" | "homeDir">,
+  configPath: string,
+) => {
+  const localRoot = resolve(options.workspace ?? process.cwd());
+  const globalRoot = resolve(
+    options.homeDir ?? homedir(),
+    ".config",
+    "opencode",
+  );
+  const effectiveConfigPaths = [
+    configPathForScope(localRoot, "local"),
+    configPathForScope(globalRoot, "global"),
+  ];
+  for (const effectivePath of [...new Set(effectiveConfigPaths)]) {
+    const registrations = await bridgeRegistrations(effectivePath);
+    if (registrations.length > 1)
+      throw new Error(
+        `DUPLICATE_NATIVE_BRIDGE:${effectivePath}#plugin:${registrations.join(",")}`,
+      );
+    if (
+      registrations.length &&
+      (effectivePath !== configPath || registrations[0] !== managedBridgePlugin)
+    )
+      throw new Error(`DUPLICATE_NATIVE_BRIDGE:${effectivePath},${configPath}`);
+  }
+  const root = options.scope === "local" ? localRoot : globalRoot;
+  const alternateManifestPath = manifestPathForScope(
+    options.scope === "local" ? globalRoot : localRoot,
+    options.scope === "local" ? "global" : "local",
+  );
+  const alternate = await optionalRead(alternateManifestPath);
+  if (!alternate) return;
+  const bridge = nativeBridgePath(JSON.parse(alternate));
+  if (bridge)
+    throw new Error(
+      `DUPLICATE_NATIVE_BRIDGE:${bridge},${guardPathForScope(root, options.scope)}`,
+    );
+};
+
+const sourceRoot = fileURLToPath(new URL("../../../../", import.meta.url));
+const openCodeBuildEntrypoints = [
+  "packages/capabilities-mcp/src/opencode/plugin-entry.ts",
+  "packages/orchestration/src/runtimes/opencode/index.ts",
+] as const;
+const openCodeBuildManifests = [
+  "packages/capabilities-mcp/package.json",
+  "packages/orchestration/package.json",
+  "packages/working-system/package.json",
+  "package.json",
+  "bun.lock",
+] as const;
+const sourceImport =
+  /(?:import|export)\s+(?:type\s+)?(?:[^"'`]*?\s+from\s+)?["']([^"']+)["']/g;
+const sourceCandidates = (path: string) => [
+  path,
+  `${path}.ts`,
+  join(path, "index.ts"),
+];
+const sourcePath = (path: string) => relative(sourceRoot, path);
+const sourceFile = async (path: string) => {
+  for (const candidate of sourceCandidates(path)) {
+    try {
+      const source = await optionalRead(candidate);
+      if (source !== undefined) return { path: candidate, source };
+    } catch (error) {
+      if ((error as { code?: string }).code !== "EISDIR") throw error;
+    }
+  }
+  return undefined;
+};
+const importedSources = async (entrypoints: readonly string[]) => {
+  const pending = entrypoints.map((path) => join(sourceRoot, path));
+  const seen = new Set<string>();
+  while (pending.length) {
+    const current = pending.pop();
+    if (!current || seen.has(current)) continue;
+    const file = await sourceFile(current);
+    if (!file)
+      throw new Error(`OPENCODE_BUILD_SOURCE_MISSING:${sourcePath(current)}`);
+    seen.add(file.path);
+    for (const match of file.source.matchAll(sourceImport)) {
+      const specifier = match[1];
+      if (!specifier?.startsWith(".")) continue;
+      const imported = await sourceFile(resolve(dirname(file.path), specifier));
+      if (!imported)
+        throw new Error(
+          `OPENCODE_BUILD_SOURCE_MISSING:${sourcePath(resolve(dirname(file.path), specifier))}`,
+        );
+      if (!seen.has(imported.path)) pending.push(imported.path);
+    }
+  }
+  return [...seen]
+    .map(sourcePath)
+    .sort((left, right) => left.localeCompare(right));
+};
+const hashSources = async (paths: readonly string[]): Promise<HashedSource[]> =>
+  Promise.all(
+    [...paths]
+      .sort((left, right) => left.localeCompare(right))
+      .map(async (path) => ({
+        path,
+        sha256: digest(await readFile(join(sourceRoot, path), "utf8")),
+      })),
+  );
+const openCodeBuildSources = async () =>
+  hashSources([
+    ...(await importedSources(openCodeBuildEntrypoints)),
+    ...openCodeBuildManifests,
+  ]);
+const buildIdFromSources = (sources: readonly HashedSource[]) =>
+  digest(sources.map(({ path, sha256 }) => `${path}:${sha256}`).join("\n"));
+const orderedAssetHashes = (assets: readonly PlannedAsset[]): HashedSource[] =>
+  [...assets]
+    .map(({ path, sha256 }) => ({ path, sha256 }))
+    .sort((left, right) => left.path.localeCompare(right.path));
 export const planOpenCodeInstall = async (
   options: OpenCodeInstallOptions,
 ): Promise<InstallationPlan> => {
@@ -119,24 +344,23 @@ export const planOpenCodeInstall = async (
     options.scope === "local"
       ? resolve(options.workspace ?? process.cwd())
       : resolve(options.homeDir ?? homedir(), ".config", "opencode");
+  const sourceHashes = await openCodeBuildSources();
+  const buildId = buildIdFromSources(sourceHashes);
   const renderedConfig = openCodeRuntime.buildRuntimeConfig({
     scope: options.scope,
     mcpCommand: options.mcpCommand,
-    ...(options.scope === "local" ? { mcpCwd: root } : {}),
   })[0];
   if (!renderedConfig) throw new Error("OPENCODE_CONFIG_RENDERER_EMPTY");
   const configPath = join(root, renderedConfig.path);
-  const manifestPath =
-    options.scope === "local"
-      ? join(root, ".opencode", ".pulso-manifest.json")
-      : join(root, ".pulso-manifest.json");
+  await assertNoDuplicateNativeBridge(options, configPath);
+  const manifestPath = manifestPathForScope(root, options.scope);
   const previous = await optionalRead(manifestPath);
   let previousManifest: OpenCodeManifest | undefined;
   if (previous) {
     try {
       previousManifest = JSON.parse(previous) as OpenCodeManifest;
       if (
-        previousManifest.version !== 1 ||
+        !validManifestVersion(previousManifest.version) ||
         previousManifest.runtime !== "opencode"
       )
         throw new Error();
@@ -156,6 +380,7 @@ export const planOpenCodeInstall = async (
   for (const id of agentIds) {
     const content = openCodeRuntime.renderAgent(agentDefinitions[id], {
       model: options.modelConfig?.agents[id] ?? null,
+      buildId,
     }).content;
     const path = join(agentDir, `${id}.md`);
     assets.push({ path, content, sha256: digest(content) });
@@ -169,27 +394,23 @@ export const planOpenCodeInstall = async (
       sha256: digest(rendered.content),
     });
   }
+  const pluginSource = fileURLToPath(
+    new URL(
+      "../../../capabilities-mcp/src/opencode/plugin-entry.ts",
+      import.meta.url,
+    ),
+  );
   const pluginBuild = await Bun.build({
-    entrypoints: [
-      fileURLToPath(
-        new URL(
-          "../../../orchestration/src/runtimes/opencode/protocol-guard/plugin.ts",
-          import.meta.url,
-        ),
-      ),
-    ],
+    entrypoints: [pluginSource],
     target: "bun",
     format: "esm",
     minify: true,
+    define: { __PULSO_BUILD_ID__: JSON.stringify(buildId) },
     write: false,
   } as Parameters<typeof Bun.build>[0] & { write: false });
   if (!pluginBuild.success || !pluginBuild.outputs[0])
-    throw new Error("OPENCODE_PROTOCOL_GUARD_BUILD_FAILED");
-  const guardPath = join(
-    options.scope === "local" ? join(root, ".opencode") : root,
-    "plugins",
-    "pulso-protocol-guard.js",
-  );
+    throw new Error("OPENCODE_NATIVE_BRIDGE_BUILD_FAILED");
+  const guardPath = guardPathForScope(root, options.scope);
   const guardContent = await pluginBuild.outputs[0].text();
   assets.push({
     path: guardPath,
@@ -198,31 +419,49 @@ export const planOpenCodeInstall = async (
   });
   const configRaw = await optionalRead(configPath);
   const config = configRaw ? parseJsonc(configRaw) : {};
-  const mcp = (
-    config.mcp && typeof config.mcp === "object" ? config.mcp : {}
-  ) as Record<string, unknown>;
+  if (config.mcp !== undefined && !isRecord(config.mcp))
+    throw new Error("OPENCODE_MCP_CONFIG_INVALID");
+  const plugins = Array.isArray(config.plugin) ? config.plugin : [];
+  if (!plugins.every((entry) => typeof entry === "string"))
+    throw new Error("OPENCODE_PLUGIN_CONFIG_INVALID");
   const renderedValue = JSON.parse(renderedConfig.content) as {
-    mcp?: Record<string, unknown>;
+    plugin?: string[];
   };
-  const pulsoConfig = renderedValue.mcp?.pulso;
-  if (!pulsoConfig) throw new Error("OPENCODE_MCP_RENDER_FAILED");
-  const currentEntry = mcp.pulso;
-  const existingManagedHash = previousManifest?.configEntries[configPath];
+  const bridgePlugin = renderedValue.plugin?.[0];
+  if (!bridgePlugin) throw new Error("OPENCODE_NATIVE_BRIDGE_RENDER_FAILED");
+  const pluginConfig = plugins.includes(bridgePlugin)
+    ? plugins
+    : [...plugins, bridgePlugin];
+  const currentEntry = config.plugin;
+  const currentMcp = isRecord(config.mcp) ? config.mcp.pulso : undefined;
+  const existingMcpHash = managedConfigHash(
+    previousManifest,
+    configPath,
+    "mcp.pulso",
+  );
   if (
-    currentEntry !== undefined &&
-    digest(JSON.stringify(currentEntry)) !==
-      digest(JSON.stringify(pulsoConfig)) &&
-    digest(JSON.stringify(currentEntry)) !== existingManagedHash
+    existingMcpHash &&
+    (currentMcp === undefined ||
+      digest(JSON.stringify(currentMcp)) !== existingMcpHash)
   )
     throw new Error(`INSTALL_CONFLICT:${configPath}#mcp.pulso`);
-  const mutation: PlannedConfigMutation = {
+  const pluginMutation: PlannedConfigMutation = {
     path: configPath,
-    key: "mcp.pulso",
-    value: pulsoConfig,
+    key: "plugin",
+    value: pluginConfig,
     ...(currentEntry === undefined
       ? {}
       : { previousHash: digest(JSON.stringify(currentEntry)) }),
   };
+  const mcpMutation =
+    !existingMcpHash || currentMcp === undefined
+      ? undefined
+      : ({
+          path: configPath,
+          key: "mcp.pulso",
+          value: undefined,
+          previousHash: digest(JSON.stringify(currentMcp)),
+        } satisfies PlannedConfigMutation);
   const conflicts: string[] = [];
   for (const asset of assets) {
     const current = await optionalRead(asset.path);
@@ -237,16 +476,18 @@ export const planOpenCodeInstall = async (
     throw new Error(`INSTALL_CONFLICT:${conflicts.join(",")}`);
   const runtimePlan: RuntimeInstallPlan = {
     runtime: "opencode",
+    buildId,
+    sourceHashes,
     ...(options.version ? { runtimeVersion: options.version } : {}),
     assets,
-    config: [mutation],
+    config: [pluginMutation, ...(mcpMutation ? [mcpMutation] : [])],
     ...(options.modelConfig ? { modelConfig: options.modelConfig } : {}),
   };
   const plan: InstallationPlan = {
     runtimes: [runtimePlan],
     scope: options.scope,
     fileMutations: assets,
-    configMutations: [mutation],
+    configMutations: [pluginMutation, ...(mcpMutation ? [mcpMutation] : [])],
     warnings: [],
   };
   return plan;
@@ -255,6 +496,7 @@ export const planOpenCodeInstall = async (
 export const applyOpenCodeInstall = async (
   options: OpenCodeInstallOptions,
   plan: InstallationPlan,
+  hooks: OpenCodeInstallPublicationHooks = {},
 ) => {
   if (
     plan.scope !== options.scope ||
@@ -262,6 +504,38 @@ export const applyOpenCodeInstall = async (
     plan.runtimes[0]?.runtime !== "opencode"
   )
     throw new Error("INSTALL_PLAN_STALE");
+  const configMutation = plan.configMutations.find(
+    (mutation) => mutation.key === "plugin",
+  );
+  const mcpMutation = plan.configMutations.find(
+    (mutation) => mutation.key === "mcp.pulso",
+  );
+  if (!configMutation) throw new Error("INSTALL_CONFIG_MUTATION_MISSING");
+  if (
+    plan.configMutations.length > 2 ||
+    plan.configMutations.some(
+      (mutation) => mutation.key !== "plugin" && mutation.key !== "mcp.pulso",
+    ) ||
+    (mcpMutation && mcpMutation.path !== configMutation.path)
+  )
+    throw new Error("INSTALL_PLAN_STALE");
+  await assertNoDuplicateNativeBridge(options, configMutation.path);
+  const runtimePlan = plan.runtimes[0];
+  const sourceHashes = runtimePlan?.sourceHashes;
+  if (
+    !runtimePlan?.buildId ||
+    !sourceHashes?.length ||
+    sourceHashes.some(
+      (source) =>
+        !source.path ||
+        !source.sha256 ||
+        typeof source.path !== "string" ||
+        typeof source.sha256 !== "string",
+    ) ||
+    buildIdFromSources(sourceHashes) !== runtimePlan.buildId
+  )
+    throw new Error("INSTALL_PLAN_BUILD_INVALID");
+  const buildId = runtimePlan.buildId;
   if (
     options.modelConfig &&
     Object.values(options.modelConfig.agents).some((id) => id !== null)
@@ -276,29 +550,30 @@ export const applyOpenCodeInstall = async (
     if (lost.length)
       throw new Error(`MODEL_CATALOG_STALE:${[...new Set(lost)].join(",")}`);
   }
-  const previousManifestPath =
+  const root =
     options.scope === "local"
-      ? join(
-          resolve(options.workspace ?? process.cwd()),
-          ".opencode",
-          ".pulso-manifest.json",
-        )
-      : join(
-          resolve(options.homeDir ?? homedir(), ".config", "opencode"),
-          ".pulso-manifest.json",
-        );
+      ? resolve(options.workspace ?? process.cwd())
+      : resolve(options.homeDir ?? homedir(), ".config", "opencode");
+  if (configMutation.path !== configPathForScope(root, options.scope))
+    throw new Error("INSTALL_PLAN_STALE");
+  const previousManifestPath = manifestPathForScope(root, options.scope);
   const previousRaw = await optionalRead(previousManifestPath);
   const previous = previousRaw
     ? (JSON.parse(previousRaw) as OpenCodeManifest)
     : undefined;
   if (
     previous &&
-    (previous.version !== 1 ||
+    (!validManifestVersion(previous.version) ||
       previous.runtime !== "opencode" ||
       previous.scope !== options.scope)
   )
     throw new Error("INSTALL_MANIFEST_INVALID");
   for (const asset of plan.fileMutations) {
+    if (digest(asset.content) !== asset.sha256)
+      throw new Error(`INSTALL_PLAN_ASSET_HASH_INVALID:${asset.path}`);
+    const assetPath = relative(root, asset.path);
+    if (!assetPath || assetPath === ".." || assetPath.startsWith("../"))
+      throw new Error(`INSTALL_PLAN_ASSET_PATH_INVALID:${asset.path}`);
     const current = await optionalRead(asset.path);
     if (
       current !== undefined &&
@@ -307,81 +582,186 @@ export const applyOpenCodeInstall = async (
     )
       throw new Error(`INSTALL_CONFLICT:${asset.path}`);
   }
-  const configMutation = plan.configMutations[0];
-  if (!configMutation) throw new Error("INSTALL_CONFIG_MUTATION_MISSING");
-  const configRaw = (await optionalRead(configMutation.path)) ?? "{}\n";
-  const parsed = parseJsonc(configRaw);
-  const current = (parsed.mcp as Record<string, unknown> | undefined)?.pulso;
   if (
-    current !== undefined &&
-    digest(JSON.stringify(current)) !==
-      digest(JSON.stringify(configMutation.value)) &&
-    digest(JSON.stringify(current)) !==
-      previous?.configEntries[configMutation.path]
+    new Set(plan.fileMutations.map((asset) => asset.path)).size !==
+    plan.fileMutations.length
   )
-    throw new Error(`INSTALL_CONFLICT:${configMutation.path}#mcp.pulso`);
+    throw new Error("INSTALL_PLAN_ASSET_PATH_DUPLICATE");
+  const nativeBridge = plan.fileMutations.find((asset) =>
+    asset.path.endsWith("/plugins/pulso-protocol-guard.js"),
+  );
+  if (!nativeBridge?.content.includes(buildId))
+    throw new Error("INSTALL_PLAN_NATIVE_BRIDGE_INVALID");
+  const configOriginal = await optionalRead(configMutation.path);
+  const configRaw = configOriginal ?? "{}\n";
+  const parsed = parseJsonc(configRaw);
+  if (mcpMutation && parsed.mcp !== undefined && !isRecord(parsed.mcp))
+    throw new Error("OPENCODE_MCP_CONFIG_INVALID");
+  if (
+    parsed.plugin !== undefined &&
+    (!Array.isArray(parsed.plugin) ||
+      !parsed.plugin.every((entry) => typeof entry === "string"))
+  )
+    throw new Error("OPENCODE_PLUGIN_CONFIG_INVALID");
+  const plannedPlugins = configMutation.value;
+  if (
+    !Array.isArray(plannedPlugins) ||
+    !plannedPlugins.every((entry) => typeof entry === "string") ||
+    !plannedPlugins.includes(managedBridgePlugin)
+  )
+    throw new Error("INSTALL_PLAN_STALE");
+  const currentPlugins = (parsed.plugin as string[] | undefined) ?? [];
+  const effectivePluginConfig = currentPlugins.includes(managedBridgePlugin)
+    ? currentPlugins
+    : [...currentPlugins, managedBridgePlugin];
+  // Re-read every effective source after planning and immediately before writes.
+  await assertNoDuplicateNativeBridge(options, configMutation.path);
+  if (mcpMutation) {
+    const currentMcp = isRecord(parsed.mcp) ? parsed.mcp.pulso : undefined;
+    if (
+      currentMcp === undefined ||
+      digest(JSON.stringify(currentMcp)) !==
+        managedConfigHash(previous, mcpMutation.path, "mcp.pulso")
+    )
+      throw new Error(`INSTALL_CONFLICT:${configMutation.path}#mcp.pulso`);
+  }
   let configText: string;
   if (configRaw.trim() === "{}" || configRaw.trim() === "{}\n")
-    configText = `${JSON.stringify({ $schema: "https://opencode.ai/config.json", mcp: { pulso: configMutation.value } }, null, 2)}\n`;
-  else if (!parsed.mcp || typeof parsed.mcp !== "object")
+    configText = `${JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: configMutation.value }, null, 2)}\n`;
+  else {
     configText = applyEdits(
       configRaw,
-      modify(
-        configRaw,
-        ["mcp"],
-        { pulso: configMutation.value },
-        { formattingOptions: { insertSpaces: true, tabSize: 2 } },
-      ),
-    );
-  else
-    configText = applyEdits(
-      configRaw,
-      modify(configRaw, ["mcp", "pulso"], configMutation.value, {
+      modify(configRaw, ["plugin"], effectivePluginConfig, {
         formattingOptions: { insertSpaces: true, tabSize: 2 },
       }),
     );
+    if (mcpMutation)
+      configText = applyEdits(
+        configText,
+        modify(configText, ["mcp", "pulso"], undefined, {
+          formattingOptions: { insertSpaces: true, tabSize: 2 },
+        }),
+      );
+  }
+  const configEntries = { ...(previous?.configEntries ?? {}) };
+  delete configEntries[configMutation.path];
+  delete configEntries[configEntryKey(configMutation.path, "mcp.pulso")];
+  configEntries[configEntryKey(configMutation.path, "plugin")] = digest(
+    JSON.stringify(effectivePluginConfig),
+  );
+  const manifest: OpenCodeManifest = {
+    version: 5,
+    runtime: "opencode",
+    scope: options.scope,
+    ...(options.version ? { runtimeVersion: options.version } : {}),
+    files: Object.fromEntries(
+      orderedAssetHashes(plan.fileMutations).map(({ path, sha256 }) => [
+        path,
+        sha256,
+      ]),
+    ),
+    assetHashes: orderedAssetHashes(plan.fileMutations),
+    sourceHashes: [...sourceHashes].sort((left, right) =>
+      left.path.localeCompare(right.path),
+    ),
+    configEntries,
+    ...(options.modelConfig
+      ? {
+          modelProfile: options.modelConfig.profile,
+          resolvedModels: options.modelConfig.agents,
+        }
+      : {}),
+    buildId,
+    nativeBridge: {
+      path: nativeBridge.path,
+      sha256: nativeBridge.sha256,
+      version: "1.18.32",
+      role: "native-bridge",
+    },
+  };
+  const stagingRoot = join(
+    dirname(previousManifestPath),
+    ".pulso-staging",
+    `${buildId}-${crypto.randomUUID()}`,
+  );
+  const stagedAssets = plan.fileMutations.map((asset) => ({
+    asset,
+    path: join(stagingRoot, relative(root, asset.path)),
+  }));
+  const stagedConfigPath = join(stagingRoot, "opencode.json");
+  const stagedManifestPath = join(stagingRoot, ".pulso-manifest.json");
+  const publish = async (source: string, destination: string) => {
+    await mkdir(dirname(destination), { recursive: true });
+    await rename(source, destination);
+  };
+  const snapshots = await Promise.all(
+    [
+      ...new Set([
+        ...plan.fileMutations.map((asset) => asset.path),
+        configMutation.path,
+        previousManifestPath,
+      ]),
+    ].map(async (path) => ({ path, content: await optionalRead(path) })),
+  );
+  const rollback = async () => {
+    for (const snapshot of snapshots) {
+      if (snapshot.content === undefined)
+        await rm(snapshot.path, { force: true });
+      else await atomicWrite(snapshot.path, snapshot.content);
+    }
+  };
+  let publicationStarted = false;
   try {
-    for (const asset of plan.fileMutations)
-      await atomicWrite(asset.path, asset.content);
-    await atomicWrite(configMutation.path, configText);
-    const manifest: OpenCodeManifest = {
-      version: 1,
-      runtime: "opencode",
-      scope: options.scope,
-      ...(options.version ? { runtimeVersion: options.version } : {}),
-      files: Object.fromEntries(
-        plan.fileMutations.map((asset) => [asset.path, asset.sha256]),
-      ),
-      configEntries: {
-        [configMutation.path]: digest(JSON.stringify(configMutation.value)),
-        ...(previous?.configEntries ?? {}),
-      },
-      ...(options.modelConfig
-        ? {
-            modelProfile: options.modelConfig.profile,
-            resolvedModels: options.modelConfig.agents,
-          }
-        : {}),
-      protocolGuard: {
-        path:
-          plan.fileMutations.find((asset) =>
-            asset.path.endsWith("/plugins/pulso-protocol-guard.js"),
-          )?.path ?? "",
-        sha256:
-          plan.fileMutations.find((asset) =>
-            asset.path.endsWith("/plugins/pulso-protocol-guard.js"),
-          )?.sha256 ?? "",
-        version: 2,
-      },
-    };
+    for (const staged of stagedAssets)
+      await atomicWrite(staged.path, staged.asset.content);
+    await atomicWrite(stagedConfigPath, configText);
     await atomicWrite(
-      previousManifestPath,
+      stagedManifestPath,
       `${JSON.stringify(manifest, null, 2)}\n`,
     );
+    for (const staged of stagedAssets)
+      if (digest(await readFile(staged.path, "utf8")) !== staged.asset.sha256)
+        throw new Error(`INSTALL_STAGING_HASH_MISMATCH:${staged.asset.path}`);
+    const stagedManifest = JSON.parse(
+      await readFile(stagedManifestPath, "utf8"),
+    ) as OpenCodeManifest;
+    if (
+      stagedManifest.buildId !== buildId ||
+      stagedManifest.nativeBridge.path !== nativeBridge.path ||
+      stagedManifest.nativeBridge.sha256 !== nativeBridge.sha256 ||
+      stagedManifest.nativeBridge.version !== "1.18.32"
+    )
+      throw new Error("INSTALL_STAGING_MANIFEST_INVALID");
+    await hooks.beforeActivation?.();
+    if ((await optionalRead(configMutation.path)) !== configOriginal)
+      throw new Error(`INSTALL_CONFLICT:${configMutation.path}#plugin`);
+    const stagedBridge = stagedAssets.find(
+      (staged) => staged.asset.path === nativeBridge.path,
+    );
+    if (!stagedBridge) throw new Error("INSTALL_STAGING_NATIVE_BRIDGE_MISSING");
+    publicationStarted = true;
+    await publish(stagedBridge.path, nativeBridge.path);
+    await hooks.afterBridgePublish?.();
+    for (const staged of stagedAssets)
+      if (staged.asset.path !== nativeBridge.path)
+        await publish(staged.path, staged.asset.path);
+    await publish(stagedConfigPath, configMutation.path);
+    // The manifest switch is the sole point that permits the new bridge to run.
+    await publish(stagedManifestPath, previousManifestPath);
   } catch (error) {
+    if (publicationStarted)
+      try {
+        await rollback();
+      } catch (rollbackError) {
+        throw new Error(
+          `INSTALL_PARTIAL_FAILURE:${error instanceof Error ? error.message : String(error)}:ROLLBACK_FAILED:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        );
+      }
     throw new Error(
       `INSTALL_PARTIAL_FAILURE:${error instanceof Error ? error.message : String(error)}`,
     );
+  } finally {
+    await rm(stagingRoot, { recursive: true, force: true });
   }
   return {
     installedFiles: plan.fileMutations.map((asset) => asset.path),
@@ -396,7 +776,7 @@ export const reconfigureOpenCodeModels = async (options: {
   homeDir?: string;
   executable: string;
   modelConfig: ResolvedAgentModelConfig;
-  discovery?: OpenCodeDiscovery;
+  discovery?: Pick<OpenCodeDiscovery, "models">;
 }) => {
   if (Object.values(options.modelConfig.agents).some((id) => id !== null)) {
     const catalog = await (options.discovery ?? new OpenCodeDiscovery()).models(
@@ -413,19 +793,31 @@ export const reconfigureOpenCodeModels = async (options: {
     options.scope === "local"
       ? resolve(options.workspace ?? process.cwd())
       : resolve(options.homeDir ?? homedir(), ".config", "opencode");
-  const manifestPath =
-    options.scope === "local"
-      ? join(root, ".opencode", ".pulso-manifest.json")
-      : join(root, ".pulso-manifest.json");
+  const manifestPath = manifestPathForScope(root, options.scope);
   const source = await optionalRead(manifestPath);
   if (!source) throw new Error("OPENCODE_MANIFEST_MISSING");
   const manifest = JSON.parse(source) as OpenCodeManifest;
   if (
-    manifest.version !== 1 ||
+    !validManifestVersion(manifest.version) ||
     manifest.runtime !== "opencode" ||
     manifest.scope !== options.scope
   )
     throw new Error("INSTALL_MANIFEST_INVALID");
+  if (!manifest.buildId) throw new Error("OPENCODE_MANIFEST_BUILD_ID_MISSING");
+  const sourceHashes = await openCodeBuildSources();
+  const buildId = buildIdFromSources(sourceHashes);
+  const manifestSources = manifest.sourceHashes ?? [];
+  const sourcesMatch =
+    manifestSources.length === sourceHashes.length &&
+    manifestSources.every(
+      (source, index) =>
+        source.path === sourceHashes[index]?.path &&
+        source.sha256 === sourceHashes[index]?.sha256,
+    );
+  if (manifest.buildId !== buildId || !sourcesMatch)
+    throw new Error(
+      `OPENCODE_BUILD_DRIFT:manifest=${manifest.buildId},current=${buildId}:REINSTALL_REQUIRED`,
+    );
   const agentRoot =
     options.scope === "local"
       ? join(root, ".opencode", "agents")
@@ -436,6 +828,7 @@ export const reconfigureOpenCodeModels = async (options: {
     if (!currentHash) throw new Error(`OPENCODE_MANAGED_AGENT_MISSING:${id}`);
     const content = openCodeRuntime.renderAgent(agentDefinitions[id], {
       model: options.modelConfig.agents[id],
+      buildId: manifest.buildId,
     }).content;
     return {
       id,
@@ -452,6 +845,16 @@ export const reconfigureOpenCodeModels = async (options: {
   }
   for (const asset of planned) await atomicWrite(asset.path, asset.content);
   for (const asset of planned) manifest.files[asset.path] = asset.sha256;
+  const assetHashes = new Map<string, string>();
+  for (const entry of manifest.assetHashes ?? [])
+    assetHashes.set(entry.path, entry.sha256);
+  if (!manifest.assetHashes)
+    for (const [path, sha256] of Object.entries(manifest.files))
+      assetHashes.set(path, sha256);
+  for (const asset of planned) assetHashes.set(asset.path, asset.sha256);
+  manifest.assetHashes = [...assetHashes]
+    .map(([path, sha256]) => ({ path, sha256 }))
+    .sort((left, right) => left.path.localeCompare(right.path));
   manifest.modelProfile = options.modelConfig.profile;
   manifest.resolvedModels = options.modelConfig.agents;
   await atomicWrite(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -477,7 +880,7 @@ export const uninstallOpenCode = async (options: {
     return { removedFiles: [] as string[], conflicts: [] as string[] };
   const manifest = JSON.parse(source) as OpenCodeManifest;
   if (
-    manifest.version !== 1 ||
+    !validManifestVersion(manifest.version) ||
     manifest.runtime !== "opencode" ||
     manifest.scope !== options.scope
   )
@@ -488,13 +891,24 @@ export const uninstallOpenCode = async (options: {
     if (current !== undefined && digest(current) !== expected)
       conflicts.push(path);
   }
-  for (const [path, expected] of Object.entries(manifest.configEntries)) {
-    const sourceConfig = await optionalRead(path);
+  const managedConfigEntries = Object.entries(manifest.configEntries).map(
+    ([entry, expected]) => ({
+      ...managedConfigEntry(manifest, entry),
+      expected,
+    }),
+  );
+  for (const entry of managedConfigEntries) {
+    const sourceConfig = await optionalRead(entry.path);
     if (!sourceConfig) continue;
     const config = parseJsonc(sourceConfig);
-    const entry = (config.mcp as Record<string, unknown> | undefined)?.pulso;
-    if (entry !== undefined && digest(JSON.stringify(entry)) !== expected)
-      conflicts.push(`${path}#mcp.pulso`);
+    const value =
+      entry.key === "plugin"
+        ? config.plugin
+        : isRecord(config.mcp)
+          ? config.mcp.pulso
+          : undefined;
+    if (value !== undefined && digest(JSON.stringify(value)) !== entry.expected)
+      conflicts.push(`${entry.path}#${entry.key}`);
   }
   if (conflicts.length) return { removedFiles: [] as string[], conflicts };
   if (options.dryRun)
@@ -504,18 +918,39 @@ export const uninstallOpenCode = async (options: {
     };
   for (const path of Object.keys(manifest.files))
     await rm(path, { force: true });
-  for (const [path] of Object.entries(manifest.configEntries)) {
+  const configKeys = new Map<string, Set<"plugin" | "mcp.pulso">>();
+  for (const entry of managedConfigEntries) {
+    const keys =
+      configKeys.get(entry.path) ?? new Set<"plugin" | "mcp.pulso">();
+    keys.add(entry.key);
+    configKeys.set(entry.path, keys);
+  }
+  for (const [path, keys] of configKeys) {
     const sourceConfig = await optionalRead(path);
     if (!sourceConfig) continue;
-    const config = parseJsonc(sourceConfig);
-    const mcp = config.mcp as Record<string, unknown> | undefined;
-    if (!mcp?.pulso) continue;
-    const updated = applyEdits(
-      sourceConfig,
-      modify(sourceConfig, ["mcp", "pulso"], undefined, {
-        formattingOptions: { insertSpaces: true, tabSize: 2 },
-      }),
-    );
+    let updated = sourceConfig;
+    if (keys.has("plugin")) {
+      const config = parseJsonc(updated);
+      const plugins = Array.isArray(config.plugin) ? config.plugin : undefined;
+      if (plugins) {
+        const remaining = plugins.filter(
+          (entry) => entry !== managedBridgePlugin,
+        );
+        updated = applyEdits(
+          updated,
+          modify(updated, ["plugin"], remaining, {
+            formattingOptions: { insertSpaces: true, tabSize: 2 },
+          }),
+        );
+      }
+    }
+    if (keys.has("mcp.pulso"))
+      updated = applyEdits(
+        updated,
+        modify(updated, ["mcp", "pulso"], undefined, {
+          formattingOptions: { insertSpaces: true, tabSize: 2 },
+        }),
+      );
     await atomicWrite(path, updated);
   }
   await rm(manifestPath, { force: true });

@@ -3,6 +3,7 @@ import type {
   Artifact,
   Assignment,
   Execution,
+  OperationReceipt,
   State,
   Store,
   Work,
@@ -101,7 +102,7 @@ export class SqliteStore implements Store {
       CREATE TABLE IF NOT EXISTS work_executions (id TEXT PRIMARY KEY, work_item_id TEXT NOT NULL REFERENCES work_items(id), assignment_id TEXT NOT NULL REFERENCES work_assignments(id), executor_id TEXT NOT NULL, executor_type TEXT, external_execution_ref TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, failure_reason TEXT, version INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS work_leases (id TEXT PRIMARY KEY, work_item_id TEXT NOT NULL REFERENCES work_items(id), execution_id TEXT NOT NULL REFERENCES work_executions(id), holder_id TEXT NOT NULL, status TEXT NOT NULL, acquired_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL, expires_at TEXT NOT NULL, fencing_token INTEGER NOT NULL, version INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS work_events (id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id), sequence INTEGER NOT NULL, item_id TEXT REFERENCES work_items(id), execution_id TEXT REFERENCES work_executions(id), type TEXT NOT NULL, actor TEXT, timestamp TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(work_id, sequence));
-      CREATE TABLE IF NOT EXISTS work_artifacts (id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id), item_id TEXT REFERENCES work_items(id), type TEXT NOT NULL, uri TEXT NOT NULL, description TEXT, created_at TEXT NOT NULL);
+       CREATE TABLE IF NOT EXISTS work_artifacts (id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works(id), item_id TEXT REFERENCES work_items(id), type TEXT NOT NULL, uri TEXT NOT NULL, description TEXT, created_at TEXT NOT NULL);
        INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, datetime('now'));
     `);
     const applyMigration = (
@@ -185,6 +186,19 @@ export class SqliteStore implements Store {
       renameOrAdd("work_executions", "", "executor_type", "executor_type TEXT");
       renameOrAdd("work_leases", "owner_agent", "holder_id", "holder_id TEXT");
     });
+    applyMigration(
+      5,
+      `
+        CREATE TABLE IF NOT EXISTS operation_receipts (
+          operation_key TEXT PRIMARY KEY,
+          input_hash TEXT NOT NULL,
+          entity_kind TEXT NOT NULL CHECK(entity_kind IN ('work', 'work_item')),
+          entity_id TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_operation_receipts_entity
+          ON operation_receipts(entity_kind, entity_id);
+      `,
+    );
   }
 
   private load(): State {
@@ -321,7 +335,28 @@ export class SqliteStore implements Store {
         payload: JSON.parse(r.payload as string),
       }),
     );
-    return { works, items, assignments, executions, leases, artifacts, events };
+    const operationReceipts = (
+      this.db.query("SELECT * FROM operation_receipts").all() as Array<
+        Record<string, unknown>
+      >
+    ).map(
+      (r): OperationReceipt => ({
+        operationKey: r.operation_key as string,
+        inputHash: r.input_hash as string,
+        entityKind: r.entity_kind as OperationReceipt["entityKind"],
+        entityId: r.entity_id as string,
+      }),
+    );
+    return {
+      works,
+      items,
+      assignments,
+      executions,
+      leases,
+      artifacts,
+      events,
+      operationReceipts,
+    };
   }
 
   async read() {
@@ -338,18 +373,20 @@ export class SqliteStore implements Store {
       () => turn,
     );
     await previous;
+    let begun = false;
     try {
-      this.db.exec("BEGIN IMMEDIATE");
-    } catch (e) {
-      if (String(e).includes("database is locked")) {
-        error(
-          "CONCURRENT_TRANSACTION",
-          "Another writer currently owns the SQLite transaction",
-        );
+      try {
+        this.db.exec("BEGIN IMMEDIATE");
+        begun = true;
+      } catch (e) {
+        if (String(e).includes("database is locked")) {
+          error(
+            "CONCURRENT_TRANSACTION",
+            "Another writer currently owns the SQLite transaction",
+          );
+        }
+        throw e;
       }
-      throw e;
-    }
-    try {
       const before = this.load();
       const state = structuredClone(before);
       const out = await fn(state);
@@ -359,7 +396,7 @@ export class SqliteStore implements Store {
       this.db.exec("COMMIT");
       return out;
     } catch (e) {
-      this.db.exec("ROLLBACK");
+      if (begun) this.db.exec("ROLLBACK");
       throw e;
     } finally {
       release();
@@ -435,7 +472,7 @@ export class SqliteStore implements Store {
     );
     sync(before.executions, state.executions, "work_executions", (e) =>
       run(
-        "INSERT INTO work_executions(id,work_item_id,assignment_id,executor_id,executor_type,external_execution_ref,status,created_at,started_at,completed_at,failure_reason,version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET executor_id=excluded.executor_id,executor_type=excluded.executor_type,status=excluded.status,started_at=excluded.started_at,completed_at=excluded.completed_at,failure_reason=excluded.failure_reason,version=excluded.version",
+        "INSERT INTO work_executions(id,work_item_id,assignment_id,executor_id,executor_type,external_execution_ref,status,created_at,started_at,completed_at,failure_reason,version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET executor_id=excluded.executor_id,executor_type=excluded.executor_type,external_execution_ref=excluded.external_execution_ref,status=excluded.status,started_at=excluded.started_at,completed_at=excluded.completed_at,failure_reason=excluded.failure_reason,version=excluded.version",
         [
           e.id,
           e.workItemId,
@@ -497,6 +534,20 @@ export class SqliteStore implements Store {
           e.timestamp,
           json(e.payload),
         ]);
+    const oldReceipts = new Set(
+      before.operationReceipts.map((receipt) => receipt.operationKey),
+    );
+    for (const receipt of state.operationReceipts)
+      if (!oldReceipts.has(receipt.operationKey))
+        run(
+          "INSERT INTO operation_receipts(operation_key,input_hash,entity_kind,entity_id) VALUES(?,?,?,?)",
+          [
+            receipt.operationKey,
+            receipt.inputHash,
+            receipt.entityKind,
+            receipt.entityId,
+          ],
+        );
   }
   close() {
     this.db.close();
@@ -531,9 +582,9 @@ export class SqliteStore implements Store {
     );
     return {
       database: true,
-      schema: schemaVersion >= 4,
+      schema: schemaVersion >= 5,
       schemaVersion,
-      migrations: schemaVersion >= 4,
+      migrations: schemaVersion >= 5,
       foreignKeys: foreignKeys === 1,
       leaseUniqueness: indexes.has("unique_active_lease"),
       eventLog:

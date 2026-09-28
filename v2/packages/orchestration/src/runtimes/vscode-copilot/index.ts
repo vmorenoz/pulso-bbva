@@ -1,5 +1,4 @@
-import { semanticPrompt } from "../../agents/definitions";
-import { resultProtocol, taskProtocol } from "../../protocol/schemas";
+import { legacyPrimaryPrompt, semanticPrompt } from "../../agents/definitions";
 import type {
   AgentDefinition,
   CanonicalSkill,
@@ -18,6 +17,10 @@ const toolNames: Record<string, string> = {
 };
 const list = (values: string[]) =>
   `[${values.map((value) => `'${value}'`).join(", ")}]`;
+
+// Baseline legacy contract retained until VS Code receives the native bridge.
+const legacyPrimaryRuntimeContract =
+  "Delegate through VS Code's native agent/subagent tool. Set the Task JSON protocol field to pulso-task/2 and the returned AgentResult protocol field to pulso-result/2; omit unused optional Task fields and never send null.";
 
 export const vscodeCopilotRuntime: RuntimeDefinition = {
   id: "vscode-copilot",
@@ -54,11 +57,13 @@ export const vscodeCopilotRuntime: RuntimeDefinition = {
       frontmatter.push("disable-model-invocation: false");
     const contract =
       agent.role === "primary"
-        ? `Delegate through VS Code's native agent/subagent tool. Set the Task JSON protocol field to ${taskProtocol.id} and the returned AgentResult protocol field to ${resultProtocol.id}; omit unused optional Task fields and never send null.`
+        ? legacyPrimaryRuntimeContract
         : "This specialist is stateless and must not delegate. Follow the generated communication_protocol; omit unused optional fields and never send null for an omitted field.";
     return {
       path: `${agent.id}.agent.md`,
-      content: `---\n${frontmatter.join("\n")}\n---\n${semanticPrompt(agent)}\n<runtime_contract>${contract}</runtime_contract>\n`,
+      content: `---\n${frontmatter.join("\n")}\n---\n${semanticPrompt(agent, {
+        primaryPrompt: legacyPrimaryPrompt,
+      })}\n<runtime_contract>${contract}</runtime_contract>\n`,
     };
   },
   renderSkill(skill: CanonicalSkill) {

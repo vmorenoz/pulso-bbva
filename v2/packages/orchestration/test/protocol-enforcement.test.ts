@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import { createProtocolEnforcer } from "../src/protocol/enforcement";
 import { summarizeValidationError } from "../src/protocol/errors";
+import {
+  exampleResult,
+  renderTaskResultTemplate,
+} from "../src/protocol/examples";
 import { agentResultSchema } from "../src/protocol/schemas";
 import {
   serializeAgentResult,
@@ -76,6 +80,59 @@ test("result enforcement rejects missing specialist, identity mismatches, and pa
     expect(() => enforcer.validateResult(source, expected)).toThrow(
       "AGENT_RESULT_INVALID",
     );
+});
+
+test("schema-derived examples and templates preserve strict result contracts", () => {
+  const enforcer = createProtocolEnforcer();
+  for (const specialist of [
+    "planner",
+    "explorer",
+    "executor",
+    "verifier",
+    "security-auditor",
+  ] as const) {
+    const example = exampleResult(specialist);
+    expect(example.specialist).toBe(specialist);
+    expect(
+      enforcer.validateResult(serializeAgentResult(example), {
+        delegationId: example.delegationId,
+        specialist,
+        workId: example.workId,
+        workItemId: example.workItemId,
+      }),
+    ).toEqual(example);
+  }
+  expect(
+    renderTaskResultTemplate({
+      delegationId: "dlg-1",
+      specialist: "explorer",
+      workId: "work-1",
+      workItemId: "item-1",
+    }),
+  ).toContain('"status":"blocked"');
+});
+
+test("repair retains the precise structural error after one markdown fence", () => {
+  const enforcer = createProtocolEnforcer();
+  const invalid = {
+    ...result,
+    specialistResult: {
+      kind: "explorer",
+      findings: [{ summary: "wrong location", limitations: ["not allowed"] }],
+    },
+  };
+  const invalidWire = `<pulso-result v="2">${JSON.stringify(invalid).replaceAll(
+    "<",
+    "\\u003C",
+  )}</pulso-result>`;
+  expect(() =>
+    enforcer.validateResult(`\`\`\`\n${invalidWire}\n\`\`\``, {
+      delegationId: "dlg-1",
+      specialist: "explorer",
+      workId: "work-1",
+      workItemId: "item-1",
+    }),
+  ).toThrow("specialistResult.findings[0].limitations");
 });
 
 test("specialist contract diagnostics are bounded while retaining the issue count", () => {

@@ -38,6 +38,7 @@ test("complete workflow survives restart and rejects zombie", async () => {
     assigneeId: "assignee-c",
   });
   const a = await r.execution.start(discovery.id, "assignee-a");
+  expect((await r.work.snapshot(w.id)).work.status).toBe("active");
   await r.execution.heartbeat(a.executionId, a.leaseId);
   await r.execution.complete(a.executionId, a.leaseId, "discovery complete");
   const old = await r.execution.start(delivery.id, "assignee-b");
@@ -51,7 +52,6 @@ test("complete workflow survives restart and rejects zombie", async () => {
   await r.execution.complete(b.executionId, b.leaseId, "delivery complete");
   const c = await r.execution.start(verification.id, "assignee-c");
   await r.execution.complete(c.executionId, c.leaseId, "verification complete");
-  await r.work.transition("work", w.id, "start");
   await r.work.transition("work", w.id, "complete");
   const artifact = await r.work.artifact({
     workId: w.id,

@@ -21,12 +21,7 @@ import {
   uninstallGlobalVscode,
   uninstallLocalVscode,
 } from "./index";
-import {
-  formatMcpBundleBuildException,
-  formatMcpBundleBuildFailure,
-  installerDependencyPlugin,
-  withMcpBundleDependencies,
-} from "./mcp-bundle";
+import { buildMcpBundle } from "./mcp-bundle";
 import {
   applyOpenCodeInstall,
   type InstallationPlan,
@@ -47,7 +42,6 @@ import { scopeSelectionOptions } from "./wizard/scope-selection";
 
 const root = resolve(import.meta.dir, "../../..");
 const orchestrationRoot = join(root, "packages/orchestration");
-const mcpEntrypoint = join(root, "packages/capabilities-mcp/src/mcp/stdio.ts");
 const dataRoot = () => {
   if (process.platform === "darwin")
     return join(homedir(), "Library/Application Support/Pulso/v2");
@@ -104,37 +98,6 @@ const readCanonicalSkills = async (): Promise<CanonicalSkill[]> => {
       ),
     })),
   );
-};
-
-const buildMcpBundle = async () => {
-  const installerEntry = join(import.meta.dir, "cli.ts");
-  return withMcpBundleDependencies({
-    installerEntry,
-    build: async (temporaryDependencyRoot) => {
-      let build: Awaited<ReturnType<typeof Bun.build>>;
-      try {
-        build = await Bun.build({
-          entrypoints: [mcpEntrypoint],
-          target: "bun",
-          format: "esm",
-          plugins: [
-            installerDependencyPlugin(installerEntry, temporaryDependencyRoot),
-          ],
-        });
-      } catch (error) {
-        throw new Error(formatMcpBundleBuildException(error), { cause: error });
-      }
-      if (!build.success)
-        throw new Error(formatMcpBundleBuildFailure(build.logs));
-      const output = build.outputs[0];
-      if (!output) throw new Error("INSTALL_MCP_BUNDLE_MISSING");
-      try {
-        return await output.text();
-      } catch (error) {
-        throw new Error(formatMcpBundleBuildException(error), { cause: error });
-      }
-    },
-  });
 };
 
 const install = async (terminal: TerminalWizard): Promise<boolean> => {
@@ -480,14 +443,18 @@ const install = async (terminal: TerminalWizard): Promise<boolean> => {
     return false;
   }
 
-  const bundle = await terminal.withProgress(
-    "Verificando dependencias, descargando las que falten y empaquetando MCP...",
-    buildMcpBundle,
-    "Bundle Capabilities MCP listo",
-  );
+  const bundle = activeRuntimes.includes("vscode-copilot")
+    ? await terminal.withProgress(
+        "Verificando dependencias, descargando las que falten y empaquetando MCP...",
+        // VS Code retains its legacy MCP runtime and is not part of OpenCode's build unit.
+        () => buildMcpBundle("development"),
+        "Bundle Capabilities MCP listo",
+      )
+    : undefined;
 
   let totalFiles = 0;
   if (activeRuntimes.includes("vscode-copilot")) {
+    if (!bundle) throw new Error("INSTALL_MCP_BUNDLE_MISSING");
     let result: { installedFiles: string[] };
     if (scope === "global") {
       if (!mcpConfigPath) throw new Error("VSCODE_MCP_CONFIG_PATH_UNRESOLVED");
@@ -536,17 +503,6 @@ const install = async (terminal: TerminalWizard): Promise<boolean> => {
   ) {
     const installPlan = openCodePlan;
     const installOptions = openCodeInstallOptions;
-    if (scope === "global" || !activeRuntimes.includes("vscode-copilot"))
-      await terminal.withProgress(
-        "Registrando el bundle MCP compartido...",
-        () =>
-          installSharedRuntime({
-            dataRoot: dataRoot(),
-            mcpBundle: bundle,
-            homeDir,
-          }),
-        "Bundle MCP registrado",
-      );
     const result = await terminal.withProgress(
       "Instalando agentes, skills y configuración OpenCode...",
       () => applyOpenCodeInstall(installOptions, installPlan),

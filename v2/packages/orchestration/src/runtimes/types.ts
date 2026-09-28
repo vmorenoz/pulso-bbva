@@ -92,6 +92,7 @@ export type ProtocolEnforcement =
 export interface RuntimeRenderOptions {
   runtimeContract?: string;
   model?: string | null;
+  buildId?: string;
 }
 
 export interface RuntimeConfigOptions {

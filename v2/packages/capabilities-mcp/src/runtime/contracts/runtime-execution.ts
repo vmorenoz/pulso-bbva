@@ -10,18 +10,29 @@ export type RuntimeBindingStatus =
   | "waiting"
   | "lost";
 
+export type RuntimeBindingManager = "mcp" | "opencode-native";
+
 export interface RuntimeExecutionBinding {
   bindingId: string;
   runtime: RuntimeExecutionReference;
   workId: string;
   workItemId: string;
+  /** Missing fields identify a legacy row that must be resolved from Work state. */
+  executorId?: string;
+  assigneeId?: string;
+  requestHash?: string;
+  managedBy?: RuntimeBindingManager;
   assignmentId?: string;
   executionId: string;
   leaseId: string;
   fencingToken: number;
   createdAt: string;
+  creationToken?: string;
+  creationExpiresAt?: string;
   expiresAt: string;
   status: RuntimeBindingStatus;
+  terminalResult?: string;
+  version: number;
 }
 
 export interface ExecutionHandle {

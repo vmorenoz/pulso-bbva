@@ -31,7 +31,7 @@ export interface WorkingSystem {
   work: WorkService;
   execution: ExecutionService;
   recovery: RecoveryService;
-  doctor(): Record<string, boolean | number>;
+  doctor(): Record<string, boolean | number | string>;
   close(): void;
 }
 export const bootstrapWorkingSystem = (

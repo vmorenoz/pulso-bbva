@@ -47,7 +47,7 @@ test("agent definitions enforce the Pulso-only topology without fixed routes", a
   );
 });
 
-test("both runtimes render the same canonical semantic prompt and skill roster", () => {
+test("OpenCode managed and VS Code legacy render their expected prompt contracts", () => {
   for (const id of agentIds) {
     const vscode = vscodeCopilotRuntime.renderAgent(
       agentDefinitions[id],
@@ -63,8 +63,8 @@ test("both runtimes render the same canonical semantic prompt and skill roster",
         .replaceAll("&lt;", "<")
         .replaceAll("&gt;", ">")
         .replace(/<runtime_contract>[\s\S]*?<\/runtime_contract>\n?/, "");
-    expect(body(vscode)).toBe(body(opencode));
-    if (id !== "pulso")
+    if (id !== "pulso") {
+      expect(body(vscode)).toBe(body(opencode));
       expect(
         vscode.match(
           /<communication_protocol>([\s\S]*?)<\/communication_protocol>/,
@@ -74,24 +74,34 @@ test("both runtimes render the same canonical semantic prompt and skill roster",
           /<communication_protocol>([\s\S]*?)<\/communication_protocol>/,
         )?.[1],
       );
-    else {
+    } else {
       expect(vscode).toContain("pulso-result/2");
-      expect(opencode).toContain("installed OpenCode Protocol Guard validates");
+      expect(vscode).toContain(
+        "Capabilities MCP is the sole operational boundary",
+      );
+      expect(opencode).toContain("pulso_native_prepare");
+      expect(opencode).toContain("OpenCode native management generates Work");
+      expect(opencode).toContain("fachada nativa gestionada");
+      expect(opencode).not.toContain("pulso_*: allow");
     }
   }
   expect(vscodeCopilotRuntime.capabilities).toBeDefined();
   expect(agentDefinitions.pulso.skills).toEqual(agentDefinitions.pulso.skills);
 });
 
-test("Pulso policy anchors continuity and explicit-only commits", () => {
+test("Pulso managed policy anchors continuity and explicit-only commits", () => {
   const rendered = openCodeRuntime.renderAgent(agentDefinitions.pulso).content;
-  expect(rendered).toContain("Work continuity defaults to reuse");
   expect(rendered).toContain(
-    "Request a new Work only when the user's objective actually changes",
+    "Una aclaración, una corrección y una continuación del mismo objetivo pertenecen al mismo Work",
   );
-  expect(rendered).toContain("only when the user explicitly requests a commit");
-  expect(rendered).toContain("Git identity is unavailable");
-  expect(rendered).toContain("There are no predefined routes");
+  expect(rendered).toContain(
+    "Un objetivo independiente explícito abre otro Work",
+  );
+  expect(rendered).toContain("commit o push requiere petición explícita");
+  expect(rendered).toContain("Una identidad Git ausente es un bloqueo");
+  expect(rendered).toContain(
+    "No existen rutas, ciclos ni secuencias obligatorias",
+  );
 });
 
 test("checked-in VS Code agents are generated from the canonical runtime renderer", async () => {

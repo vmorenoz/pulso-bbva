@@ -104,6 +104,12 @@ export interface WorkEvent {
   timestamp: string;
   payload: unknown;
 }
+export interface OperationReceipt {
+  operationKey: string;
+  inputHash: string;
+  entityKind: "work" | "work_item";
+  entityId: string;
+}
 export interface CreateWorkInput {
   workspaceId: string;
   title: string;
@@ -124,6 +130,7 @@ export interface State {
   leases: WorkLease[];
   artifacts: Artifact[];
   events: WorkEvent[];
+  operationReceipts: OperationReceipt[];
 }
 export const validateState = (state: State) => {
   for (const item of state.items) {
@@ -161,6 +168,21 @@ export const validateState = (state: State) => {
     ) {
       error("INVALID_STATE", "Active lease must reference a running execution");
     }
+    const item = state.items.find(
+      (candidate) => candidate.id === lease.workItemId,
+    );
+    const work =
+      item && state.works.find((candidate) => candidate.id === item.workId);
+    if (work?.status !== "active")
+      error(
+        "INVALID_STATE",
+        "Active execution authority requires an active Work",
+      );
+  }
+  for (const receipt of state.operationReceipts) {
+    const entities = receipt.entityKind === "work" ? state.works : state.items;
+    if (!entities.some((entity) => entity.id === receipt.entityId))
+      error("INVALID_STATE", "Operation receipt must reference its entity");
   }
 };
 export const validateAppendOnlyEvents = (before: State, after: State) => {
@@ -174,6 +196,16 @@ export const validateAppendOnlyEvents = (before: State, after: State) => {
     ) {
       error("EVENT_LOG_APPEND_ONLY", "Existing events cannot be modified");
     }
+  }
+  for (const receipt of before.operationReceipts) {
+    const current = after.operationReceipts.find(
+      (candidate) => candidate.operationKey === receipt.operationKey,
+    );
+    if (JSON.stringify(current) !== JSON.stringify(receipt))
+      error(
+        "OPERATION_RECEIPTS_APPEND_ONLY",
+        "Operation receipts cannot change",
+      );
   }
 };
 export interface Store {
@@ -205,17 +237,33 @@ export class MemoryStore implements Store {
     leases: [],
     artifacts: [],
     events: [],
+    operationReceipts: [],
   };
+  private transactionTail = Promise.resolve();
   async read() {
     return clone(this.state);
   }
   async transaction<T>(fn: (s: State) => T | Promise<T>) {
-    const draft = clone(this.state);
-    const out = await fn(draft);
-    validateAppendOnlyEvents(this.state, draft);
-    validateState(draft);
-    this.state = draft;
-    return out;
+    let release!: () => void;
+    const turn = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const previous = this.transactionTail;
+    this.transactionTail = previous.then(
+      () => turn,
+      () => turn,
+    );
+    await previous;
+    try {
+      const draft = clone(this.state);
+      const out = await fn(draft);
+      validateAppendOnlyEvents(this.state, draft);
+      validateState(draft);
+      this.state = draft;
+      return out;
+    } finally {
+      release();
+    }
   }
 }
 const id = () => crypto.randomUUID();
@@ -229,6 +277,11 @@ const workTransitions: Record<WorkStatus, WorkStatus[]> = {
   completed: [],
   cancelled: [],
 };
+/** Work records remain editable until a terminal decision; only active work may run. */
+export const isWorkModifiable = (status: WorkStatus) =>
+  status !== "completed" && status !== "cancelled";
+export const isWorkStartable = (status: WorkStatus) =>
+  status === "pending" || status === "active";
 const itemTransitions: Record<WorkItemStatus, WorkItemStatus[]> = {
   pending: ["ready", "cancelled"],
   ready: ["in_progress", "cancelled"],
@@ -283,10 +336,18 @@ export class WorkService {
   ) {
     this.recovery = new RecoveryService(store, clock);
   }
-  async create(input: CreateWorkInput) {
+  async create(
+    input: CreateWorkInput,
+    operation?: { operationKey: string; inputHash: string },
+  ) {
     return this.store.transaction((s) => {
       if (!input.title || !input.objective)
         error("INVALID_INPUT", "title and objective are required");
+      const existing = this.receiptEntity(s, operation, "work");
+      if (existing)
+        return clone(
+          get(s.works, existing.entityId, "OPERATION_RECEIPT_CORRUPT"),
+        );
       const now = at(this.clock);
       const w: Work = {
         id: id(),
@@ -318,8 +379,43 @@ export class WorkService {
           this.assignIn(s, item.id, raw.assigneeId, "item.assigned");
       }
       this.promote(s, w.id);
+      this.recordReceipt(s, operation, "work", w.id);
       return clone(w);
     });
+  }
+  private receiptEntity(
+    s: State,
+    operation: { operationKey: string; inputHash: string } | undefined,
+    entityKind: OperationReceipt["entityKind"],
+  ) {
+    if (!operation) return undefined;
+    if (!operation.operationKey || !operation.inputHash)
+      error(
+        "INVALID_INPUT",
+        "operationKey and inputHash are required together",
+      );
+    const receipt = s.operationReceipts.find(
+      (candidate) => candidate.operationKey === operation.operationKey,
+    );
+    if (!receipt) return undefined;
+    if (
+      receipt.inputHash !== operation.inputHash ||
+      receipt.entityKind !== entityKind
+    )
+      error(
+        "OPERATION_CONFLICT",
+        "operationKey was already used with different input",
+      );
+    return receipt;
+  }
+  private recordReceipt(
+    s: State,
+    operation: { operationKey: string; inputHash: string } | undefined,
+    entityKind: OperationReceipt["entityKind"],
+    entityId: string,
+  ) {
+    if (!operation) return;
+    s.operationReceipts.push({ ...operation, entityKind, entityId });
   }
   private validateDeps(s: State, item: WorkItem) {
     for (const dep of item.dependencies) {
@@ -338,16 +434,26 @@ export class WorkService {
       if (walk(dep, new Set())) error("DEPENDENCY_CYCLE", "Dependency cycle");
     }
   }
-  async addItem(input: {
-    workId: string;
-    title: string;
-    kind: WorkItemKind;
-    description?: string;
-    dependencies?: string[];
-    assigneeId?: string;
-  }) {
+  async addItem(
+    input: {
+      workId: string;
+      title: string;
+      kind: WorkItemKind;
+      description?: string;
+      dependencies?: string[];
+      assigneeId?: string;
+    },
+    operation?: { operationKey: string; inputHash: string },
+  ) {
     return this.store.transaction((s) => {
       const w = get(s.works, input.workId, "WORK_NOT_FOUND");
+      const existing = this.receiptEntity(s, operation, "work_item");
+      if (existing)
+        return clone(
+          get(s.items, existing.entityId, "OPERATION_RECEIPT_CORRUPT"),
+        );
+      if (!isWorkModifiable(w.status))
+        error("WORK_NOT_MODIFIABLE", "Terminal Work cannot accept WorkItems");
       const item: WorkItem = {
         id: id(),
         workId: w.id,
@@ -365,6 +471,7 @@ export class WorkService {
       if (input.assigneeId)
         this.assignIn(s, item.id, input.assigneeId, "item.assigned");
       this.promote(s, w.id);
+      this.recordReceipt(s, operation, "work_item", item.id);
       return clone(item);
     });
   }
@@ -464,6 +571,8 @@ export class WorkService {
   ) {
     return this.store.transaction((s) => {
       const w = get(s.works, workId, "WORK_NOT_FOUND");
+      if (!isWorkModifiable(w.status))
+        error("WORK_NOT_MODIFIABLE", "Terminal Work cannot be modified");
       assertVersion(w.version, input.version);
       if (input.title) w.title = input.title;
       if (input.objective) w.objective = input.objective;
@@ -508,6 +617,33 @@ export class WorkService {
           !workTransitions[work.status].includes(to)
         )
           error("INVALID_TRANSITION", `${work.status} -> ${to}`);
+        if (
+          work.status === "active" &&
+          ["blocked", "waiting", "completed", "failed", "cancelled"].includes(
+            to,
+          )
+        ) {
+          const itemIds = new Set(
+            s.items
+              .filter((item) => item.workId === work.id)
+              .map((item) => item.id),
+          );
+          if (
+            s.executions.some(
+              (execution) =>
+                itemIds.has(execution.workItemId) &&
+                execution.status === "running",
+            ) ||
+            s.leases.some(
+              (lease) =>
+                itemIds.has(lease.workItemId) && lease.status === "active",
+            )
+          )
+            error(
+              "WORK_HAS_ACTIVE_EXECUTION",
+              "Work cannot change while child execution authority is active",
+            );
+        }
         if (
           to === "completed" &&
           s.items.some(
@@ -696,10 +832,22 @@ export class ExecutionService {
   ) {
     this.recovery = new RecoveryService(store, clock);
   }
-  async start(itemId: string, executorId: string) {
+  async start(
+    itemId: string,
+    executorId: string,
+    options?: { externalExecutionRef?: Execution["externalExecutionRef"] },
+  ) {
     await this.recover();
     return this.store.transaction((s) => {
       const item = get(s.items, itemId, "ITEM_NOT_FOUND");
+      const work = get(s.works, item.workId, "WORK_NOT_FOUND");
+      if (!isWorkStartable(work.status))
+        error(
+          ["blocked", "waiting", "failed"].includes(work.status)
+            ? "WORK_RESUME_REQUIRED"
+            : "WORK_NOT_EXECUTABLE",
+          "Work must be explicitly resumed before starting an execution",
+        );
       if (item.status !== "ready")
         error(
           item.status === "recovery_required"
@@ -719,11 +867,18 @@ export class ExecutionService {
       )
         error("ACTIVE_LEASE_EXISTS", "Item already leased");
       const now = at(this.clock);
+      if (work.status === "pending") {
+        work.status = "active";
+        work.startedAt = now;
+        work.version++;
+        event(s, this.clock, work.id, "work.started");
+      }
       const ex: Execution = {
         id: id(),
         workItemId: itemId,
         assignmentId: assignment.id,
         executorId,
+        externalExecutionRef: options?.externalExecutionRef,
         status: "running",
         createdAt: now,
         startedAt: now,

@@ -25,6 +25,8 @@ const pathName = (path: Issue["path"] = []) =>
 
 const issueMessage = (issue: Issue) => {
   const path = pathName(issue.path);
+  if (issue.code === "unrecognized_keys" && issue.keys?.length === 1)
+    return `${path}.${issue.keys[0]}: unexpected field`;
   if (issue.code === "unrecognized_keys")
     return `${path}: unexpected field${(issue.keys?.length ?? 0) === 1 ? "" : "s"} ${(issue.keys ?? []).join(", ")}`;
   if (

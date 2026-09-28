@@ -5,6 +5,7 @@ export * from "./prompting/specialist-prompt-assembler";
 export * from "./protocol/context-budget";
 export * from "./protocol/enforcement";
 export * from "./protocol/errors";
+export * from "./protocol/examples";
 export * from "./protocol/instructions";
 export * from "./protocol/parse";
 export * from "./protocol/repair";

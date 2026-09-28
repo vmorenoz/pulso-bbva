@@ -49,6 +49,9 @@ export interface WorkingSystemGateway {
   inspect(
     executionId: string,
   ): Promise<{ execution: Execution; lease: WorkLease }>;
+  findExecutionsByRuntime(
+    runtime: RuntimeExecutionReference,
+  ): Promise<Array<{ execution: Execution; lease?: WorkLease }>>;
   inspectItem(
     itemId: string,
   ): Promise<{ items: WorkItem[]; assignments: Assignment[] } | undefined>;
