@@ -4,11 +4,15 @@ import type {
   Assignment,
   Execution,
   OperationReceipt,
+  PreparationIntent,
   State,
   Store,
   Work,
+  WorkBranchRecord,
   WorkEvent,
+  WorkGraphRecord,
   WorkItem,
+  WorkItemPolicy,
   WorkLease,
 } from "../domain";
 import { error, validateAppendOnlyEvents, validateState } from "../domain";
@@ -199,6 +203,34 @@ export class SqliteStore implements Store {
           ON operation_receipts(entity_kind, entity_id);
       `,
     );
+    applyMigration(
+      6,
+      `
+      CREATE TABLE IF NOT EXISTS work_graphs (
+        work_id TEXT NOT NULL REFERENCES works(id), revision INTEGER NOT NULL CHECK(revision > 0),
+        definition_hash TEXT NOT NULL, definition TEXT NOT NULL, created_at TEXT NOT NULL,
+        PRIMARY KEY(work_id, revision)
+      );
+      CREATE TABLE IF NOT EXISTS work_branches (
+        work_id TEXT NOT NULL, revision INTEGER NOT NULL, branch_key TEXT NOT NULL,
+        objective TEXT NOT NULL, deliverable TEXT NOT NULL, effects TEXT NOT NULL,
+        PRIMARY KEY(work_id, revision, branch_key),
+        FOREIGN KEY(work_id, revision) REFERENCES work_graphs(work_id, revision) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS work_item_policies (
+        work_item_id TEXT PRIMARY KEY REFERENCES work_items(id), branch_key TEXT NOT NULL,
+        node_key TEXT NOT NULL, graph_revision INTEGER NOT NULL, effects TEXT NOT NULL,
+        resources TEXT NOT NULL, criteria TEXT NOT NULL, required_capabilities TEXT NOT NULL,
+        preference_revision INTEGER, definition_hash TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS work_preparation_intents (
+        operation_key TEXT PRIMARY KEY, input_hash TEXT NOT NULL, work_id TEXT NOT NULL,
+        graph_revision INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','prepared','failed')),
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(work_id, graph_revision) REFERENCES work_graphs(work_id, revision)
+      );
+    `,
+    );
   }
 
   private load(): State {
@@ -347,6 +379,67 @@ export class SqliteStore implements Store {
         entityId: r.entity_id as string,
       }),
     );
+    const workGraphs = (
+      this.db
+        .query("SELECT * FROM work_graphs ORDER BY work_id, revision")
+        .all() as Array<Record<string, unknown>>
+    ).map(
+      (r): WorkGraphRecord => ({
+        workId: r.work_id as string,
+        revision: r.revision as number,
+        definitionHash: r.definition_hash as string,
+        definition: JSON.parse(r.definition as string),
+        createdAt: r.created_at as string,
+      }),
+    );
+    const workBranches = (
+      this.db
+        .query(
+          "SELECT * FROM work_branches ORDER BY work_id, revision, branch_key",
+        )
+        .all() as Array<Record<string, unknown>>
+    ).map(
+      (r): WorkBranchRecord => ({
+        workId: r.work_id as string,
+        revision: r.revision as number,
+        branchKey: r.branch_key as string,
+        objective: r.objective as string,
+        deliverable: r.deliverable as string,
+        effects: JSON.parse(r.effects as string),
+      }),
+    );
+    const workItemPolicies = (
+      this.db.query("SELECT * FROM work_item_policies").all() as Array<
+        Record<string, unknown>
+      >
+    ).map(
+      (r): WorkItemPolicy => ({
+        workItemId: r.work_item_id as string,
+        branchKey: r.branch_key as string,
+        nodeKey: r.node_key as string,
+        graphRevision: r.graph_revision as number,
+        effects: JSON.parse(r.effects as string),
+        resources: JSON.parse(r.resources as string),
+        criteria: JSON.parse(r.criteria as string),
+        requiredCapabilities: JSON.parse(r.required_capabilities as string),
+        preferenceRevision: r.preference_revision as number | undefined,
+        definitionHash: r.definition_hash as string,
+      }),
+    );
+    const preparationIntents = (
+      this.db.query("SELECT * FROM work_preparation_intents").all() as Array<
+        Record<string, unknown>
+      >
+    ).map(
+      (r): PreparationIntent => ({
+        operationKey: r.operation_key as string,
+        inputHash: r.input_hash as string,
+        workId: r.work_id as string,
+        graphRevision: r.graph_revision as number,
+        state: r.state as PreparationIntent["state"],
+        createdAt: r.created_at as string,
+      }),
+    );
     return {
       works,
       items,
@@ -356,6 +449,10 @@ export class SqliteStore implements Store {
       artifacts,
       events,
       operationReceipts,
+      workGraphs,
+      workBranches,
+      workItemPolicies,
+      preparationIntents,
     };
   }
 
@@ -548,6 +645,52 @@ export class SqliteStore implements Store {
             receipt.entityId,
           ],
         );
+    // These business records are append-only by revision; never erase history on a DTO save.
+    for (const graph of state.workGraphs)
+      run("INSERT OR IGNORE INTO work_graphs VALUES(?,?,?,?,?)", [
+        graph.workId,
+        graph.revision,
+        graph.definitionHash,
+        json(graph.definition),
+        graph.createdAt,
+      ]);
+    for (const branch of state.workBranches)
+      run("INSERT OR IGNORE INTO work_branches VALUES(?,?,?,?,?,?)", [
+        branch.workId,
+        branch.revision,
+        branch.branchKey,
+        branch.objective,
+        branch.deliverable,
+        json(branch.effects),
+      ]);
+    for (const policy of state.workItemPolicies)
+      run(
+        "INSERT INTO work_item_policies VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(work_item_id) DO UPDATE SET branch_key=excluded.branch_key,node_key=excluded.node_key,graph_revision=excluded.graph_revision,effects=excluded.effects,resources=excluded.resources,criteria=excluded.criteria,required_capabilities=excluded.required_capabilities,preference_revision=excluded.preference_revision,definition_hash=excluded.definition_hash",
+        [
+          policy.workItemId,
+          policy.branchKey,
+          policy.nodeKey,
+          policy.graphRevision,
+          json(policy.effects),
+          json(policy.resources),
+          json(policy.criteria),
+          json(policy.requiredCapabilities),
+          policy.preferenceRevision ?? null,
+          policy.definitionHash,
+        ],
+      );
+    for (const intent of state.preparationIntents)
+      run(
+        "INSERT INTO work_preparation_intents VALUES(?,?,?,?,?,?) ON CONFLICT(operation_key) DO UPDATE SET state=excluded.state",
+        [
+          intent.operationKey,
+          intent.inputHash,
+          intent.workId,
+          intent.graphRevision,
+          intent.state,
+          intent.createdAt,
+        ],
+      );
   }
   close() {
     this.db.close();
@@ -582,9 +725,9 @@ export class SqliteStore implements Store {
     );
     return {
       database: true,
-      schema: schemaVersion >= 5,
+      schema: schemaVersion >= 6,
       schemaVersion,
-      migrations: schemaVersion >= 5,
+      migrations: schemaVersion >= 6,
       foreignKeys: foreignKeys === 1,
       leaseUniqueness: indexes.has("unique_active_lease"),
       eventLog:

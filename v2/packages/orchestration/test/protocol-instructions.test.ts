@@ -100,10 +100,10 @@ test("OpenCode prompts expose only canonical versions, statuses and specialist p
     "Task specialist selector never replaces the required specialist field",
   );
   expect(openCodeRuntime.renderAgent(agentDefinitions.pulso).content).toContain(
-    "OpenCode native management generates Work",
+    "pulso_prepare resuelve el Work",
   );
   expect(managedPulsoInstructions).toContain(
-    "never construct delegationId, binding, lease, execution, or runtime lifecycle calls",
+    "Never construct Work or execution identities, bindings, leases, or lifecycle calls",
   );
   expect(pulsoInstructions).toContain("work:{workId:string,workItemId:string}");
   expect(guardedPulsoInstructions).toContain(

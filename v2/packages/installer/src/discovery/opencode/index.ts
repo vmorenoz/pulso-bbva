@@ -8,6 +8,17 @@ export interface OpenCodeCapabilities {
   mcp: boolean;
   modelsCommand: boolean;
 }
+
+// Keep the capability probe tied to OpenCode's supported agent and skill
+// interfaces; Pulso installs these as workspace assets without touching
+// project instruction files.
+export const openCodeRequiredCapabilities = [
+  "agentConfiguration",
+  "agentModelOverride",
+  "skills",
+  "mcp",
+  "modelsCommand",
+] as const satisfies readonly (keyof OpenCodeCapabilities)[];
 export interface OpenCodeProbe {
   executable: string | null;
   version?: string;
@@ -157,7 +168,9 @@ export class OpenCodeDiscovery {
     return {
       executable,
       version: parseVersion(versionResult.stdout),
-      supported: Object.values(capabilities).every(Boolean),
+      supported: openCodeRequiredCapabilities.every(
+        (capability) => capabilities[capability],
+      ),
       capabilities,
     };
   }

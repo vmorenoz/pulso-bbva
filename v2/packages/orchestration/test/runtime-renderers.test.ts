@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { agentDefinitions, agentIds } from "../src/agents/definitions";
+import { openCodeV21PromptTexts } from "../src/agents/opencode-v21-prompts";
 import { openCodeRuntime } from "../src/runtimes/opencode";
 import { vscodeCopilotRuntime } from "../src/runtimes/vscode-copilot";
 
@@ -12,11 +13,11 @@ test("OpenCode managed assets expose only the native bridge and bounded task sel
   expect(pulso).toContain("task:");
   expect(pulso).toContain('"planner": allow');
   expect(pulso).toContain('"*": deny');
-  expect(pulso).toContain('"pulso_native_work": allow');
-  expect(pulso).toContain('"pulso_native_prepare": allow');
-  expect(pulso).toContain('"pulso_native_status": allow');
-  expect(pulso).toContain("fachada nativa gestionada");
-  expect(pulso).toContain("Utiliza la fachada operativa");
+  expect(pulso).toContain('"pulso_native_work": deny');
+  expect(pulso).toContain('"pulso_native_prepare": deny');
+  expect(pulso).toContain('"pulso_native_status": deny');
+  expect(pulso).toContain("pulso_prepare resuelve el Work");
+  expect(pulso).toContain("Usa pulso_prepare");
   expect(pulso).not.toContain("pulso_*: allow");
   expect(pulso).not.toContain(
     "Capabilities MCP is the sole operational boundary",
@@ -48,8 +49,11 @@ test("OpenCode managed and VS Code legacy runtime contracts remain isolated", ()
   expect(vscode).toContain("tools: ['agent', 'pulso/*']");
   expect(vscode).not.toMatch(forbidden);
   expect(opencode).toContain("task:");
-  expect(opencode).toContain('"pulso_native_prepare": allow');
-  expect(opencode).not.toMatch(forbidden);
+  expect(opencode).toContain('"pulso_native_prepare": deny');
+  expect(opencode).toContain('"read": allow');
+  expect(opencode).toContain('"glob": allow');
+  expect(opencode).toContain('"grep": allow');
+  expect(opencode).not.toMatch(/['"](?:edit|bash)['"]:\s*allow/i);
   expect(opencode).toContain('"planner": allow');
   expect(opencode).toContain('"security-auditor": allow');
   expect(opencode).not.toContain("pulso_*: allow");
@@ -69,7 +73,7 @@ test("OpenCode omits inherited model overrides and preserves exact selected IDs"
   expect(selected).toContain("model: openai/example-exact");
 });
 
-test("runtime renderers retain shared specialist prompts and distinct primary contracts", () => {
+test("VS Code keeps legacy prompts while OpenCode uses the supplied v2.1 prompts", () => {
   const semanticBody = (text: string) =>
     text
       .slice(text.indexOf("\n---\n") + 5)
@@ -81,13 +85,14 @@ test("runtime renderers retain shared specialist prompts and distinct primary co
       .replaceAll("&gt;", ">")
       .replace(/<runtime_contract>[\s\S]*?<\/runtime_contract>\n?/, "");
   for (const id of agentIds.filter((agent) => agent !== "pulso")) {
-    expect(
-      semanticBody(
-        vscodeCopilotRuntime.renderAgent(agentDefinitions[id]).content,
-      ),
-    ).toBe(
-      semanticBody(openCodeRuntime.renderAgent(agentDefinitions[id]).content),
+    const vscodeBody = semanticBody(
+      vscodeCopilotRuntime.renderAgent(agentDefinitions[id]).content,
     );
+    const openCodeBody = semanticBody(
+      openCodeRuntime.renderAgent(agentDefinitions[id]).content,
+    );
+    expect(vscodeBody).toContain(agentDefinitions[id].prompt.mission ?? "");
+    expect(openCodeBody).toContain(openCodeV21PromptTexts[id].mission ?? "");
   }
   const vscode = vscodeCopilotRuntime.renderAgent(
     agentDefinitions.pulso,
@@ -95,7 +100,7 @@ test("runtime renderers retain shared specialist prompts and distinct primary co
   const opencode = openCodeRuntime.renderAgent(agentDefinitions.pulso).content;
   expect(vscode).toContain("Capabilities MCP is the sole operational boundary");
   expect(opencode).toContain("Working System es la única autoridad");
-  expect(opencode).toContain("pulso_native_work");
+  expect(opencode).toContain("pulso_prepare");
 });
 
 test("runtime skill renderers use the same canonical skill artifact", () => {

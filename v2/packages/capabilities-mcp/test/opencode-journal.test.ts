@@ -190,3 +190,73 @@ test("two SQLite journal instances fence an old owner without releasing its shel
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("child-session lookup is workspace-scoped and refuses ambiguous matches", async () => {
+  const root = mkdtempSync(
+    join(tmpdir(), "pulso-opencode-journal-child-lookup-"),
+  );
+  const journal = new NativeJournal(join(root, "runtime-bindings.db"));
+  try {
+    const first = await journal.createPreparation(
+      preparation("child-lookup-a", "executor"),
+    );
+    const firstClaim = await journal.claim({
+      delegationId: first.delegationId,
+      workspaceId: "workspace",
+      parentSessionId: "parent",
+      parentCallId: "call-a",
+      ownerInstanceId: "owner-a",
+      now: "2026-01-01T00:00:01.000Z",
+      deadlineAt: "2026-01-01T00:30:01.000Z",
+    });
+    const observed = await journal.observe({
+      delegationId: first.delegationId,
+      ownerInstanceId: "owner-a",
+      version: firstClaim.version,
+      childSessionId: "child-session",
+      observedAt: "2026-01-01T00:00:02.000Z",
+    });
+    expect(
+      await journal.getByChildSession("workspace", "child-session"),
+    ).toMatchObject({
+      delegationId: first.delegationId,
+      childSessionId: "child-session",
+    });
+    expect(
+      await journal.getByChildSession("other-workspace", "child-session"),
+    ).toBeUndefined();
+
+    await journal.finishReceipt({
+      delegationId: first.delegationId,
+      ownerInstanceId: "owner-a",
+      version: observed.version,
+      phase: "applied",
+    });
+    const second = await journal.createPreparation({
+      ...preparation("child-lookup-b", "executor"),
+      workItemId: "child-lookup-b-item",
+    });
+    const secondClaim = await journal.claim({
+      delegationId: second.delegationId,
+      workspaceId: "workspace",
+      parentSessionId: "parent",
+      parentCallId: "call-b",
+      ownerInstanceId: "owner-b",
+      now: "2026-01-01T00:00:03.000Z",
+      deadlineAt: "2026-01-01T00:30:03.000Z",
+    });
+    await journal.observe({
+      delegationId: second.delegationId,
+      ownerInstanceId: "owner-b",
+      version: secondClaim.version,
+      childSessionId: "child-session",
+      observedAt: "2026-01-01T00:00:04.000Z",
+    });
+    expect(
+      await journal.getByChildSession("workspace", "child-session"),
+    ).toBeUndefined();
+  } finally {
+    journal.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

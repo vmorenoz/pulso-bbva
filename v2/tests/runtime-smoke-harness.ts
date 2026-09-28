@@ -366,14 +366,29 @@ export const sessionIdFromEvents = (events: RuntimeEvent[]) =>
 
 const workFromEvents = (events: RuntimeEvent[]) => {
   const values = events.flatMap((event) => {
-    if (event.part?.tool !== "pulso_native_work") return [];
-    try {
-      const output = JSON.parse(event.part.state?.output ?? "") as unknown;
-      if (!isRecord(output)) return [];
-      return isRecord(output.currentWork) ? [output.currentWork] : [output];
-    } catch {
-      return [];
+    const tool = event.part?.tool;
+    if (tool === "pulso_native_work") {
+      try {
+        const output = JSON.parse(event.part?.state?.output ?? "") as unknown;
+        if (!isRecord(output)) return [];
+        return isRecord(output.currentWork) ? [output.currentWork] : [output];
+      } catch {
+        return [];
+      }
     }
+    if (tool === "pulso_prepare") {
+      const state = event.part?.state;
+      const output = recordFromOutput(state?.output);
+      const metadata = isRecord(state?.metadata)
+        ? state.metadata
+        : isRecord(output?.metadata)
+          ? output.metadata
+          : undefined;
+      return metadata && typeof metadata.workId === "string"
+        ? [{ workId: metadata.workId, status: metadata.workStatus }]
+        : [];
+    }
+    return [];
   });
   const current = values.at(-1);
   return {
@@ -1059,11 +1074,55 @@ const messageText = (value: unknown) => {
 const findNativeTaskArgs = (value: unknown): JsonRecord | undefined => {
   let latest: JsonRecord | undefined;
   const visit = (candidate: unknown) => {
+    if (typeof candidate === "string") {
+      const match =
+        /(?:^|\n)([^\r\n]+?) · (planner|explorer|executor|verifier|security-auditor)\r?\n- subagent_type: (planner|explorer|executor|verifier|security-auditor)\r?\n- prompt: (pulso-dispatch\/1:[^\s]+)/.exec(
+          candidate,
+        );
+      if (match && match[2] === match[3])
+        latest = {
+          description: match[1],
+          subagent_type: match[3],
+          prompt: match[4],
+        };
+      try {
+        visit(JSON.parse(candidate) as unknown);
+      } catch {
+        // The user-facing prepare output is Markdown rather than JSON.
+      }
+      return;
+    }
     if (Array.isArray(candidate)) {
       for (const entry of candidate) visit(entry);
       return;
     }
     if (!isRecord(candidate)) return;
+    const output =
+      typeof candidate.output === "string" ? candidate.output : undefined;
+    if (output) {
+      const match =
+        /(?:^|\n)([^\r\n]+?) · (planner|explorer|executor|verifier|security-auditor)\r?\n- subagent_type: (planner|explorer|executor|verifier|security-auditor)\r?\n- prompt: (pulso-dispatch\/1:[^\s]+)/.exec(
+          output,
+        );
+      if (match && match[2] === match[3])
+        latest = {
+          description: match[1],
+          subagent_type: match[3],
+          prompt: match[4],
+        };
+    }
+    if (typeof candidate.text === "string") {
+      const match =
+        /(?:^|\n)([^\r\n]+?) · (planner|explorer|executor|verifier|security-auditor)\r?\n- subagent_type: (planner|explorer|executor|verifier|security-auditor)\r?\n- prompt: (pulso-dispatch\/1:[^\s]+)/.exec(
+          candidate.text,
+        );
+      if (match && match[2] === match[3])
+        latest = {
+          description: match[1],
+          subagent_type: match[3],
+          prompt: match[4],
+        };
+    }
     const taskArgs = candidate.nativeTaskArgs;
     if (
       isRecord(taskArgs) &&
@@ -1073,12 +1132,6 @@ const findNativeTaskArgs = (value: unknown): JsonRecord | undefined => {
     )
       latest = taskArgs;
     for (const child of Object.values(candidate)) {
-      if (typeof child === "string")
-        try {
-          visit(JSON.parse(child) as unknown);
-        } catch {
-          // A normal text message is not a tool response.
-        }
       visit(child);
     }
   };
@@ -1333,41 +1386,82 @@ const startScriptedProvider = async (
         function: { name, arguments: JSON.stringify(argumentsValue) },
       });
       let message: JsonRecord;
-      if (parentStage === 0) {
+      if (parentStage === 0 && specialist) {
         parentStage += 1;
+        const readonly = ["explorer", "planner", "security-auditor"].includes(
+          specialist,
+        );
+        const verifier = specialist === "verifier";
+        const effects = readonly
+          ? ["read", "artifact"]
+          : verifier
+            ? ["read", "test"]
+            : ["read", "edit", "test", "shell"];
+        const mode = readonly
+          ? "read"
+          : verifier || specialist === "executor"
+            ? "exclusive"
+            : "read";
+        const resources =
+          specialist === "executor"
+            ? [{ path: "src/total.ts", coverage: "exact", access: "write" }]
+            : [{ path: ".", coverage: "subtree", access: "read" }];
         message = {
           role: "assistant",
           content: null,
-          tool_calls: [call("pulso_native_work", { action: "get" })],
+          tool_calls: [
+            call("pulso_prepare", {
+              request: {
+                intent: "new",
+                objective: userMessage.slice(0, 240),
+                graph: {
+                  protocol: "pulso-graph/1",
+                  revision: 1,
+                  branches: [
+                    {
+                      key: "delivery",
+                      objective: userMessage.slice(0, 240),
+                      deliverable: "Verified delegated result",
+                      allowedEffects: effects,
+                      criteria: [
+                        {
+                          key: "result",
+                          description: "Return the requested result",
+                          evidenceRequired: false,
+                        },
+                      ],
+                    },
+                  ],
+                  nodes: [
+                    {
+                      key: "delivery",
+                      branch: "delivery",
+                      specialist,
+                      objective: userMessage.slice(0, 240),
+                      dependsOn: [],
+                      effects,
+                      resources,
+                      mode,
+                      criteria: [
+                        {
+                          key: "result",
+                          description: "Return the requested result",
+                          evidenceRequired: false,
+                        },
+                      ],
+                      requiredCapabilities: [],
+                      context: { facts: [], references: [] },
+                      constraints: [],
+                      requestedEvidence: [],
+                    },
+                  ],
+                },
+              },
+            }),
+          ],
         };
       } else if (parentStage === 1 && specialist) {
-        parentStage += 1;
-        message = {
-          role: "assistant",
-          content: null,
-          tool_calls: [
-            call("pulso_native_work", {
-              action: "open",
-              intent: /Nuevo objetivo B/.test(userMessage) ? "new" : "continue",
-              objective: userMessage.slice(0, 240),
-            }),
-          ],
-        };
-      } else if (parentStage === 2 && specialist) {
-        parentStage += 1;
-        message = {
-          role: "assistant",
-          content: null,
-          tool_calls: [
-            call("pulso_native_prepare", {
-              specialist,
-              objective: userMessage.slice(0, 240),
-              acceptanceCriteria: ["Return the canonical pulso-result/2."],
-            }),
-          ],
-        };
-      } else if (parentStage === 3 && specialist) {
-        const nativeTaskArgs = findNativeTaskArgs(body.messages);
+        const nativeTaskArgs = findNativeTaskArgs(body);
         assert(nativeTaskArgs, "SCRIPTED_NATIVE_TASK_ARGS_NOT_OBSERVED");
         assert(
           typeof nativeTaskArgs.prompt === "string",
@@ -1387,7 +1481,7 @@ const startScriptedProvider = async (
           content: null,
           tool_calls: [call("task", nativeTaskArgs)],
         };
-      } else if (parentStage === 4 && specialist) {
+      } else if (parentStage === 2 && specialist) {
         parentStage += 1;
         if (mode === "valid-status") {
           const delegationId = delegationIdFrom(body.messages);
@@ -1396,7 +1490,11 @@ const startScriptedProvider = async (
             role: "assistant",
             content: null,
             tool_calls: [
-              call("pulso_native_status", { delegationId, view: "full" }),
+              call("pulso_inspect", {
+                view: "receipt",
+                detail: "full",
+                reference: delegationId,
+              }),
             ],
           };
         } else {

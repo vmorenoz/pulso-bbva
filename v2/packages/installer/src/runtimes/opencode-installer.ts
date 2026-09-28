@@ -337,6 +337,21 @@ const orderedAssetHashes = (assets: readonly PlannedAsset[]): HashedSource[] =>
   [...assets]
     .map(({ path, sha256 }) => ({ path, sha256 }))
     .sort((left, right) => left.path.localeCompare(right.path));
+const protectedWorkspaceFile = (path: string) =>
+  ["AGENTS.md", "CLAUDE.md", "PULSO.md"].includes(
+    path.split(/[\\/]/).pop() ?? "",
+  );
+
+const pulsoSkillIds = [
+  "pulso-adaptive-orchestration",
+  "pulso-evidence-inventory",
+  "pulso-executable-plans",
+  "pulso-human-delivery",
+  "pulso-parallel-work",
+  "pulso-preferences-capabilities",
+  "pulso-quality-review",
+  "pulso-safe-recovery",
+] as const;
 export const planOpenCodeInstall = async (
   options: OpenCodeInstallOptions,
 ): Promise<InstallationPlan> => {
@@ -385,7 +400,19 @@ export const planOpenCodeInstall = async (
     const path = join(agentDir, `${id}.md`);
     assets.push({ path, content, sha256: digest(content) });
   }
-  for (const skill of options.skills) {
+  const suppliedSkillIds = new Set(options.skills.map((skill) => skill.id));
+  const bundledPulsoSkills = await Promise.all(
+    pulsoSkillIds
+      .filter((id) => !suppliedSkillIds.has(id))
+      .map(async (id) => ({
+        id,
+        content: await readFile(
+          join(sourceRoot, "packages/orchestration/skills", `${id}.md`),
+          "utf8",
+        ),
+      })),
+  );
+  for (const skill of [...options.skills, ...bundledPulsoSkills]) {
     const rendered = openCodeRuntime.renderSkill(skill);
     const path = join(skillDir, rendered.path);
     assets.push({
@@ -569,6 +596,8 @@ export const applyOpenCodeInstall = async (
   )
     throw new Error("INSTALL_MANIFEST_INVALID");
   for (const asset of plan.fileMutations) {
+    if (protectedWorkspaceFile(asset.path))
+      throw new Error(`INSTALL_PROTECTED_PATH:${asset.path}`);
     if (digest(asset.content) !== asset.sha256)
       throw new Error(`INSTALL_PLAN_ASSET_HASH_INVALID:${asset.path}`);
     const assetPath = relative(root, asset.path);
@@ -887,6 +916,10 @@ export const uninstallOpenCode = async (options: {
     throw new Error("INSTALL_MANIFEST_INVALID");
   const conflicts: string[] = [];
   for (const [path, expected] of Object.entries(manifest.files)) {
+    if (protectedWorkspaceFile(path)) {
+      conflicts.push(path);
+      continue;
+    }
     const current = await optionalRead(path);
     if (current !== undefined && digest(current) !== expected)
       conflicts.push(path);
@@ -913,11 +946,13 @@ export const uninstallOpenCode = async (options: {
   if (conflicts.length) return { removedFiles: [] as string[], conflicts };
   if (options.dryRun)
     return {
-      removedFiles: Object.keys(manifest.files),
+      removedFiles: Object.keys(manifest.files).filter(
+        (path) => !protectedWorkspaceFile(path),
+      ),
       conflicts: [] as string[],
     };
   for (const path of Object.keys(manifest.files))
-    await rm(path, { force: true });
+    if (!protectedWorkspaceFile(path)) await rm(path, { force: true });
   const configKeys = new Map<string, Set<"plugin" | "mcp.pulso">>();
   for (const entry of managedConfigEntries) {
     const keys =
@@ -955,7 +990,9 @@ export const uninstallOpenCode = async (options: {
   }
   await rm(manifestPath, { force: true });
   return {
-    removedFiles: Object.keys(manifest.files),
+    removedFiles: Object.keys(manifest.files).filter(
+      (path) => !protectedWorkspaceFile(path),
+    ),
     conflicts: [] as string[],
   };
 };

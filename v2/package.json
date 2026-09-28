@@ -22,6 +22,10 @@
     "test:runtime-smoke:offline": "bun test tests/runtime-smoke-harness.test.ts tests/support/native-evidence.test.ts tests/support/fixture-scope.test.ts",
     "test:opencode-bridge": "bun test packages/capabilities-mcp/test/opencode-*.test.ts",
     "test:opencode-live": "bun run tests/opencode-live.ts",
+    "test:evolution:unit": "bun test packages/*/test",
+    "test:evolution:integration": "bun run test:integration && bun run test:e2e && bun run test:opencode-bridge && bun run test:runtime-smoke:offline && bun test tests/evolution-v21",
+    "test:evolution:live": "bun run tests/opencode-live.ts",
+    "test:evolution:all": "bun run test:evolution:unit && bun run test:evolution:integration && bun run test:evolution:live",
     "build": "bun run build:orchestration && bun build apps/cli/src/index.ts packages/capabilities-mcp/src/index.ts --outdir dist --target bun",
     "build:orchestration": "bun build packages/orchestration/src/index.ts --outdir packages/orchestration/dist --target bun"
   },

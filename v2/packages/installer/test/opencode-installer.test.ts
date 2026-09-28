@@ -315,13 +315,13 @@ test("generated OpenCode CP2 asset activates only the managed native bridge", as
     expect(pulso).toBeDefined();
     expect(pulso).toContain('"*": deny');
     expect(pulso).not.toMatch(/^\s+\*: deny$/m);
-    expect(pulso).toContain('"pulso_native_work": allow');
-    expect(pulso).toContain('"pulso_native_prepare": allow');
-    expect(pulso).toContain('"pulso_native_status": allow');
+    expect(pulso).toContain('"pulso_native_work": deny');
+    expect(pulso).toContain('"pulso_native_prepare": deny');
+    expect(pulso).toContain('"pulso_native_status": deny');
     expect(pulso).toContain('"planner": allow');
     expect(pulso).toContain('"security-auditor": allow');
     expect(pulso).not.toContain("pulso_*: allow");
-    expect(pulso).toContain("fachada nativa gestionada");
+    expect(pulso).toContain("pulso_prepare resuelve el Work");
     expect(pulso).toContain(
       `pulso-build-id:${plan.runtimes[0]?.buildId ?? "missing"}`,
     );

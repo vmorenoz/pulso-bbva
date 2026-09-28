@@ -112,9 +112,8 @@ export const renderAgentProtocolInstructions = (
 ): string => {
   if (agent === "pulso" && options.runtimeMode === "managed-opencode")
     return [
-      "OpenCode native management generates Work and execution identities; never construct delegationId, binding, lease, execution, or runtime lifecycle calls yourself.",
-      "Use pulso_native_work, pulso_native_prepare, pulso_native_status and the exact native Task arguments returned by prepare. The adapter validates and finalizes the specialist result before it is returned.",
-      taskEnvelopeContract(),
+      "OpenCode v2.1 uses pulso_prepare, pulso_inspect, pulso_work, pulso_preferences, pulso_artifact and native task. Legacy pulso_native_* tools are not part of this managed profile. Never construct Work or execution identities, bindings, leases, or lifecycle calls.",
+      "Copy the exact confirmed pulso-dispatch/1 reference and specialist selector returned by pulso_prepare into native task. Artifact publication is only for managed deliverables and grants no Work or delegation authority. The bridge validates the task/result contracts and finalizes the attempt.",
     ].join(" ");
   if (agent === "pulso")
     return [

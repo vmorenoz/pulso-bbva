@@ -1,0 +1,13 @@
+# Pulso v2.1 — revisión independiente E11
+
+## Integración técnica
+
+La implementación añade contratos adaptativos estrictos, validación de grafo/frontera, políticas durables en SQLite v6 y un bridge OpenCode con fachada, journal nativo, guardas de efectos, preferencias, artefactos y presentación de receipts. Se conserva Working System como autoridad sobre Work/WorkItem/Assignment/Execution/Lease; SQLite, delegación parent-call-child, fencing/leases/receipts y referencia corta de task permanecen presentes. Suites: evolución offline 111/111 (354 assertions), paquetes 285/285 (1288), integración 3/3, E2E 4/4, bridge 66/66 (184 assertions), instalador 45/45 (186 assertions); typecheck/build exit 0 (`metrics.md:7-14`). El smoke `test:runtime-smoke:offline` falla con `SCRIPTED_NATIVE_TASK_ARGS_NOT_OBSERVED` antes de observar un Work durable (`metrics.md:19`); prepare→task no está integrado de extremo a extremo. E04 añade guardas y pruebas offline de lectura protegida, move, symlink y bash. E06/E07 añaden verificación de existencia/ubicación de targets y la esperan antes de adoptar, no revisión de contenido (`artifact-service.ts:276-339; evolution-facade.ts:279-293`). `capabilities.json` carga descriptores explícitos con protección de archivo, pero discovery/probe del host y permisos dinámicos de herramientas externas siguen sin integrarse (`capability-catalog.ts:74-143; plugin.ts:219-247`). `lint` termina exit 0 con 26 warnings y 1 info; no está libre de advertencias.
+
+## Resultado funcional
+
+Se verifican mecanismos deterministas y persistencia mediante pruebas offline; el `agent list` aislado de OpenCode 1.18.32 enumera seis roles y ocho skills (15 assets), sin AGENTS.md/CLAUDE.md/PULSO.md. Esto acredita carga de configuración/assets únicamente. No hubo llamadas a provider ni ejecución de sesiones reales. Saludo/no-Work, inventario completo de un universo real, revisión negativa completa, migración de historial v2 real, backup de DB, README malicioso y AC25/26 en host real no se dan por demostrados. Overlap de hijos, writers simultáneos y adopción autorizada real permanecen sin ejecutar.
+
+## Calidad del contenido
+
+Los prompts v2.1 de OpenCode distinguen autoridad, efectos, contexto, continuidad y límites de evidencia; las ocho skills y seis roles se empaquetan como assets. Pruebas offline comprueban que una capacidad solo mencionada por una skill no genera descriptor aprobado ni autorización en el catálogo; no prueban conducta del modelo ante contenido adversarial (incluido README malicioso). La verificación del plan comprueba filesystem, no calidad semántica del plan o del contenido objetivo. La calidad de conversaciones reales, cumplimiento sostenido y utilidad comparativa no se midió.

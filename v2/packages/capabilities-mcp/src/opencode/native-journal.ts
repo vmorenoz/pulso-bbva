@@ -39,6 +39,13 @@ export type NativeDelegation = {
 /** A host hook replay may inspect its claim, but it never authorizes task dispatch. */
 export type NativeClaim = NativeDelegation & { dispatchAllowed: boolean };
 
+export type NativeResource = {
+  path: string;
+  coverage: "exact" | "tree" | "workspace";
+  access: "read" | "write";
+  mode: "read" | "files" | "exclusive";
+};
+
 type Row = Record<string, unknown>;
 type Preparation = Omit<
   NativeDelegation,
@@ -74,6 +81,21 @@ const decode = (value: unknown) =>
   typeof value === "string" ? value : undefined;
 const pause = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+const pathsOverlap = (
+  left: string,
+  leftCoverage: string,
+  right: string,
+  rightCoverage: string,
+) => {
+  if (!left || !right || left === right) return true;
+  const leftPrefix = left.endsWith("/") ? left : `${left}/`;
+  const rightPrefix = right.endsWith("/") ? right : `${right}/`;
+  return (
+    (leftCoverage === "tree" && right.startsWith(leftPrefix)) ||
+    (rightCoverage === "tree" && left.startsWith(rightPrefix))
+  );
+};
 
 /**
  * Transport-only durable state. Work state remains exclusively in work.db.
@@ -238,6 +260,41 @@ export class NativeJournal {
         throw error;
       }
     }
+    // The unique shell-claim index is replaced only alongside transactional
+    // reservations. Keeping both would silently retain the old one-writer rule.
+    const reservationsMigration = this.db
+      .query("SELECT 1 FROM native_journal_migrations WHERE version = 5")
+      .get();
+    if (!reservationsMigration) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec(`
+          CREATE TABLE native_resource_reservations (
+            delegation_id TEXT NOT NULL REFERENCES native_delegations(delegation_id) ON DELETE CASCADE,
+            workspace_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            coverage TEXT NOT NULL CHECK(coverage IN ('exact','tree','workspace')),
+            access TEXT NOT NULL CHECK(access IN ('read','write')),
+            mode TEXT NOT NULL CHECK(mode IN ('read','files','exclusive')),
+            state TEXT NOT NULL CHECK(state IN ('active','released')),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(delegation_id,path)
+          );
+          CREATE INDEX idx_native_reservations_workspace
+            ON native_resource_reservations(workspace_id,state);
+          DROP INDEX IF EXISTS idx_native_delegations_shell_claim;
+        `);
+        this.db
+          .query(
+            "INSERT INTO native_journal_migrations(version, applied_at) VALUES(5, datetime('now'))",
+          )
+          .run();
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
   }
 
   async associateWork(input: {
@@ -358,6 +415,7 @@ export class NativeJournal {
     ownerInstanceId: string;
     now: string;
     deadlineAt: string;
+    resources?: NativeResource[];
   }): Promise<NativeClaim> {
     return this.transaction(() => {
       const current = this.require(input.delegationId);
@@ -385,6 +443,79 @@ export class NativeJournal {
           .run(input.delegationId, current.version);
         throw new Error("PREPARATION_EXPIRED");
       }
+      const resources = input.resources?.length
+        ? input.resources
+        : [
+            {
+              path: "",
+              coverage: "workspace",
+              access: "write",
+              mode: "exclusive",
+            } satisfies NativeResource,
+          ];
+      if (
+        resources.some(
+          (resource) =>
+            resource.mode === "files" &&
+            (resource.coverage !== "exact" || resource.access !== "write"),
+        )
+      )
+        throw new Error("RESOURCE_POLICY_INVALID");
+      if (
+        resources.some((resource) => resource.mode === "exclusive") &&
+        resources.length !== 1
+      )
+        throw new Error("RESOURCE_POLICY_INVALID");
+      const activeCount = this.db
+        .query(`SELECT COUNT(DISTINCT d.delegation_id) AS count
+        FROM native_delegations d LEFT JOIN native_resource_reservations r
+        ON r.delegation_id=d.delegation_id AND r.state='active'
+        WHERE d.workspace_id=? AND d.transport_phase='claimed'`)
+        .get(input.workspaceId) as Row;
+      if (Number(activeCount.count) >= 4)
+        throw new Error("WORKSPACE_ACTIVE_LIMIT");
+      const active = this.db
+        .query(`SELECT d.delegation_id,r.path,r.coverage,r.access,r.mode
+        FROM native_delegations d LEFT JOIN native_resource_reservations r
+        ON r.delegation_id=d.delegation_id AND r.state='active'
+        WHERE d.workspace_id=? AND d.transport_phase='claimed' AND d.delegation_id<>?`)
+        .all(input.workspaceId, input.delegationId) as Row[];
+      for (const wanted of resources) {
+        for (const existing of active) {
+          const existingMode = String(existing.mode ?? "exclusive");
+          const existingPath = String(existing.path ?? "");
+          if (wanted.mode === "exclusive" || existingMode === "exclusive") {
+            if (
+              !input.resources?.length &&
+              (current.specialist === "executor" ||
+                current.specialist === "verifier")
+            )
+              throw new Error("SHELL_SPECIALIST_LIMIT");
+            throw new Error("RESOURCE_CONFLICT");
+          }
+          if (
+            (wanted.mode !== "read" || existingMode !== "read") &&
+            pathsOverlap(
+              wanted.path,
+              wanted.coverage,
+              existingPath,
+              String(existing.coverage ?? "workspace"),
+            )
+          )
+            throw new Error("RESOURCE_CONFLICT");
+          if (
+            wanted.mode === "files" &&
+            existingMode === "files" &&
+            pathsOverlap(
+              wanted.path,
+              wanted.coverage,
+              existingPath,
+              String(existing.coverage),
+            )
+          )
+            throw new Error("RESOURCE_CONFLICT");
+        }
+      }
       try {
         const result = this.db
           .query(
@@ -401,6 +532,20 @@ export class NativeJournal {
             current.version,
           ) as { changes: number };
         if (result.changes !== 1) throw new Error("CLAIM_LOST");
+        for (const resource of resources)
+          this.db
+            .query(`INSERT INTO native_resource_reservations
+        (delegation_id,workspace_id,path,coverage,access,mode,state,created_at)
+        VALUES(?,?,?,?,?,?,'active',?)`)
+            .run(
+              input.delegationId,
+              input.workspaceId,
+              resource.path,
+              resource.coverage,
+              resource.access,
+              resource.mode,
+              input.now,
+            );
       } catch (error) {
         if (String(error).includes("UNIQUE constraint failed"))
           throw new Error("SHELL_SPECIALIST_LIMIT");
@@ -408,6 +553,28 @@ export class NativeJournal {
       }
       return { ...this.require(input.delegationId), dispatchAllowed: true };
     });
+  }
+
+  async releaseReservations(delegationId: string) {
+    return this.transaction(() => {
+      const delegation = this.require(delegationId);
+      if (
+        delegation.transportPhase !== "closed" ||
+        delegation.sideEffectsMayContinue
+      )
+        throw new Error("RESERVATION_AUTHORITY_ACTIVE");
+      return this.db
+        .query(`UPDATE native_resource_reservations
+          SET state='released' WHERE delegation_id=? AND state='active'`)
+        .run(delegationId);
+    });
+  }
+
+  async reservations(workspaceId: string) {
+    return this.db
+      .query(`SELECT delegation_id AS delegationId,path,coverage,access,mode,state,created_at AS createdAt
+      FROM native_resource_reservations WHERE workspace_id=? ORDER BY created_at,delegation_id,path`)
+      .all(workspaceId) as Array<Record<string, unknown>>;
   }
 
   async attachBinding(input: {
@@ -721,6 +888,17 @@ export class NativeJournal {
     return row ? this.row(row) : undefined;
   }
 
+  /** Returns a child-session match only when it is unique within the workspace. */
+  async getByChildSession(workspaceId: string, childSessionId: string) {
+    const rows = this.db
+      .query(
+        `SELECT * FROM native_delegations
+         WHERE workspace_id=? AND child_session_id=? LIMIT 2`,
+      )
+      .all(workspaceId, childSessionId) as Row[];
+    return rows.length === 1 ? this.row(rows[0]) : undefined;
+  }
+
   async getByTaskWire(
     workspaceId: string,
     parentSessionId: string,
@@ -808,7 +986,14 @@ export class NativeJournal {
       changes: number;
     };
     if (result.changes !== 1) throw new Error("JOURNAL_CAS_CONFLICT");
-    return this.require(current.delegationId);
+    const updated = this.require(current.delegationId);
+    if (updated.transportPhase === "closed" && !updated.sideEffectsMayContinue)
+      this.db
+        .query(
+          "UPDATE native_resource_reservations SET state='released' WHERE delegation_id=? AND state='active'",
+        )
+        .run(current.delegationId);
+    return updated;
   }
 
   private adoptClaimInTransaction(

@@ -12,7 +12,15 @@ export type SkillId =
   | "bbva-apx-testing"
   | "bbva-cells"
   | "bbva-cells-testing"
-  | "integration-verification";
+  | "integration-verification"
+  | "pulso-adaptive-orchestration"
+  | "pulso-evidence-inventory"
+  | "pulso-executable-plans"
+  | "pulso-human-delivery"
+  | "pulso-parallel-work"
+  | "pulso-preferences-capabilities"
+  | "pulso-quality-review"
+  | "pulso-safe-recovery";
 
 export type RuntimeId = "vscode-copilot" | "opencode";
 export type Capability =

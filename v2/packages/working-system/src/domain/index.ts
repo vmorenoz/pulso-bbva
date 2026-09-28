@@ -122,6 +122,84 @@ export interface CreateWorkInput {
     assigneeId?: string;
   }>;
 }
+export interface WorkGraphRecord {
+  workId: string;
+  revision: number;
+  definitionHash: string;
+  definition: Record<string, unknown>;
+  createdAt: string;
+}
+export interface WorkBranchRecord {
+  workId: string;
+  revision: number;
+  branchKey: string;
+  objective: string;
+  deliverable: string;
+  effects: string[];
+}
+export interface WorkItemPolicy {
+  workItemId: string;
+  branchKey: string;
+  nodeKey: string;
+  graphRevision: number;
+  effects: string[];
+  resources: Array<{
+    path: string;
+    coverage: "exact" | "subtree";
+    access: "read" | "write";
+  }>;
+  criteria: Array<{
+    key: string;
+    description: string;
+    evidenceRequired: boolean;
+  }>;
+  requiredCapabilities: string[];
+  preferenceRevision?: number;
+  definitionHash: string;
+}
+export interface PreparationIntent {
+  operationKey: string;
+  inputHash: string;
+  workId: string;
+  graphRevision: number;
+  state: "pending" | "prepared" | "failed";
+  createdAt: string;
+}
+export interface GraphInput {
+  protocol: "pulso-graph/1";
+  revision: number;
+  branches: Array<{
+    key: string;
+    objective: string;
+    deliverable: string;
+    allowedEffects: string[];
+    criteria: Array<{
+      key: string;
+      description: string;
+      evidenceRequired: boolean;
+    }>;
+  }>;
+  nodes: Array<{
+    key: string;
+    branch: string;
+    specialist: string;
+    objective: string;
+    dependsOn: string[];
+    effects: string[];
+    resources: Array<{
+      path: string;
+      coverage: "exact" | "subtree";
+      access: "read" | "write";
+    }>;
+    mode: "read" | "files" | "exclusive";
+    criteria: Array<{
+      key: string;
+      description: string;
+      evidenceRequired: boolean;
+    }>;
+    requiredCapabilities: string[];
+  }>;
+}
 export interface State {
   works: Work[];
   items: WorkItem[];
@@ -131,8 +209,120 @@ export interface State {
   artifacts: Artifact[];
   events: WorkEvent[];
   operationReceipts: OperationReceipt[];
+  workGraphs: WorkGraphRecord[];
+  workBranches: WorkBranchRecord[];
+  workItemPolicies: WorkItemPolicy[];
+  preparationIntents: PreparationIntent[];
 }
+export const cloneState = (state: State): State => structuredClone(state);
 export const validateState = (state: State) => {
+  const graphRevisions = new Set<string>();
+  const latestGraphRevision = new Map<string, number>();
+  for (const graph of state.workGraphs ?? [])
+    latestGraphRevision.set(
+      graph.workId,
+      Math.max(latestGraphRevision.get(graph.workId) ?? 0, graph.revision),
+    );
+  for (const graph of state.workGraphs ?? []) {
+    const revisionKey = `${graph.workId}:${graph.revision}`;
+    if (graphRevisions.has(revisionKey))
+      error("INVALID_STATE", "Duplicate Work graph revision");
+    graphRevisions.add(revisionKey);
+    if (latestGraphRevision.get(graph.workId) !== graph.revision) continue;
+    const graphObject = graph.definition as unknown as GraphInput;
+    const itemPolicies = (state.workItemPolicies ?? []).filter(
+      (policy) =>
+        policy.graphRevision === graph.revision &&
+        state.items.some(
+          (item) =>
+            item.id === policy.workItemId && item.workId === graph.workId,
+        ),
+    );
+    const keys = new Set(graphObject.nodes?.map((node) => node.key) ?? []);
+    if (
+      !graphObject.nodes?.length ||
+      !graphObject.branches?.length ||
+      graphObject.nodes.length !== itemPolicies.length ||
+      itemPolicies.some((policy) => !keys.has(policy.nodeKey))
+    )
+      error(
+        "INVALID_STATE",
+        "Graph revision must project every node to one WorkItem policy",
+      );
+    const branchKeys = new Set(
+      graphObject.branches.map((branch) => branch.key),
+    );
+    const nodeMap = new Map(graphObject.nodes.map((node) => [node.key, node]));
+    for (const node of graphObject.nodes)
+      if (
+        !branchKeys.has(node.branch) ||
+        node.dependsOn.some((key) => !nodeMap.has(key))
+      )
+        error(
+          "INVALID_STATE",
+          "Graph contains an unresolved branch or dependency alias",
+        );
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    const visit = (key: string) => {
+      if (visiting.has(key)) error("GRAPH_CYCLE", key);
+      if (visited.has(key)) return;
+      visiting.add(key);
+      for (const dependency of nodeMap.get(key)!.dependsOn) visit(dependency);
+      visiting.delete(key);
+      visited.add(key);
+    };
+    for (const key of keys) visit(key);
+    const branchRows = (state.workBranches ?? []).filter(
+      (branch) =>
+        branch.workId === graph.workId && branch.revision === graph.revision,
+    );
+    if (branchRows.length !== graphObject.branches.length)
+      error("INVALID_STATE", "Graph branch projection is incomplete");
+  }
+  const workGraphKeys = new Set<string>();
+  for (const graph of state.workGraphs ?? []) {
+    if (
+      !state.works.some((work) => work.id === graph.workId) ||
+      !Number.isInteger(graph.revision) ||
+      graph.revision < 1 ||
+      !graph.definitionHash
+    )
+      error(
+        "INVALID_STATE",
+        "Work graph must reference a valid Work and revision",
+      );
+    const key = `${graph.workId}:${graph.revision}`;
+    if (workGraphKeys.has(key))
+      error("INVALID_STATE", "Duplicate Work graph revision");
+    workGraphKeys.add(key);
+  }
+  const policies = new Set<string>();
+  for (const policy of state.workItemPolicies ?? []) {
+    const item = state.items.find(
+      (candidate) => candidate.id === policy.workItemId,
+    );
+    if (!item || !workGraphKeys.has(`${item.workId}:${policy.graphRevision}`))
+      error(
+        "INVALID_STATE",
+        "Work item policy must reference its item and graph revision",
+      );
+    if (policies.has(policy.workItemId))
+      error("INVALID_STATE", "Duplicate active Work item policy");
+    policies.add(policy.workItemId);
+  }
+  for (const intent of state.preparationIntents ?? []) {
+    if (
+      !intent.operationKey ||
+      !intent.inputHash ||
+      !state.works.some((work) => work.id === intent.workId) ||
+      !workGraphKeys.has(`${intent.workId}:${intent.graphRevision}`)
+    )
+      error(
+        "INVALID_STATE",
+        "Preparation intent must reference its durable graph",
+      );
+  }
   for (const item of state.items) {
     const leases = state.leases.filter(
       (l) => l.workItemId === item.id && l.status === "active",
@@ -238,6 +428,10 @@ export class MemoryStore implements Store {
     artifacts: [],
     events: [],
     operationReceipts: [],
+    workGraphs: [],
+    workBranches: [],
+    workItemPolicies: [],
+    preparationIntents: [],
   };
   private transactionTail = Promise.resolve();
   async read() {
@@ -335,6 +529,485 @@ export class WorkService {
     private clock: Clock = systemClock,
   ) {
     this.recovery = new RecoveryService(store, clock);
+  }
+  /** Creates the Work and its graph-backed items in one core transaction. Keys are aliases, never runtime IDs. */
+  async createFromGraph(input: {
+    workspaceId: string;
+    title: string;
+    objective: string;
+    graph: GraphInput;
+    definitionHash: string;
+    operationKey: string;
+    inputHash: string;
+    createdAt?: string;
+  }) {
+    return this.store.transaction((s) => {
+      if (
+        !input.workspaceId ||
+        !input.title ||
+        !input.objective ||
+        !input.operationKey ||
+        !input.inputHash
+      )
+        error(
+          "INVALID_INPUT",
+          "Work identity and idempotency keys are required",
+        );
+      const receipt = s.operationReceipts.find(
+        (r) => r.operationKey === input.operationKey,
+      );
+      if (receipt) {
+        if (
+          receipt.inputHash !== input.inputHash ||
+          receipt.entityKind !== "work"
+        )
+          error(
+            "OPERATION_CONFLICT",
+            "operationKey was already used with different input",
+          );
+        return clone(
+          get(s.works, receipt.entityId, "OPERATION_RECEIPT_CORRUPT"),
+        );
+      }
+      if (
+        input.graph.protocol !== "pulso-graph/1" ||
+        input.graph.revision !== 1 ||
+        !input.definitionHash
+      )
+        error(
+          "GRAPH_REVISION_CONFLICT",
+          "Initial graph must be pulso-graph/1 revision 1",
+        );
+      const work: Work = {
+        id: id(),
+        workspaceId: input.workspaceId,
+        title: input.title,
+        objective: input.objective,
+        status: "pending",
+        createdAt: input.createdAt ?? at(this.clock),
+        version: 1,
+      };
+      s.works.push(work);
+      this.persistGraphIn(s, work.id, input.graph, input.definitionHash);
+      this.validateGraphInput(input.graph);
+      const itemIds = new Map(
+        input.graph.nodes.map((node) => [node.key, id()]),
+      );
+      for (const node of input.graph.nodes) {
+        const dependencies = node.dependsOn.map(
+          (key) => itemIds.get(key) ?? error("DEPENDENCY_INVALID", key),
+        );
+        const item: WorkItem = {
+          id: itemIds.get(node.key)!,
+          workId: work.id,
+          title: node.objective,
+          description: node.objective,
+          kind: node.specialist,
+          status: dependencies.length ? "pending" : "ready",
+          dependencies,
+          createdAt: work.createdAt,
+          version: 1,
+        };
+        s.items.push(item);
+        s.workItemPolicies.push({
+          workItemId: item.id,
+          branchKey: node.branch,
+          nodeKey: node.key,
+          graphRevision: input.graph.revision,
+          effects: [...node.effects],
+          resources: structuredClone(node.resources),
+          criteria: structuredClone(node.criteria),
+          requiredCapabilities: [...node.requiredCapabilities],
+          definitionHash: input.definitionHash,
+        });
+        this.assignIn(s, item.id, node.specialist, "item.assigned");
+      }
+      event(s, this.clock, work.id, "work.created");
+      event(s, this.clock, work.id, "graph.created", {
+        payload: {
+          revision: input.graph.revision,
+          definitionHash: input.definitionHash,
+        },
+      });
+      s.operationReceipts.push({
+        operationKey: input.operationKey,
+        inputHash: input.inputHash,
+        entityKind: "work",
+        entityId: work.id,
+      });
+      s.preparationIntents.push({
+        operationKey: input.operationKey,
+        inputHash: input.inputHash,
+        workId: work.id,
+        graphRevision: input.graph.revision,
+        state: "pending",
+        createdAt: work.createdAt,
+      });
+      return clone(work);
+    });
+  }
+  /** CAS graph update: items which have started or reached a terminal status cannot be redefined. */
+  async reviseGraph(input: {
+    workId: string;
+    expectedRevision: number;
+    graph: GraphInput;
+    definitionHash: string;
+    reason: string;
+  }) {
+    return this.store.transaction((s) => {
+      const work = get(s.works, input.workId, "WORK_NOT_FOUND");
+      if (!isWorkModifiable(work.status))
+        error("WORK_NOT_MODIFIABLE", "Terminal Work cannot be revised");
+      const previous = s.workGraphs
+        .filter((g) => g.workId === work.id)
+        .sort((a, b) => b.revision - a.revision)[0];
+      if (
+        !previous ||
+        previous.revision !== input.expectedRevision ||
+        input.graph.revision !== input.expectedRevision + 1
+      )
+        error(
+          "GRAPH_REVISION_CONFLICT",
+          "Graph revision compare-and-swap failed",
+        );
+      if (input.graph.protocol !== "pulso-graph/1" || !input.definitionHash)
+        error("GRAPH_REVISION_CONFLICT", "Invalid graph revision");
+      this.validateGraphInput(input.graph);
+      const priorPolicies = s.workItemPolicies.filter(
+        (p) =>
+          p.graphRevision === previous.revision &&
+          s.items.some((i) => i.id === p.workItemId && i.workId === work.id),
+      );
+      const previousGraph = previous.definition as unknown as GraphInput;
+      const byKey = new Map(
+        priorPolicies.map((policy) => [policy.nodeKey, policy]),
+      );
+      for (const policy of priorPolicies) {
+        const item = get(s.items, policy.workItemId, "ITEM_NOT_FOUND");
+        const revisedNode = input.graph.nodes.find(
+          (node) => node.key === policy.nodeKey,
+        );
+        const unstarted = item.status === "pending" || item.status === "ready";
+        const previousNode = previousGraph.nodes.find(
+          (node) => node.key === policy.nodeKey,
+        );
+        if (
+          !unstarted &&
+          (!revisedNode ||
+            JSON.stringify(previousNode) !== JSON.stringify(revisedNode))
+        )
+          error("GRAPH_ACTIVE_NODE_IMMUTABLE", policy.nodeKey);
+        if (!revisedNode && ["pending", "ready"].includes(item.status)) {
+          item.status = "cancelled";
+          item.completedAt = at(this.clock);
+          item.version++;
+        }
+      }
+      const idsByKey = new Map(
+        input.graph.nodes.map((node) => [
+          node.key,
+          byKey.get(node.key)?.workItemId ?? id(),
+        ]),
+      );
+      for (const node of input.graph.nodes) {
+        const existing = byKey.get(node.key);
+        const dependencies = node.dependsOn.map(
+          (key) => idsByKey.get(key) ?? error("DEPENDENCY_INVALID", key),
+        );
+        if (existing) {
+          const item = get(s.items, existing.workItemId, "ITEM_NOT_FOUND");
+          if (item.status !== "pending" && item.status !== "ready") {
+            existing.graphRevision = input.graph.revision;
+            existing.definitionHash = input.definitionHash;
+            continue;
+          }
+          item.title = node.objective;
+          item.description = node.objective;
+          item.kind = node.specialist;
+          item.dependencies = dependencies;
+          item.status = dependencies.length === 0 ? "ready" : "pending";
+          item.version++;
+          const policy = s.workItemPolicies.find(
+            (p) => p.workItemId === item.id,
+          )!;
+          Object.assign(policy, {
+            branchKey: node.branch,
+            graphRevision: input.graph.revision,
+            effects: [...node.effects],
+            resources: structuredClone(node.resources),
+            criteria: structuredClone(node.criteria),
+            requiredCapabilities: [...node.requiredCapabilities],
+            definitionHash: input.definitionHash,
+          });
+          const assignment = activeAssignment(s, item.id);
+          if (assignment?.assigneeId !== node.specialist)
+            this.assignIn(s, item.id, node.specialist, "item.reassigned");
+        } else {
+          const item: WorkItem = {
+            id: idsByKey.get(node.key)!,
+            workId: work.id,
+            title: node.objective,
+            description: node.objective,
+            kind: node.specialist,
+            status: dependencies.length === 0 ? "ready" : "pending",
+            dependencies,
+            createdAt: at(this.clock),
+            version: 1,
+          };
+          s.items.push(item);
+          s.workItemPolicies.push({
+            workItemId: item.id,
+            branchKey: node.branch,
+            nodeKey: node.key,
+            graphRevision: input.graph.revision,
+            effects: [...node.effects],
+            resources: structuredClone(node.resources),
+            criteria: structuredClone(node.criteria),
+            requiredCapabilities: [...node.requiredCapabilities],
+            definitionHash: input.definitionHash,
+          });
+          this.assignIn(s, item.id, node.specialist, "item.assigned");
+        }
+      }
+      for (const node of input.graph.nodes) {
+        const item = get(s.items, idsByKey.get(node.key)!, "ITEM_NOT_FOUND");
+        if (["pending", "ready"].includes(item.status))
+          item.status = item.dependencies.every(
+            (dependency) =>
+              get(s.items, dependency, "ITEM_NOT_FOUND").status === "completed",
+          )
+            ? "ready"
+            : "pending";
+      }
+      this.persistGraphIn(s, work.id, input.graph, input.definitionHash);
+      event(s, this.clock, work.id, "graph.revised", {
+        payload: {
+          fromRevision: previous.revision,
+          revision: input.graph.revision,
+          reason: input.reason,
+        },
+      });
+      return clone(input.graph);
+    });
+  }
+  private persistGraphIn(
+    s: State,
+    workId: string,
+    graph: GraphInput,
+    definitionHash: string,
+  ) {
+    if (
+      s.workGraphs.some(
+        (record) =>
+          record.workId === workId && record.revision === graph.revision,
+      )
+    )
+      error("GRAPH_REVISION_CONFLICT", "Graph revision already exists");
+    s.workGraphs.push({
+      workId,
+      revision: graph.revision,
+      definitionHash,
+      definition: structuredClone(graph) as unknown as Record<string, unknown>,
+      createdAt: at(this.clock),
+    });
+    for (const branch of graph.branches)
+      s.workBranches.push({
+        workId,
+        revision: graph.revision,
+        branchKey: branch.key,
+        objective: branch.objective,
+        deliverable: branch.deliverable,
+        effects: [...branch.allowedEffects],
+      });
+  }
+  private validateGraphInput(graph: GraphInput) {
+    if (
+      graph.protocol !== "pulso-graph/1" ||
+      !Number.isInteger(graph.revision) ||
+      graph.revision < 1 ||
+      !graph.branches.length ||
+      !graph.nodes.length
+    )
+      error(
+        "GRAPH_VERSION_INVALID",
+        "Graph protocol and nonempty revision are required",
+      );
+    const branchByKey = new Map(
+      graph.branches.map((branch) => [branch.key, branch]),
+    );
+    const nodes = new Map(graph.nodes.map((node) => [node.key, node]));
+    if (
+      branchByKey.size !== graph.branches.length ||
+      nodes.size !== graph.nodes.length
+    )
+      error("GRAPH_DUPLICATE_KEY", "Graph keys must be unique");
+    for (const branch of graph.branches)
+      if (
+        !branch.key ||
+        !branch.objective ||
+        !branch.deliverable ||
+        !branch.criteria.length ||
+        new Set(branch.criteria.map((criterion) => criterion.key)).size !==
+          branch.criteria.length ||
+        !branch.allowedEffects.length ||
+        branch.allowedEffects.some(
+          (effect) =>
+            ![
+              "read",
+              "artifact",
+              "preference",
+              "edit",
+              "test",
+              "shell",
+              "delete",
+              "network",
+              "commit",
+              "push",
+            ].includes(effect),
+        )
+      )
+        error("INVALID_INPUT", branch.key);
+    for (const node of graph.nodes) {
+      const branch =
+        branchByKey.get(node.branch) ?? error("BRANCH_NOT_FOUND", node.branch);
+      if (
+        new Set(node.dependsOn).size !== node.dependsOn.length ||
+        node.dependsOn.some((key) => !nodes.has(key))
+      )
+        error("DEPENDENCY_INVALID", node.key);
+      if (
+        !node.key ||
+        !node.objective ||
+        ![
+          "explorer",
+          "planner",
+          "executor",
+          "verifier",
+          "security-auditor",
+        ].includes(node.specialist) ||
+        !["read", "files", "exclusive"].includes(node.mode) ||
+        node.effects.some(
+          (effect) =>
+            ![
+              "read",
+              "artifact",
+              "preference",
+              "edit",
+              "test",
+              "shell",
+              "delete",
+              "network",
+              "commit",
+              "push",
+            ].includes(effect),
+        )
+      )
+        error("INVALID_INPUT", node.key);
+      if (
+        node.effects.some((effect) => !branch.allowedEffects.includes(effect))
+      )
+        error("EFFECT_NOT_AUTHORIZED", node.key);
+      if (
+        node.mode === "read" &&
+        node.effects.some((effect) => !["read", "artifact"].includes(effect))
+      )
+        error("MODE_EFFECT_MISMATCH", node.key);
+      if (
+        node.mode === "files" &&
+        node.effects.some(
+          (effect) => !["read", "edit", "artifact"].includes(effect),
+        )
+      )
+        error("FILES_MODE_NO_COMMANDS", node.key);
+      if (
+        node.mode !== "exclusive" &&
+        node.effects.some((effect) =>
+          [
+            "test",
+            "shell",
+            "delete",
+            "network",
+            "commit",
+            "push",
+            "preference",
+          ].includes(effect),
+        )
+      )
+        error("EXCLUSIVE_REQUIRED", node.key);
+      if (
+        ["explorer", "planner", "security-auditor"].includes(node.specialist) &&
+        node.effects.some((effect) => !["read", "artifact"].includes(effect))
+      )
+        error("SPECIALIST_EFFECT_DENIED", node.key);
+      if (
+        node.specialist === "verifier" &&
+        node.effects.some((effect) =>
+          ["edit", "delete", "preference", "commit", "push"].includes(effect),
+        )
+      )
+        error("VERIFIER_MUTATION_DENIED", node.key);
+      if (
+        !node.criteria.length ||
+        new Set(node.criteria.map((criterion) => criterion.key)).size !==
+          node.criteria.length ||
+        node.resources.length === 0
+      )
+        error("INVALID_INPUT", node.key);
+      for (const resource of node.resources) {
+        if (
+          !resource.path ||
+          (resource.path !== "." &&
+            (resource.path.startsWith("/") ||
+              /^[A-Za-z]:/.test(resource.path) ||
+              resource.path.includes("\\") ||
+              [...resource.path].some(
+                (character) => character.charCodeAt(0) < 32,
+              ) ||
+              [...resource.path].some((character) =>
+                "*?[]{}".includes(character),
+              ) ||
+              resource.path
+                .split("/")
+                .some((part) => !part || part === "." || part === "..")))
+        )
+          error("RESOURCE_PATH_INVALID", resource.path);
+        if (
+          !["exact", "subtree"].includes(resource.coverage) ||
+          !["read", "write"].includes(resource.access)
+        )
+          error("INVALID_INPUT", node.key);
+        if (
+          resource.access === "write" &&
+          (resource.path === "." ||
+            /^(\.git|\.opencode|\.pulso)(\/|$)/.test(resource.path))
+        )
+          error("PROTECTED_RESOURCE", resource.path);
+        if (node.mode === "read" && resource.access === "write")
+          error("READ_MODE_WRITE_RESOURCE", node.key);
+        if (
+          node.mode === "files" &&
+          resource.access === "write" &&
+          resource.coverage !== "exact"
+        )
+          error("EXACT_WRITE_REQUIRED", node.key);
+      }
+      if (
+        node.effects.includes("edit") &&
+        !node.resources.some((resource) => resource.access === "write")
+      )
+        error("WRITE_RESOURCE_REQUIRED", node.key);
+    }
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    const visit = (key: string) => {
+      if (visiting.has(key)) error("GRAPH_CYCLE", key);
+      if (visited.has(key)) return;
+      visiting.add(key);
+      for (const dependency of nodes.get(key)!.dependsOn) visit(dependency);
+      visiting.delete(key);
+      visited.add(key);
+    };
+    for (const key of nodes.keys()) visit(key);
   }
   async create(
     input: CreateWorkInput,

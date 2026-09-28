@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { agentDefinitions, agentIds } from "../src/agents/definitions";
+import { openCodeV21PromptTexts } from "../src/agents/opencode-v21-prompts";
 import { openCodeRuntime } from "../src/runtimes/opencode";
 import { vscodeCopilotRuntime } from "../src/runtimes/vscode-copilot";
 
@@ -64,7 +65,10 @@ test("OpenCode managed and VS Code legacy render their expected prompt contracts
         .replaceAll("&gt;", ">")
         .replace(/<runtime_contract>[\s\S]*?<\/runtime_contract>\n?/, "");
     if (id !== "pulso") {
-      expect(body(vscode)).toBe(body(opencode));
+      expect(body(vscode)).toContain(agentDefinitions[id].prompt.mission ?? "");
+      expect(body(opencode)).toContain(
+        openCodeV21PromptTexts[id].mission ?? "",
+      );
       expect(
         vscode.match(
           /<communication_protocol>([\s\S]*?)<\/communication_protocol>/,
@@ -80,8 +84,8 @@ test("OpenCode managed and VS Code legacy render their expected prompt contracts
         "Capabilities MCP is the sole operational boundary",
       );
       expect(opencode).toContain("pulso_native_prepare");
-      expect(opencode).toContain("OpenCode native management generates Work");
-      expect(opencode).toContain("fachada nativa gestionada");
+      expect(opencode).toContain("pulso_prepare resuelve el Work");
+      expect(opencode).toContain("Las herramientas pulso_native_* heredadas");
       expect(opencode).not.toContain("pulso_*: allow");
     }
   }
@@ -92,16 +96,13 @@ test("OpenCode managed and VS Code legacy render their expected prompt contracts
 test("Pulso managed policy anchors continuity and explicit-only commits", () => {
   const rendered = openCodeRuntime.renderAgent(agentDefinitions.pulso).content;
   expect(rendered).toContain(
-    "Una aclaración, una corrección y una continuación del mismo objetivo pertenecen al mismo Work",
+    "Una aclaración o corrección del mismo resultado conserva el Work activo",
   );
   expect(rendered).toContain(
-    "Un objetivo independiente explícito abre otro Work",
+    "Un objetivo verdaderamente independiente abre otro",
   );
-  expect(rendered).toContain("commit o push requiere petición explícita");
-  expect(rendered).toContain("Una identidad Git ausente es un bloqueo");
-  expect(rendered).toContain(
-    "No existen rutas, ciclos ni secuencias obligatorias",
-  );
+  expect(rendered).toContain("Commit y push requieren solicitud explícita");
+  expect(rendered).toContain("No hay rutas fast, normal, planned ni sensitive");
 });
 
 test("checked-in VS Code agents are generated from the canonical runtime renderer", async () => {

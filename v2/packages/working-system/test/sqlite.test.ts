@@ -188,7 +188,7 @@ test("upgrades a schema migration record from the previous shape", () => {
   );
   legacy.close();
   const store = new SqliteStore(path);
-  expect(store.diagnostics()).toMatchObject({ schema: true, schemaVersion: 5 });
+  expect(store.diagnostics()).toMatchObject({ schema: true, schemaVersion: 6 });
   store.close();
 });
 
@@ -224,7 +224,13 @@ test("upgrades a v4 database in place without losing existing Work rows", async 
     title: "legacy title",
     objective: "legacy objective",
   });
-  expect(store.diagnostics()).toMatchObject({ schemaVersion: 5 });
+  expect(store.diagnostics()).toMatchObject({ schemaVersion: 6 });
+  expect(await store.read()).toMatchObject({
+    workGraphs: [],
+    workBranches: [],
+    workItemPolicies: [],
+    preparationIntents: [],
+  });
   store.close();
 });
 
@@ -290,6 +296,10 @@ test("rolls back a failed idempotent Work creation with its receipt", async () =
     works: [],
     items: [],
     operationReceipts: [],
+    workGraphs: [],
+    workBranches: [],
+    workItemPolicies: [],
+    preparationIntents: [],
   });
   store.close();
 });

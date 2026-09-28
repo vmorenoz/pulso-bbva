@@ -387,6 +387,9 @@ export class NativeDelegationService {
     const resultTemplate = renderTaskResultTemplate(expected);
     const built = buildTaskEnvelope({
       ...input,
+      // The facade nests context; the assembler consumes top-level facts/references.
+      facts: input.context?.facts,
+      references: input.context?.references,
       delegationId: expected.delegationId,
       specialist: expected.specialist,
       workId: expected.workId,
@@ -923,6 +926,60 @@ export class NativeDelegationService {
   }
 
   private async claim(delegation: NativeDelegation, call: HookCall) {
+    const state = await this.runtime.store.read();
+    const policy = state.workItemPolicies.find(
+      (item) => item.workItemId === delegation.workItemId,
+    );
+    const graph =
+      policy &&
+      (state.workGraphs.find(
+        (item) =>
+          item.workId === delegation.workId &&
+          item.revision === policy.graphRevision,
+      )?.definition as
+        | {
+            nodes?: Array<{
+              key: string;
+              mode: "read" | "files" | "exclusive";
+            }>;
+          }
+        | undefined);
+    const mode = graph?.nodes?.find(
+      (node) => node.key === policy?.nodeKey,
+    )?.mode;
+    const resources =
+      !policy || !mode || mode === "exclusive"
+        ? [
+            {
+              path: "",
+              coverage: "workspace" as const,
+              access: "write" as const,
+              mode: "exclusive" as const,
+            },
+          ]
+        : policy.resources.length
+          ? policy.resources.map((resource) => ({
+              path: resource.path,
+              coverage:
+                resource.coverage === "subtree"
+                  ? ("tree" as const)
+                  : ("exact" as const),
+              access: resource.access,
+              mode:
+                resource.access === "write"
+                  ? ("files" as const)
+                  : ("read" as const),
+            }))
+          : [
+              {
+                path: "",
+                coverage: "workspace" as const,
+                access:
+                  mode === "read" ? ("read" as const) : ("write" as const),
+                mode:
+                  mode === "read" ? ("read" as const) : ("exclusive" as const),
+              },
+            ];
     return this.journal.claim({
       delegationId: delegation.delegationId,
       workspaceId: delegation.workspaceId,
@@ -933,6 +990,7 @@ export class NativeDelegationService {
       deadlineAt: new Date(
         now().getTime() + this.observationPolicy.maximumExecutionMs,
       ).toISOString(),
+      resources,
     });
   }
 

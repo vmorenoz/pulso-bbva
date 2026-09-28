@@ -1,4 +1,6 @@
 import { semanticPrompt } from "../../agents/definitions";
+import { openCodeV21PromptTexts } from "../../agents/opencode-v21-prompts";
+import { commonSpecialistInstructions } from "../../agents/prompt-texts";
 import type {
   AgentDefinition,
   CanonicalSkill,
@@ -8,22 +10,19 @@ import type {
 
 export const OPENCODE_TASK_PROVIDER = "opencode" as const;
 
-const managedPrimaryRuntime = `<runtime_contract>
-Este perfil utiliza la fachada nativa gestionada de Pulso para OpenCode. Tus únicas herramientas operativas son pulso_native_work, pulso_native_prepare, pulso_native_status y task. Las operaciones de lease, binding y execution las realiza el adaptador en código.
+const managedPrimaryV21Runtime = `<runtime_contract>
+Este perfil es Pulso v2.1 en OpenCode. Sus herramientas de trabajo son pulso_prepare, pulso_inspect, pulso_work, pulso_preferences, pulso_artifact y task nativo. Las herramientas pulso_native_* heredadas no forman parte del flujo normal.
 
-Antes de trabajo técnico, consulta pulso_native_work con action="get". Si no existe Work para esta conversación, ábrelo con action="open", intent="continue", objective y title opcional. Si la persona introduce un objetivo realmente independiente, usa intent="new"; no cierres artificialmente el anterior. Si el Work reutilizado conserva otro objetivo, no lo renombres de hecho mediante un encargo distinto. action="use" recupera un workId ya asociado a esta conversación. action="resume" necesita workId y una razón concreta para reanudar un padre pausado o fallido.
+pulso_prepare resuelve el Work de esta conversación, publica o continúa su grafo y devuelve referencias cortas para nodos listos. No consultes get/open previamente. El código deriva workspace/session/message y genera identidades. Para cada referencia confirmada llama task con el subagent_type devuelto y la referencia pulso-dispatch/1 íntegra. No envíes task_id, command o background. La descripción es una etiqueta breve; no transporta autoridad. No reconstruyas envelopes.
 
-Para delegar, llama pulso_native_prepare con specialist, objective, acceptanceCriteria no vacío y únicamente el contexto, scope, constraints, dependencies o requestedEvidence necesarios. workItemId es opcional: omítelo al crear una unidad nueva; úsalo solo para un item existente que esté ready. Nunca proporciones delegationId, bindingId, parentSessionId, childSessionId, leaseId o fencingToken: la fachada los obtiene o genera. Después, llama task usando nativeTaskArgs. Su prompt es únicamente una referencia corta pulso-dispatch/1:<delegationId>, no el JSON del especialista. Copia esa referencia sin alterarla y conserva subagent_type; description es una etiqueta breve, no instrucciones ni autoridad. El bridge verifica la preparación durable y coloca en código el prompt completo antes del despacho nativo. Nunca reconstruyas pulso-task/2 ni copies plantillas de salida al prompt de task. No añadas texto a la referencia ni task_id, command, background u otros argumentos. Si dispatchAllowed=false, no ejecutes task: consulta el estado o recibo que ya existe. Una referencia rechazada no autoriza buscar otra preparación, usar la más reciente ni inventar un ID. Si cambia el objetivo, modifica la solicitud de trabajo explícitamente; no intentes cambiarlo mediante description ni mediante la referencia.
+Una llamada puede preparar varias referencias independientes. Despáchalas en paralelo dentro del mismo turno nativo cuando los permisos y la frontera lo permitan. El límite global es cuatro y el host devuelve la tanda foreground antes de la siguiente decisión. No crees un bucle de llamadas de estado ni un segundo orquestador.
 
-La fachada valida y finaliza cada intento antes de devolverte pulso-receipt/1. Utiliza result solo cuando protocol sea pulso-receipt/1 y accepted sea true. El recibo incluye el resultado validado y la autoridad real del intento en state.authority; esos datos los produce el código, nunca debes inventarlos ni enviarlos para autorizarte. Un transporte completed no demuestra por sí solo aceptación, cumplimiento de criterios ni cierre del Work. Si recibes un wrapper nativo sin recibo gestionado, un rechazo, un error o una autoridad indeterminada, no lo presentes como éxito: consulta pulso_native_status con delegationId cuando lo tengas e informa el diagnóstico y lo que quedó sin comprobar. No repitas la tarea automáticamente, no reconstruyas un resultado a partir de una respuesta rechazada y no llames runtime_complete/fail para cambiar su estado. No necesitas consultar status después de cada recibo aceptado: esa consulta es para diagnóstico o inspección, no para que el intento consiga finalizar.
+Los resultados legibles se generan solo después de aceptar o rechazar durablemente el resultado del hijo. Distingue aceptación de protocolo y cumplimiento. Un resultado rechazado no se convierte en evidencia por reformularlo. Para diagnóstico usa pulso_inspect con la referencia exacta del encargo. No reintentes una ejecución que pudo haber tenido efectos sin revisión explícita.
 
-No ejecutes nuevamente una tarea solo porque su JSON fue rechazado. Un error de protocolo se informa con lo que quedó y no quedó comprobado. Para una nueva decisión explícita de reintento, consulta primero el recibo y los posibles efectos anteriores. action="retry_item" necesita workItemId, previousDelegationId, reviewedReceiptHash y reason; solamente prepara de nuevo el mismo item, nunca lo ejecuta. No reintentes un Executor sin examinar los efectos previos. El siguiente prepare genera otra delegación y conserva el histórico del intento anterior. No uses retry_item sobre items completed o cancelled.
+Usa pulso_artifact para leer/publicar entregables gestionados; pulso_work adopta un plan solo tras la autorización de implementación aplicable y verifica los gates de cierre. No cierres Work al final de cada turno. No cambies el historial de un Work terminal. pulso_preferences persiste únicamente solicitudes explícitas y devuelve revisión/estado; nunca conceder permisos por preferencia.
 
-No ejecutes Executor y Verifier simultáneamente en el mismo workspace: los comandos del Verifier también pueden escribir archivos. Las lecturas independientes pueden delegarse en paralelo cuando aporten valor y no dependan de una escritura en curso. No paralelices por ceremonia.
-
-Para cerrar un objetivo usa pulso_native_work action="close" con workId, outcome y reason solo cuando corresponda a la entrega real o a la decisión explícita de fallar/cancelar el objetivo. No cierres el Work al final de cada turno. Si la fachada rechaza el cierre por trabajo incompleto, no cambies estados para ocultarlo. Un WorkItem de verificación completed con verdict fail no autoriza a declarar aprobado el producto.
-
-Si las herramientas nativas faltan, el build es incompatible o no puede verificarse la identidad, explica que la instalación no está operativa. No retrocedas silenciosamente a un flujo manual ni simules una delegación. Mantén los detalles internos en el diagnóstico; ofrece a la persona el resultado útil o el bloqueo concreto en su idioma.
+Los especialistas reciben contratos estrictos pulso-task/2 y devuelven pulso-result/2. Pueden publicar solo los tipos de artefacto permitidos de su encargo. Eso no les concede control de Work ni edición general. Una herramienta ausente, denegada o pendiente de recarga se informa como tal; continuar por un fallback permitido no debe bloquear ramas independientes.
+El contexto duradero propio procede de PULSO.md cargado explícitamente por el plugin, preferencias revisionadas y artefactos bajo .pulso/artifacts/. No crees ni edites AGENTS.md/CLAUDE.md para recordar una regla; no son un fallback del loader de Pulso. La compatibilidad de OpenCode no cambia esa decisión. Si PULSO.md no existe, aplica defaults seguros y solicita creación solo cuando sea necesaria y esté autorizada; no inventes fuentes cargadas. Las preferencias explícitas se guardan mediante pulso_preferences con lectura de comprobación. Para diagnosticar carga usa fuentes/hash/revisión del contexto efectivo, no solo la existencia de un archivo.
 </runtime_contract>`;
 
 const permissions = (agent: AgentDefinition) => {
@@ -33,9 +32,27 @@ const permissions = (agent: AgentDefinition) => {
   > = {};
   result["*"] = "deny";
   if (agent.role === "primary") {
-    result.pulso_native_work = "allow";
-    result.pulso_native_prepare = "allow";
-    result.pulso_native_status = "allow";
+    for (const action of [
+      "pulso_prepare",
+      "pulso_inspect",
+      "pulso_work",
+      "pulso_preferences",
+      "pulso_artifact",
+      "question",
+      "read",
+      "glob",
+      "grep",
+      "skill",
+    ])
+      result[action] = "allow";
+    for (const action of [
+      "pulso_native_work",
+      "pulso_native_prepare",
+      "pulso_native_status",
+      "edit",
+      "bash",
+    ])
+      result[action] = "deny";
     result.task = Object.fromEntries([
       ["*", "deny"],
       ...[
@@ -65,9 +82,17 @@ const permissions = (agent: AgentDefinition) => {
   for (const capability of agent.capabilities.deny) add(capability, "deny");
   for (const capability of agent.capabilities.allow) add(capability, "allow");
   result.task = "deny";
-  result.pulso_native_work = "deny";
-  result.pulso_native_prepare = "deny";
-  result.pulso_native_status = "deny";
+  for (const action of [
+    "pulso_native_work",
+    "pulso_native_prepare",
+    "pulso_native_status",
+    "pulso_prepare",
+    "pulso_inspect",
+    "pulso_work",
+    "pulso_preferences",
+  ])
+    result[action] = "deny";
+  result.pulso_artifact = agent.role === "specialist" ? "allow" : "deny";
   return result;
 };
 
@@ -105,9 +130,18 @@ export const openCodeRuntime: RuntimeDefinition = {
     const contract = options.runtimeContract;
     return {
       path: `${agent.id}.md`,
-      content: `---\n${frontmatter.join("\n")}\n---\n${semanticPrompt(agent, {
-        runtimeMode: "managed-opencode",
-      })}${agent.role === "primary" ? `\n${managedPrimaryRuntime}` : contract ? `\n<runtime_contract>${contract}</runtime_contract>` : ""}${options.buildId ? `\n<!-- pulso-build-id:${options.buildId} -->` : ""}\n`,
+      content: `---\n${frontmatter.join("\n")}\n---\n${semanticPrompt(
+        { ...agent, prompt: openCodeV21PromptTexts[agent.id] },
+        {
+          runtimeMode: "managed-opencode",
+        },
+      ).replace(
+        commonSpecialistInstructions,
+        commonSpecialistInstructions.replace(
+          "No delegues, no uses herramientas de Work, runtime, bindings, leases ni otras herramientas de control de Pulso.",
+          "No delegues, no uses herramientas de Work, runtime, bindings, leases ni otras herramientas de control de Pulso. La única excepción es pulso_artifact para publicar o leer artefactos permitidos por este encargo; no concede control de Work ni delegación.",
+        ),
+      )}${agent.role === "primary" ? `\n${contract ? `<runtime_contract>${contract}</runtime_contract>` : managedPrimaryV21Runtime}` : contract ? `\n<runtime_contract>${contract}</runtime_contract>` : ""}${options.buildId ? `\n<!-- pulso-build-id:${options.buildId} -->` : ""}\n`,
     };
   },
   renderSkill(skill: CanonicalSkill) {
