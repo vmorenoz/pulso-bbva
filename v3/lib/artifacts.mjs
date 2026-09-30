@@ -81,6 +81,25 @@ export function createWork(root,{id,title,objective,criterion,verification}) {
   const w={schemaVersion:1,id,revision:1,cycle:1,title,objective:{id:'OBJ-1',outcome:objective,criteria:[{id:'AC-1',description:criterion,verification,evidenceIds:[]}]},status:'pending',priority:'normal',createdAt:ts,updatedAt:ts,summary:'Trabajo creado; alcance pendiente de revisión.',blockers:[],decisionsPending:[],nextAction:'Revisar contexto y criterio de aceptación',documents:[],tasks:[],evidence:[],closure:null};
   validateWork(root,w);writeJSON(root,wp(id),w);putSummary(root,w,true);return w;
 }
+export function completeProjectMap(root,id,{summary:result,limitations=[]}={}){
+  if(!result?.trim())throw new Error('Completar mapeo requiere summary');
+  const w=readWork(root,id);
+  if(terminal(w.status))throw new Error('El trabajo de mapeo ya está cerrado');
+  if(w.tasks.length||w.evidence.length||w.documents.length||w.objective.criteria.length!==1)
+    throw new Error('complete-map solo admite un trabajo nuevo de contexto sin consolidación previa');
+  const document='.pulso/project.md';
+  if(!exists(root,document))throw new Error(`Documento no existe: ${document}`);
+  if(!readText(root,document).includes('<!-- template: project@1.0 -->'))throw new Error('project.md no declara template project@1.0');
+  const criterion=w.objective.criteria[0],taskId='T-1',evidenceId='E-1',checkedAt=now();
+  w.status='in_progress';w.summary=result;w.nextAction='Cerrar el mapeo con su evidencia estática';
+  w.documents=[{kind:'project',path:document,templateVersion:'project@1.0'}];
+  w.tasks=[{id:taskId,title:'Inspeccionar y redactar contexto inicial',criterionIds:[criterion.id],agent:'pulso-explorer',status:'done',dependsOn:[],writeScope:[document],resources:['templates/project.md'],acceptance:[criterion.description],evidenceIds:[evidenceId],summary:result}];
+  w.evidence=[{id:evidenceId,kind:'static',status:'pass',checkedAt,criterionIds:[criterion.id],taskIds:[taskId],report:document,command:null,cwd:'.',exitCode:null,basis:'Documento producido por pulso-explorer y aceptado por Pulso tras revisar el resultado delegado.',files:[fingerprint(root,document)],summary:result}];
+  criterion.evidenceIds=[evidenceId];
+  saveWork(root,w,w.revision);
+  const closed=closeWork(root,id,{summary:result,limitations});
+  return {schemaVersion:1,id:closed.id,status:closed.status,revision:closed.revision,document,evidenceId,closureId:closed.closure.id};
+}
 export function saveWork(root,candidate,expectedRevision){
   assertSchema('work',candidate);const old=readWork(root,candidate.id,{files:false});
   if(!Number.isSafeInteger(expectedRevision)||old.revision!==expectedRevision||candidate.revision!==expectedRevision)throw new Error(`Revisión obsoleta; actual=${old.revision}. Releer y reconciliar, no sobrescribir.`);

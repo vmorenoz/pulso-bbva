@@ -54,7 +54,7 @@ No tiene sentido exigir ambos resultados a la vez; depende de lo observado.
 Comprobar el mismo ID, evidencia y próximos pasos cuando correspondan. No hace falta
 esperar una semana ni trasladar sesiones internas entre motores.
 
-## Regresión manual de saludo e inicialización (3.0.4)
+## Regresión manual de saludo e inicialización
 
 Reutiliza el mismo fixture y runtime disponible. No construyas harnesses ni otra
 suite. Antes del caso anterior, una sesión nueva recibe «Hola Pulso»: comprobar
@@ -80,7 +80,7 @@ solo las acciones y el alcance observados.
 ## Registrar, no automatizar
 
 Una tabla en un informe Markdown es suficiente. Esta tabla es una plantilla de
-resultados de **3.0.4**, no arrastra PASS live de versiones anteriores:
+resultados de **esta entrega**, no arrastra PASS live de versiones anteriores:
 
 | Entorno / versión / motor | Saludo sin tools | Inicio delegado | Función y pruebas | Continuidad | Motivo si no se probó |
 |---|---|---|---|---|---|

@@ -4,13 +4,14 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {assertSchema} from '../lib/schema.mjs';
 import {readJSON,safePath,fingerprint} from '../lib/fs.mjs';
-import {status,history,createWork,saveWork,syncWork,closeWork,reopenWork,repair,validateProject,validateResult} from '../lib/artifacts.mjs';
+import {status,history,createWork,completeProjectMap,saveWork,syncWork,closeWork,reopenWork,repair,validateProject,validateResult} from '../lib/artifacts.mjs';
 import {doctor} from '../lib/doctor.mjs';
-const HELP=`Pulso v3 — utilidades de artefactos; no ejecuta agentes.
+const HELP=`Pulso — utilidades de artefactos; no ejecuta agentes.
 Uso: node /ruta/global/.pulso/bin/pulso.mjs [--root RUTA] COMANDO [opciones]
   status                            Lee solo el índice confirmado del proyecto
   history [--since ISO8601]          Resúmenes de cierres, no actividad diaria
-  new ID --title TEXTO --objective TEXTO --criterion TEXTO --verification TEXTO
+  new ID --title TEXTO --objective TEXTO --criterion TEXTO --verification TEXTO [--compact]
+  complete-map ID --summary TEXTO [--limitation TEXTO ...]
   save ARCHIVO --expected-revision N Lee candidato JSON; incrementa revisión y actualiza índice
   sync ID [--focus]                  Reconcilia un trabajo e historial de cierre
   close ID --outcome done|cancelled --summary TEXTO [--limitation TEXTO ...]
@@ -26,7 +27,7 @@ Requiere un único Pulso escritor por checkout. No bloqueará otro proceso concu
 `;
 export function parse(argv){
   const pos=[],options={};
-  const bool=new Set(['help','focus','fresh','no-probe']);
+  const bool=new Set(['help','focus','fresh','no-probe','compact']);
   for(let i=0;i<argv.length;i++){
     const a=argv[i];if(a==='--'){pos.push(...argv.slice(i+1));break;}
     if(a.startsWith('--')){const key=a.slice(2);if(bool.has(key))options[key]=true;else{if(!argv[i+1]||argv[i+1].startsWith('--'))throw new Error(`Falta valor: ${a}`);const v=argv[++i];if(key==='limitation')(options[key]??=[]).push(v);else if(Object.hasOwn(options,key))throw new Error(`Opción duplicada: ${a}`);else options[key]=v;}}
@@ -40,16 +41,17 @@ function discoverRoot(explicit){
 }
 export function main(argv=process.argv.slice(2)){
   const {pos,options:o}=parse(argv);if(o.help||!pos.length)return HELP;
-  const allowed={status:[],history:['since'],new:['title','objective','criterion','verification'],save:['expected-revision'],sync:['focus'],close:['outcome','summary','limitation'],reopen:['reason'],validate:['fresh','schema','file'],'validate-result':['delegation','result'],repair:[],fingerprint:[],doctor:['no-probe']};
+  const allowed={status:[],history:['since'],new:['title','objective','criterion','verification','compact'],'complete-map':['summary','limitation'],save:['expected-revision'],sync:['focus'],close:['outcome','summary','limitation'],reopen:['reason'],validate:['fresh','schema','file'],'validate-result':['delegation','result'],repair:[],fingerprint:[],doctor:['no-probe']};
   const command=pos.shift();if(!allowed[command])throw new Error(`Comando desconocido: ${command}`);
   for(const key of Object.keys(o))if(!['root',...allowed[command]].includes(key))throw new Error(`Opción desconocida para ${command}: --${key}`);
-  const fixed={status:0,history:0,new:1,save:1,sync:1,close:1,reopen:1,validate:0,'validate-result':0,repair:0,doctor:0};
+  const fixed={status:0,history:0,new:1,'complete-map':1,save:1,sync:1,close:1,reopen:1,validate:0,'validate-result':0,repair:0,doctor:0};
   if(Object.hasOwn(fixed,command)&&pos.length!==fixed[command])throw new Error(`Número de argumentos inválido para ${command}`);
   const root=discoverRoot(o.root);
   switch(command){
     case 'status':return status(root);
     case 'history':{if(o.since&&!Number.isFinite(Date.parse(o.since)))throw new Error('Fecha --since inválida');return history(root).filter(x=>!o.since||Date.parse(x.closedAt)>=Date.parse(o.since));}
-    case 'new':return createWork(root,{id:pos[0],title:o.title,objective:o.objective,criterion:o.criterion,verification:o.verification});
+    case 'new':{const w=createWork(root,{id:pos[0],title:o.title,objective:o.objective,criterion:o.criterion,verification:o.verification});return o.compact?{schemaVersion:1,id:w.id,status:w.status,revision:w.revision}:w;}
+    case 'complete-map':return completeProjectMap(root,pos[0],{summary:o.summary,limitations:o.limitation||[]});
     case 'save':return saveWork(root,readJSON(root,pos[0]),Number(o['expected-revision']));
     case 'sync':return syncWork(root,pos[0],{focus:!!o.focus});
     case 'close':return closeWork(root,pos[0],{outcome:o.outcome||'done',summary:o.summary,limitations:o.limitation||[]});

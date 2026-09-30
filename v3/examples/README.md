@@ -1,6 +1,6 @@
 # Proyecto sintético para una primera sesión real
 
-Copia `smoke-project` a un directorio **fuera** de la distribución de Pulso. No contiene datos BBVA ni dependencias. Instala v3 en esa copia y abre el runtime elegido con Pulso como principal.
+Copia `smoke-project` a un directorio **fuera** de la distribución de Pulso. No contiene datos BBVA ni dependencias. Instala Pulso en esa copia y abre el runtime elegido con Pulso como principal.
 
 La base actual acepta importes negativos finitos, suma positivos, devuelve cero para vacío y rechaza no finitos. Sus tres tests de base pasan; no pretenden validar el nuevo requisito.
 

@@ -1,4 +1,4 @@
-# Instalador 3.0.4
+# Instalador de Pulso
 
 Instalación exclusivamente global para OpenCode y Visual Studio Code Copilot.
 Requiere Node.js 22+, sin `npm install`, sudo, extensión propia ni procesos de agentes.
@@ -6,7 +6,7 @@ Requiere Node.js 22+, sin `npm install`, sudo, extensión propia ni procesos de 
 ## Instalar
 
 ```sh
-node /ruta/pulso-v3/install.mjs
+node install.mjs
 ```
 
 El único selector es Runtime: **OpenCode** o **Visual Studio Code (Copilot)**.
@@ -69,9 +69,9 @@ La instalación global no recorre repositorios para encontrarlas.
 ## Desinstalar
 
 ```sh
-node /ruta/pulso-v3/install.mjs uninstall
+node install.mjs uninstall
 # equivalente
-node /ruta/pulso-v3/uninstall.mjs
+node uninstall.mjs
 ```
 
 El único selector es Runtime. Se retira ese runtime de la instalación global. Si queda
@@ -81,9 +81,9 @@ estado, trabajos, contexto e historial permanecen intactos.
 ## Automatización
 
 ```sh
-node /ruta/pulso-v3/install.mjs --runtime opencode
-node /ruta/pulso-v3/install.mjs --runtime vscode --dry-run
-node /ruta/pulso-v3/install.mjs uninstall --runtime opencode
+node install.mjs --runtime opencode
+node install.mjs --runtime vscode --dry-run
+node install.mjs uninstall --runtime opencode
 ```
 
 La librería conserva `runtime: "both"` para instalar ambos en una operación. El wizard

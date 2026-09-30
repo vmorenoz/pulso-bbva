@@ -13,4 +13,4 @@ Usa esta skill cuando el cambio cruce interfaces, capas, servicios o módulos. N
 5. Verifica con la menor prueba que realmente cruce la frontera. Unit tests con mocks no prueban conectividad; declara el alcance del mock. Cuando el entorno lo permita y sea requerido, ejecuta integración/E2E real con fixtures sintéticos.
 6. Repite la comprobación relevante sobre el conjunto integrado y su fingerprint, no heredes PASS de partes. Registra lo no ejecutado/bloqueado y riesgos residuales.
 
-Salida: forma parte de la evidencia de QA o review del Code Reviewer según el encargo; no genera una tercera revisión obligatoria. No edites el índice del proyecto, no delegues y no certifiques cumplimiento institucional. Esta skill es nueva en v3; no reemplaza ni modifica el contenido de las cinco skills BBVA preservadas.
+Salida: forma parte de la evidencia de QA o review del Code Reviewer según el encargo; no genera una tercera revisión obligatoria. No edites el índice del proyecto, no delegues y no certifiques cumplimiento institucional. Esta skill pertenece a Pulso; no reemplaza ni modifica el contenido de las cinco skills BBVA preservadas.

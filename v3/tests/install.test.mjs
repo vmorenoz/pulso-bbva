@@ -135,7 +135,7 @@ test('CLI no interactivo instala y desinstala global sin depender del cwd',t=>{
   const preview=spawnSync(process.execPath,[script,'--runtime','vscode','--dry-run'],{cwd,env,encoding:'utf8'});
   assert.equal(preview.status,0,preview.stderr);assert.equal(fs.existsSync(home),false);
   const run=spawnSync(process.execPath,[script,'--runtime','opencode'],{cwd,env,encoding:'utf8'});
-  assert.equal(run.status,0,run.stderr);assert.match(run.stdout,/Ámbito: Global/);assert.equal(fs.existsSync(path.join(cwd,'.pulso')),false);
+  assert.equal(run.status,0,run.stderr);assert.match(run.stdout,/Pulso · Instalación/);assert.doesNotMatch(run.stdout,/Pulso v3|Pulso 3\.0\.4|Versión:/i);assert.match(run.stdout,/Ámbito: Global/);assert.equal(fs.existsSync(path.join(cwd,'.pulso')),false);
   const remove=spawnSync(process.execPath,[script,'uninstall','--runtime','opencode'],{cwd,env,encoding:'utf8'});
   assert.equal(remove.status,0,remove.stderr);assert.match(remove.stdout,/Desinstalación exitosa/);
 });

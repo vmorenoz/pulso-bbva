@@ -73,6 +73,9 @@ Comprueba identidad declarada, forma, existencia/rutas declaradas. No certifica 
 Ver la receta canónica `skills/pulso-init/SKILL.md`, instalada globalmente bajo
 `.agents/skills`. Pulso solo coordina: no ejecuta `prepare.mjs`, no hace el
 levantamiento técnico ni redacta `project.md`. Conserva sus comandos de metadatos
-para el trabajo real después de la preparación, sin nuevos comandos o schemas.
-`status`/`history` no crean nada si falta estado y no deben dar validez v3 a datos
+para el trabajo real después de la preparación. Cuando `/pulso-init` es el objetivo,
+crea el Work antes del mapeo con `new ... --compact` y, tras aceptar el resultado del
+Explorador, usa `complete-map ID --summary TEXTO [--limitation TEXTO]`. Esa operación
+registra el documento, tarea, evidencia y cierre sin candidatos JSON manuales.
+`status`/`history` no crean nada si falta estado y no deben dar validez actual a datos
 legacy. `repair` no se usa como migración automática.

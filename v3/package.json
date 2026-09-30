@@ -1,5 +1,5 @@
 {
-  "name": "pulso-v3",
+  "name": "pulso",
   "version": "3.0.4",
   "private": true,
   "description": "Orquestación nativa para OpenCode y VS Code Copilot; artefactos locales, sin runtime propio.",

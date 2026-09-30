@@ -39,7 +39,7 @@ function ensurePlainTarget(target){
   const root=path.join(fs.realpathSync(ancestor),...missing);
   const relative=path.relative(fs.realpathSync(source),root);
   if(relative===''||(!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep)))
-    throw new Error('El proyecto actual es la distribución de Pulso. Entra en tu proyecto y ejecuta node /ruta/pulso-v3/install.mjs, o elige Global.');
+    throw new Error('El proyecto actual es la distribución de Pulso. Entra en tu proyecto y ejecuta el instalador de Pulso, o elige Global.');
   return root;
 }
 function globalOpenCodeDir(root,env){
@@ -204,7 +204,7 @@ export function prepareWorkspace(target){
       throw new Error(`Workspace Pulso incompleto en ${root}. Conserva sus datos y revisa la instalación; no se reparó automáticamente.`);
     return {prepared:true,target:root,existingWorkspace:true,nativeAgentsInstalled:false};
   }
-  if(fs.existsSync(folder)&&fs.readdirSync(folder).length)throw new Error(`Existe .pulso sin estado v3 reconocido en ${root}. Conserva esa carpeta y retira su integración antigua antes de preparar. No se borraron datos.`);
+  if(fs.existsSync(folder)&&fs.readdirSync(folder).length)throw new Error(`Existe .pulso sin estado actual reconocido en ${root}. Conserva esa carpeta y retira su integración antigua antes de preparar. No se borraron datos.`);
   seed(root);
   return {prepared:true,target:root,existingWorkspace:false,nativeAgentsInstalled:false};
 }

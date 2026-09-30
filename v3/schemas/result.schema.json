@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:pulso:v3:result:1",
-  "title": "Pulso v3 result",
+  "title": "Pulso result",
   "type": "object",
   "additionalProperties": false,
   "properties": {

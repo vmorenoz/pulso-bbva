@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {initArtifacts,createWork,readWork,saveWork} from '../lib/artifacts.mjs';
 import {writeJSON,atomicWrite,fingerprint,now} from '../lib/fs.mjs';
-export function temp(t){const p=fs.mkdtempSync(path.join(os.tmpdir(),'pulso-v3-'));t.after(()=>fs.rmSync(p,{recursive:true,force:true}));return p;}
+export function temp(t){const p=fs.mkdtempSync(path.join(os.tmpdir(),'pulso-'));t.after(()=>fs.rmSync(p,{recursive:true,force:true}));return p;}
 export function repo(t){const p=temp(t);initArtifacts(p);return p;}
 export function create(root,id='DEMO-1'){return createWork(root,{id,title:'Validación sintética',objective:'Validar un resultado',criterion:'El resultado cumple el contrato',verification:'Ejecutar comprobación sintética'});}
 export function ready(root,id='DEMO-1'){

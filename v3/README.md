@@ -1,4 +1,4 @@
-# Pulso v3.0.4 · inicio diferido y delegado
+# Pulso · inicio diferido y delegado
 
 Pulso es un **Asistente IA para desarrollo** que coordina especialistas nativos de OpenCode y VS Code. Conserva planes y contexto
 Markdown, trabajos JSON, un índice del proyecto activo y el historial de cierres en `.pulso/`.
@@ -10,7 +10,7 @@ BBVA originales, sin nuevas dependencias, perfiles, MCP, scheduler ni base de da
 Requiere Node.js 22+; sin `npm install`. Puede ejecutarse desde cualquier directorio:
 
 ```sh
-node /ruta/pulso-v3/install.mjs
+node install.mjs
 ```
 
 Selecciona con flechas y Enter el runtime: **OpenCode** o
@@ -24,7 +24,7 @@ de cada proyecto.
 Para desinstalar, el único selector es Runtime:
 
 ```sh
-node /ruta/pulso-v3/install.mjs uninstall
+node install.mjs uninstall
 ```
 
 Se retira únicamente ese runtime de la instalación global. No se recorren proyectos
@@ -74,7 +74,7 @@ ancestros y la protección de symlinks dentro de las rutas administradas.
 
 ## Qué está comprobado
 
-| Comprobación | Resultado de 3.0.4 |
+| Comprobación | Resultado de la entrega |
 |---|---|
 | Suite de utilidades, composición e instalación global | 94/94 PASS en macOS |
 | Preparación de workspace sin instalación local | Comprobada offline |

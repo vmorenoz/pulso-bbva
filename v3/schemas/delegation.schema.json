@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:pulso:v3:delegation:1",
-  "title": "Pulso v3 delegation",
+  "title": "Pulso delegation",
   "type": "object",
   "additionalProperties": false,
   "properties": {
