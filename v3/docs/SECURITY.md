@@ -8,7 +8,7 @@ Los helpers restringen rutas al proyecto y rechazan rutas absolutas, `..`, separ
 
 No registrar secretos, datos reales de clientes o información restringida en `.pulso`, resultados o fuentes públicas. Los hashes solo identifican archivos, no autorizan leerlos ni subirlos. Los artefactos pueden contener conocimiento de negocio sensible incluso sin credenciales: el equipo decide qué versionar según su política, Pulso no certifica esa política.
 
-El instalador precomprueba colisiones y no modifica configuraciones del host. Rechaza `.pulso` ajeno/v2 no reconocido. No usa shell, red, descargas ni paquetes externos. No hay `--force`. Se preservan archivos modificados por el usuario; la instalación no reconcilia automáticamente contenido editado.
+El instalador precomprueba colisiones y no modifica configuraciones del host. Migra recursos globales solo con manifest y hashes reconocidos; no recorre ni cambia Work/State/History de proyectos. El instalador de Pulso no ejecuta shell ni descarga paquetes; el plugin usa la definición nativa y no requiere módulos npm instalados. No hay `--force`. Se preservan archivos modificados por el usuario; la instalación no reconcilia automáticamente contenido editado.
 
 ## Qué NO garantizan los checks
 

@@ -1,72 +1,38 @@
 # Arquitectura y límites
 
-## Una capa, dos adaptaciones nativas
+## Core independiente del runtime
 
-El núcleo es **contenido**: identidad, catálogo de especialistas, contratos, plantillas y convenciones. `lib/composition.mjs` compone los archivos nativos en memoria; el instalador escribe solo el runtime seleccionado e incluye las instrucciones necesarias dentro de cada definición. `scripts/build.mjs` comprueba esa composición sin generar salidas en la distribución.
+`lib/artifacts.mjs` conserva schemas, validación, persistencia atómica, historial y revisión de Work. `lib/work-mutations.mjs` ofrece operaciones semánticas sobre ese core; `lib/receipts.mjs` valida y formatea recibos breves. `lib/workspace.mjs` inicializa datos ausentes sin mutar workspaces incompatibles.
 
-OpenCode: `.opencode/agents/*.md` y comandos nativos `.opencode/commands/`. Copilot Agent Host: `.github/agents/*.agent.md` con herramientas/modelo heredados. Variante VS Code Local: misma ubicación, formato adaptado a herramientas Local y allowlist de subagentes. No se instalan ambas variantes VS Code simultáneamente porque el descubrimiento sería ambiguo.
+El core no conoce OpenCode, no ejecuta procesos, no recibe comandos de consola y no crea actividad de agentes. OpenCode v2 es el único adaptador distribuido actualmente. Un runtime futuro tendría que implementar sus propias tools sobre las operaciones del core; no se promete compatibilidad de UI.
 
-Las skills comunes se instalan en `.agents/skills/`. El instalador copia las cinco skills BBVA sin transformación. Las capacidades de integración y entradas conversacionales de Pulso son nuevas.
+## Adaptador OpenCode v2
 
-## Inicialización diferida
+`plugins/opencode-v2/index.ts` registra tools directas con la API v2 del plugin. Su raíz de trabajo proviene de `ctx.location.directory`; ninguna tool toma una ruta desde el modelo. Las llamadas devuelven texto breve. El host conserva la visibilidad nativa de delegaciones `subagent`.
 
-La selección del agente no inicia trabajo. La puerta de intención del prompt evita
-herramientas en saludos; las consultas de estado son de lectura sin bootstrap.
-La única receta es `skills/pulso-init/SKILL.md`, reutilizada por ambos adaptadores:
-inspección y mapeo son del Explorador; la preparación opcional usa el Ejecutor y
-el helper existente. No se ha agregado un controlador de agentes, flag de sesión,
-protocolo persistido de inicialización, base de datos ni hook.
+`lib/composition.mjs` genera en memoria agentes y comandos nativos v2, skills globales y archivos del plugin. No genera salidas precompiladas ni ramas de runtime legacy.
 
-Solo inspect/prepare, previos a un Work, admiten un informe corto correlacionado
-con la llamada en vez de IDs de Work inventados. El mapeo posterior pertenece al
-objetivo real y usa el contrato normal. Pulso sigue siendo el único que consolida
-actualizaciones de work/state/history; el helper inicial solo crea datos ausentes.
-La política conversacional requiere comprobación live; no es enforcement de código.
+## Artefactos por workspace
 
-## Artefactos
-
-```
+```text
 <workspace>/.pulso/
-  state.json                 # resumen actual de TODO trabajo abierto
-  history.jsonl              # una entrada por cierre/ciclo
-  project.md                 # contexto verificado
-  decisions.md               # índice de acuerdos/decisiones
+  state.json
+  history.jsonl
+  project.md
+  decisions.md
   work/<ID>/
-    work.json                # un objetivo + criterios + tareas
-    work.next.json           # candidato temporal de edición, no autoridad
-    plan.md                  # solo cuando hace falta
-    plans/<subplan>.md       # misma plantilla con parent
-    spec.md                  # solo cuando hace falta
-    evidence/<ID>.md          # reportes de comprobación
-    ...                      # research/review/delivery según encargo
+    work.json
+    plan.md / plans/ / spec.md / evidence/ ...
 ```
 
-Los recursos ejecutables y de composición viven únicamente en la instalación global:
-`~/.pulso/{templates,schemas,bin,lib,docs}`, `~/.agents/skills` y el manifest
-`~/.pulso/installation.json`. El workspace conserva solo datos del proyecto.
+Los recursos globales se instalan en `~/.pulso/{templates,schemas,lib,docs}` y `~/.config/opencode/{agents,commands,skills,plugins/pulso}`. El workspace conserva solo sus datos.
 
-`state.json` es proyección, no autoridad del detalle ni una lista de agentes vivos. Su única finalidad es orientación rápida sin escanear trabajos. Incluye abiertos pending/in_progress/blocked/paused. Guarda objetivo, avance resumido, último avance, bloqueo/decisión y siguiente acción.
+## Mutaciones
 
-`work.json` tiene un objetivo deliberado; tareas pueden cambiar con más frecuencia. Los planes no replican sus estados. IDs de criterios, tareas y evidencia dan trazabilidad. No hay copia editable TOON ni un estado paralelo en TODO nativo.
+El flujo es: intención semántica → lectura vigente → comparación `expectedRevision` → aplicación de acciones permitidas → validación del Work completo → una escritura canónica y actualización de índice → recibo compacto.
 
-`history.jsonl` registra resultados por cierre, no cada acción. Las carpetas no se mueven al cerrar. Reapertura usa mismo ID y nuevo cycle; evidencia histórica permanece, aceptación/tareas se reinician a pending para revisión. El log no permite reconstruir una agenda diaria completa.
+No se acepta JSON Patch ni Work completo. Cada archivo usa temporal + fsync + rename; la consistencia de múltiples artefactos no constituye una transacción multiproceso. La revisión protege frente a candidatos obsoletos secuenciales y se requiere un solo coordinador por checkout.
 
-## Helpers, no runtime
+## Evidencia
 
-`lib/artifacts.mjs` hace operaciones síncronas de documentos: leer, validar, guardar revisión, actualizar proyección, archivar y reconciliar. No sabe qué agentes están vivos, no llama modelos ni tools, no aplica rutas, no agenda, no observa sesiones ni corre recovery de procesos.
-
-La utilidad `save` verifica revisión leída y aumenta el contador. **No es compare-and-swap transaccional multiproceso**. Requiere escritor único; protege contra candidato obsoleto secuencial, no contra escritores simultáneos. La escritura de cada archivo usa temporal+fsync+rename. La consistencia de varios archivos es reparable, no una transacción distribuida.
-
-Cierre: canónico final → historial deduplicado por ID/cycle → retiro del índice. `sync ID` reanuda una actualización interrumpida, no una sesión de agente. `repair` explícito reconstruye el índice recorriendo carpetas; no corre en cada consulta. El historial nunca se regenera descartando cierres previos.
-
-## Validación: tres cosas diferentes
-
-1. Estructura: esquemas y tipos, campos/refs/dependencias, coherencia de índice.
-2. Evidencia: archivo de reporte, enlaces criterio/tarea y hashes vigentes al cerrar. Ejecución PASS necesita comando y exitCode cero; not_run no aprueba.
-3. Calidad/aceptación: decisión de Pulso/revisores/humano con código y evidencia real. **El validador no demuestra que un comando se ejecutó ni que una afirmación es verdadera**. Tampoco valida calidad por encabezados o palabras.
-
-El intérprete de esquemas acepta solo el vocabulario de los schemas distribuidos; falla ante keywords desconocidas. No se presenta como implementación general JSON Schema ni como validador del schema nativo entero de OpenCode.
-
-## Capas simultáneas
-
-Jerarquía del trabajo, no jerarquía de líderes. Pulso puede planificar C, ejecutar A y verificar B simultáneamente si sus contratos, bases y recursos lo permiten. Los especialistas no delegan. Un resultado responde a una delegación y revisión concretas; una revisión global nueva por trabajo independiente no invalida por sí sola la respuesta, pero exige reconciliar scopes antes de consolidar.
+La validación separa estructura/referencias, vigencia de archivos y aceptación semántica. El core puede comprobar rutas, hashes, dependencias, cobertura y estado terminal; no puede probar por sí solo que una persona ejecutó un comando ni que el resultado cumple negocio.

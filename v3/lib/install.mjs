@@ -1,25 +1,25 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {listFiles,safePath,sha256,readJSON,writeJSON,atomicWrite,exists} from './fs.mjs';
-import {initArtifacts,status as workspaceStatus} from './artifacts.mjs';
 import {composeNativeFiles} from './composition.mjs';
 
 const source=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 export const VERSION='3.0.4';
 const manifestPath='.pulso/installation.json';
-const runtimeNames=['opencode','vscode'];
+const runtimeName='opencode-v2';
 const skillNames=['bbva-engineering','bbva-apx','bbva-apx-testing','bbva-cells','bbva-cells-testing','pulso-init','pulso-status','pulso-resume','pulso-recap','pulso-integration-verification'];
 
 // Files only: no agent processes, no host configuration changes, no registry.
 function workspaceFiles(){
   const result=new Map();
-  for(const d of ['templates','schemas','lib','bin','docs'])for(const f of listFiles(path.join(source,d)))
+  for(const d of ['templates','schemas','docs'])for(const f of listFiles(path.join(source,d)))
     result.set(`.pulso/${d}/${f}`,fs.readFileSync(path.join(source,d,f)));
-  result.delete('.pulso/lib/terminal.mjs');
-  const catalog=fs.existsSync(path.join(source,'agents/catalog.json'))?'agents/catalog.json':'catalog.json';
-  result.set('.pulso/catalog.json',fs.readFileSync(path.join(source,catalog)));
+  for(const f of ['artifacts.mjs','fs.mjs','schema.mjs','work-mutations.mjs','receipts.mjs','workspace.mjs'])
+    result.set(`.pulso/lib/${f}`,fs.readFileSync(path.join(source,'lib',f)));
+  result.set('.pulso/catalog.json',fs.readFileSync(path.join(source,'agents/catalog.json')));
   return result;
 }
 function ensurePlainTarget(target){
@@ -51,13 +51,14 @@ function globalOpenCodeDir(root,env){
   safePath(root,relative);return relative;
 }
 function nativeOwner(relative,opencodeDir){
-  if(relative.startsWith(`${opencodeDir}/`))return 'opencode';
-  if(relative.startsWith('.copilot/agents/'))return 'vscode';
+  if(relative.startsWith(`${opencodeDir}/`)||relative.startsWith('.agents/skills/'))return runtimeName;
+  if(relative.startsWith('.copilot/agents/'))return 'legacy-vscode';
   return null;
 }
 function permittedManagedPath(relative,oc){
   if(/^\.pulso\/(?:templates|schemas|lib|bin|docs)\/.+/.test(relative)||relative==='.pulso/catalog.json')return true;
-  if(skillNames.some(n=>relative.startsWith(`.agents/skills/${n}/`)))return true;
+  if(skillNames.some(n=>relative.startsWith(`.agents/skills/${n}/`)||relative.startsWith(`${oc}/skills/${n}/`)))return true;
+  if(relative.startsWith(`${oc}/plugins/pulso/`))return true;
   if(relative.startsWith(`${oc}/agents/`)||relative.startsWith(`${oc}/commands/`)||relative.startsWith('.copilot/agents/'))
     return /^pulso(?:-[a-z0-9-]+)?(?:\.agent)?\.md$/.test(path.posix.basename(relative));
   return false;
@@ -65,7 +66,7 @@ function permittedManagedPath(relative,oc){
 function getPrior(root,oc){
   if(!exists(root,manifestPath))return null;
   const p=readJSON(root,manifestPath);
-  if(p.schemaVersion!==1||!p.files||typeof p.files!=='object'||Array.isArray(p.files)||!Array.isArray(p.runtimes)||p.runtimes.some(x=>!runtimeNames.includes(x))||typeof p.version!=='string')
+  if(p.schemaVersion!==1||!p.files||typeof p.files!=='object'||Array.isArray(p.files)||!Array.isArray(p.runtimes)||p.runtimes.some(x=>!['opencode','vscode','both',runtimeName].includes(x))||typeof p.version!=='string')
     throw new Error(`Manifest de instalación no reconocido: ${path.join(root,manifestPath)}`);
   if(p.borrowed&&(!Array.isArray(p.borrowed)||p.borrowed.some(f=>!Object.hasOwn(p.files,f))))throw new Error('Manifest de archivos compartidos no reconocido');
   if(p.scope&&p.scope!=='global')throw new Error('Se encontró una instalación local anterior. Pulso ahora se instala solo globalmente; no se modificará esa instalación automáticamente.');
@@ -76,7 +77,7 @@ function getPrior(root,oc){
     if(!permittedManagedPath(f,oldOC)||!/^([a-f0-9]{64})$/.test(h))
       throw new Error(`Entrada no administrable en manifest: ${f}. No se borrará ningún archivo.`);
   }
-  return p;
+  return {...p,legacyRuntimes:p.runtimes,runtimes:[runtimeName]};
 }
 function assertKnownInstallation(root,prior){
   if(!prior&&exists(root,'.pulso')&&fs.readdirSync(safePath(root,'.pulso')).length)
@@ -84,15 +85,12 @@ function assertKnownInstallation(root,prior){
 }
 function installationFiles(root,runtimes,oc){
   const files=workspaceFiles();
-  for(const f of listFiles(path.join(source,'skills')))files.set(`.agents/skills/${f}`,fs.readFileSync(path.join(source,'skills',f)));
-  const runtime=runtimes.length===2?'both':runtimes[0];
-  for(const [key,value] of composeNativeFiles({root:source,runtime,vscodeHarness:'copilot'})){
-    const dest=key.replace(/^\.opencode\//,`${oc}/`).replace(/^\.github\/agents\//,'.copilot/agents/');
+  for(const [key,value] of composeNativeFiles({root:source})){
+    const dest=key.replace(/^\.opencode\//,`${oc}/`);
     let text=value;
     if(/\/pulso(?:\.agent)?\.md$/.test(key)){
-      const args=[path.join(root,'.pulso/bin/prepare.mjs').split(path.sep).join('/'),'--root','<raíz real del proyecto activo>'];
-      const resources={prepare:path.join(root,'.pulso/bin/prepare.mjs'),cli:path.join(root,'.pulso/bin/pulso.mjs'),projectTemplate:path.join(root,'.pulso/templates/project.md'),delegationTemplate:path.join(root,'.pulso/templates/delegation.md'),stateSchema:path.join(root,'.pulso/schemas/state.schema.json'),resultSchema:path.join(root,'.pulso/schemas/result.schema.json'),skill:path.join(root,'.agents/skills/pulso-init/SKILL.md')};
-      text+=`\n<global_installation>\nEsta definición y sus recursos son globales: ${JSON.stringify(resources)}. La carpeta ${JSON.stringify(path.join(root,'.pulso'))} contiene utilidades, no estado de proyecto. Todo state/work/history/project pertenece a la raíz real del workspace activo. No busques bin/templates/schemas/agentes/skills dentro del proyecto.\nUn saludo o charla no inicializa. Solo al primer encargo concreto o /pulso-init aplica la receta global indicada. Pasa al especialista la raíz real del proyecto y estas rutas observadas. El Explorador inspecciona compatibilidad; si el workspace es nuevo, delega al Ejecutor el helper con ejecutable node y argumentos literales ${JSON.stringify(args)}. Tú no ejecutas prepare ni haces el mapeo. No uses HOME como proyecto, no migres legacy y no ejecutes runtimes desde shell. Las consultas de estado/historial no inicializan.\nPara metadatos usa el CLI global con --root apuntando al workspace. Plantillas y schemas de delegación son globales; outputs y datos siguen bajo el workspace.\n</global_installation>\n`;
+      const resources={globalRoot:path.join(root,'.pulso'),projectTemplate:path.join(root,'.pulso/templates/project.md'),delegationTemplate:path.join(root,'.pulso/templates/delegation.md'),stateSchema:path.join(root,'.pulso/schemas/state.schema.json'),resultSchema:path.join(root,'.pulso/schemas/result.schema.json'),skill:path.join(root,oc,'skills/pulso-init/SKILL.md')};
+      text+=`\n<global_installation>\nRecursos globales de Pulso: ${JSON.stringify(resources)}. El workspace activo se obtiene del contexto de OpenCode; nunca uses HOME como raíz del proyecto ni aceptes root de texto/argumentos. Usa pulso_workspace_prepare solo al primer encargo concreto o /pulso-init, nunca al saludar ni consultar estado. El plugin administra metadata de forma síncrona; no uses shell/write/edit para state/work/history ni ejecutes scripts de Pulso.\n</global_installation>\n`;
     }
     files.set(dest,text);
   }
@@ -114,8 +112,8 @@ function checkFiles(root,files,prior){
 }
 function assertNoUnregisteredAgents(root,oc,runtimes,prior,expected=new Map()){
   const dirs=[];
-  if(runtimes.includes('opencode'))dirs.push(`${oc}/agents`,`${oc}/commands`);
-  if(runtimes.includes('vscode'))dirs.push('.copilot/agents');
+  if(runtimes.includes(runtimeName))dirs.push(`${oc}/agents`,`${oc}/commands`,`${oc}/plugins`,`${oc}/skills`);
+  if(runtimes.includes('legacy-vscode'))dirs.push('.copilot/agents');
   for(const dir of dirs){
     if(!exists(root,dir))continue;
     for(const name of fs.readdirSync(safePath(root,dir))){
@@ -123,6 +121,11 @@ function assertNoUnregisteredAgents(root,oc,runtimes,prior,expected=new Map()){
       if(/^pulso(?:-[a-z0-9-]+)?(?:\.agent)?\.md$/.test(name)&&!prior?.files?.[f]&&!expected.has(f))
         throw new Error(`Integración anterior no registrada: ${path.join(root,f)}. No se puede comprobar su propiedad; conserva o retira ese archivo antes de continuar. No se borró nada.`);
     }
+  }
+  if(runtimes.includes(runtimeName)){
+    const plugin=`${oc}/plugins/pulso`;
+    if(exists(root,plugin))for(const relative of listFiles(safePath(root,plugin),plugin))
+      if(!prior?.files?.[relative]&&!expected.has(relative))throw new Error(`Colisión con plugin no administrado: ${path.join(root,relative)}. No se modificó ningún archivo.`);
   }
 }
 function checkRemovals(root,files,prior){
@@ -132,29 +135,36 @@ function checkRemovals(root,files,prior){
       throw new Error(`Archivo de Pulso modificado: ${dest}. No se borró nada. Conserva tu edición fuera de esta ruta o restáurala antes de continuar.`);
   }
 }
-export function planInstall({runtime,scope='global',target,vscodeHarness,homeDir=os.homedir(),env=process.env}){
+function checkOpenCodeV2(env,probeVersion=()=>spawnSync(env.OPENCODE_BIN||'opencode',['--version'],{encoding:'utf8',timeout:8000,env:{...process.env,...env}}).stdout){
+  let result;try{result=probeVersion();}catch{result='';}
+  const version=String(result||'').trim(),match=/\b(?:v)?(\d+)\.\d+\.\d+\b/.exec(version);
+  if(!match)throw new Error('No se pudo detectar OpenCode en PATH. Pulso requiere OpenCode v2; instala OpenCode v2 y vuelve a intentar.');
+  if(Number(match[1])!==2)throw new Error(`Pulso requiere OpenCode v2. Detectado: ${version}. Actualiza OpenCode antes de instalar Pulso.`);
+  return version;
+}
+export function planInstall({runtime,scope='global',target,homeDir=os.homedir(),env=process.env,probeVersion}={}){
   if(scope!=='global')throw new Error('Pulso solo admite instalación global. Los datos de trabajo siguen separados por proyecto.');
   if(target)throw new Error('La opción target ya no está admitida: Pulso se instala globalmente en la carpeta del usuario.');
-  if(vscodeHarness&&vscodeHarness!=='copilot')throw new Error('La instalación global de Visual Studio Code usa Copilot Agent Host.');
-  if(!['opencode','vscode','both'].includes(runtime))throw new Error('Runtime: opencode, vscode o both');
+  if(runtime&&runtime!=='opencode-v2')throw new Error('Pulso admite únicamente OpenCode v2.');
+  const runtimeVersion=checkOpenCodeV2(env,probeVersion);
   const root=ensurePlainTarget(homeDir);
   const prior=getPrior(root,'.config/opencode');assertKnownInstallation(root,prior);
-  const requested=runtime==='both'?runtimeNames:[runtime];
-  const oc=requested.includes('opencode')?globalOpenCodeDir(root,env):(prior?.opencodeDir||'.config/opencode');
-  const runtimes=[...new Set([...(prior?.runtimes||[]),...requested])].sort();
+  const requested=[runtimeName];
+  const oc=globalOpenCodeDir(root,env);
+  const runtimes=[runtimeName];
   const files=installationFiles(root,runtimes,oc);
   const {actions,conflicts}=checkFiles(root,files,prior);
-  assertNoUnregisteredAgents(root,prior?.opencodeDir||oc,requested,prior,files);
-  for(const name of skillNames)for(const dir of ['.copilot/skills',`${oc}/skills`,'.claude/skills']){
+  assertNoUnregisteredAgents(root,oc,requested,prior,files);
+  for(const name of skillNames)for(const dir of ['.copilot/skills','.claude/skills','.agents/skills']){
     const p=`${dir}/${name}/SKILL.md`;
-    if(exists(root,p))conflicts.push(`Skill duplicada ${p}; conserva una única ubicación antes de instalar.`);
+    if(exists(root,p)&&!prior?.files?.[p])conflicts.push(`Skill duplicada ${p}; conserva una única ubicación antes de instalar.`);
   }
   if(conflicts.length)throw new Error(`Instalación cancelada antes de escribir:\n${conflicts.join('\n')}`);
   const replacing=!!prior&&prior.version!==VERSION;
   const borrowed=actions.filter(a=>a.action==='unchanged'&&(!prior?.files?.[a.path]||prior?.borrowed?.includes(a.path))).map(a=>a.path);
   const removals=Object.keys(prior?.files||{}).filter(f=>!prior?.borrowed?.includes(f)&&(!files.has(f)||(replacing&&(!nativeOwner(f,prior.opencodeDir||oc)||requested.includes(nativeOwner(f,prior.opencodeDir||oc))))));
   checkRemovals(root,removals,prior);
-  return {root,scope:'global',opencodeDir:oc,runtimes,vscodeHarness:'copilot',prior,files,actions,removals,replacing,borrowed};
+  return {root,scope:'global',opencodeDir:oc,runtimes,runtimeVersion,prior,files,actions,removals,replacing,borrowed};
 }
 // In-memory rollback of owned files. This is not a persistent transaction engine.
 function applyFiles(root,files,actions,removals,prior,finish){
@@ -180,37 +190,19 @@ function applyFiles(root,files,actions,removals,prior,finish){
     throw new Error(`Operación no completada; ${rollbackErrors.length?'hay archivos que no se pudieron restaurar: '+rollbackErrors.join('; '):'archivos gestionados restaurados'}. ${e.message}`,{cause:e});
   }
 }
-function seed(root){
-  initArtifacts(root);
-  if(!exists(root,'.pulso/project.md'))atomicWrite(root,'.pulso/project.md','# Proyecto\n\nContexto todavía no levantado. Usa la plantilla global proporcionada por Pulso y evidencia del repositorio.\n');
-  if(!exists(root,'.pulso/decisions.md'))atomicWrite(root,'.pulso/decisions.md','# Índice de decisiones\n\nSin decisiones registradas. Añadir referencias; no inventar aprobaciones.\n');
-}
-export function install(options){
+export function install(options={}){
   const p=planInstall(options);
-  if(options.dryRun)return {dryRun:true,target:p.root,scope:p.scope,runtimes:p.runtimes,vscodeHarness:p.vscodeHarness,actions:p.actions,removals:p.removals};
-  const manifest={schemaVersion:1,version:VERSION,scope:'global',runtimes:p.runtimes,vscodeHarness:'copilot',opencodeDir:p.opencodeDir,files:Object.fromEntries(p.actions.map(x=>[x.path,x.hash])),borrowed:p.borrowed};
+  if(options.dryRun)return {dryRun:true,target:p.root,scope:p.scope,runtimes:p.runtimes,opencodeVersion:p.runtimeVersion,actions:p.actions,removals:p.removals};
+  const manifest={schemaVersion:1,version:VERSION,scope:'global',runtimes:p.runtimes,opencodeDir:p.opencodeDir,files:Object.fromEntries(p.actions.map(x=>[x.path,x.hash])),borrowed:p.borrowed};
   applyFiles(p.root,p.files,p.actions,p.removals,p.prior,()=>{
     writeJSON(p.root,manifestPath,manifest);
   });
-  return {installed:true,target:p.root,scope:p.scope,runtimes:p.runtimes,vscodeHarness:p.vscodeHarness,version:VERSION,replacedVersion:p.replacing?p.prior.version:null,removed:p.removals.length,created:p.actions.filter(x=>x.action==='create').length,updated:p.actions.filter(x=>x.action==='update').length,unchanged:p.actions.filter(x=>x.action==='unchanged').length,nativeSession:'NOT_RUN'};
+  return {installed:true,target:p.root,scope:p.scope,runtimes:p.runtimes,opencodeVersion:p.runtimeVersion,version:VERSION,replacedVersion:p.replacing?p.prior.version:null,removed:p.removals.length,created:p.actions.filter(x=>x.action==='create').length,updated:p.actions.filter(x=>x.action==='update').length,unchanged:p.actions.filter(x=>x.action==='unchanged').length,nativeSession:'NOT_RUN'};
 }
 
-export function prepareWorkspace(target){
-  const root=ensurePlainTarget(target),folder=safePath(root,'.pulso');
-  if(fs.existsSync(folder)&&!fs.statSync(folder).isDirectory())throw new Error(`No es directorio: ${folder}`);
-  if(exists(root,'.pulso/state.json')){
-    workspaceStatus(root);
-    if(!exists(root,'.pulso/history.jsonl')||!fs.existsSync(safePath(root,'.pulso/work'))||!fs.statSync(safePath(root,'.pulso/work')).isDirectory())
-      throw new Error(`Workspace Pulso incompleto en ${root}. Conserva sus datos y revisa la instalación; no se reparó automáticamente.`);
-    return {prepared:true,target:root,existingWorkspace:true,nativeAgentsInstalled:false};
-  }
-  if(fs.existsSync(folder)&&fs.readdirSync(folder).length)throw new Error(`Existe .pulso sin estado actual reconocido en ${root}. Conserva esa carpeta y retira su integración antigua antes de preparar. No se borraron datos.`);
-  seed(root);
-  return {prepared:true,target:root,existingWorkspace:false,nativeAgentsInstalled:false};
-}
-
-export function uninstall({runtime,homeDir=os.homedir(),env=process.env,dryRun=false}){
-  if(!runtimeNames.includes(runtime))throw new Error('Runtime: opencode o vscode');
+export function uninstall({runtime,homeDir=os.homedir(),env=process.env,dryRun=false}={}){
+  if(runtime&&runtime!=='opencode-v2')throw new Error('Pulso admite únicamente OpenCode v2.');
+  runtime=runtimeName;
   if(!fs.existsSync(path.join(homeDir,manifestPath)))return {uninstalled:false,runtime,targets:[],workPreserved:true,note:'No se encontró una instalación global registrada de ese runtime. No se eliminó nada.'};
   const root=ensurePlainTarget(homeDir),raw=readJSON(root,manifestPath),oc=raw.opencodeDir||globalOpenCodeDir(root,env);
   const prior=getPrior(root,oc);assertNoUnregisteredAgents(root,oc,[runtime],prior);
@@ -220,6 +212,9 @@ export function uninstall({runtime,homeDir=os.homedir(),env=process.env,dryRun=f
   checkRemovals(root,removals,prior);
   if(dryRun)return {dryRun:true,uninstall:true,runtime,targets:[{target:root,scope:'global',removals}]};
   const files=Object.fromEntries(Object.entries(prior.files).filter(([f])=>!removals.includes(f)));
-  applyFiles(root,new Map(),[],removals,prior,()=>writeJSON(root,manifestPath,{...prior,runtimes:remaining,files}));
+  applyFiles(root,new Map(),[],removals,prior,()=>{
+    if(remaining.length)writeJSON(root,manifestPath,{...prior,runtimes:remaining,files});
+    else fs.unlinkSync(safePath(root,manifestPath));
+  });
   return {uninstalled:true,runtime,targets:[{target:root,scope:'global',removed:removals.length,remainingRuntimes:remaining}],workPreserved:true,note:'La instalación global fue actualizada. Los datos de los proyectos no se recorrieron ni modificaron.'};
 }

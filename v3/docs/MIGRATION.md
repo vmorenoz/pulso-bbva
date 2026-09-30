@@ -1,15 +1,15 @@
-# Procedencia y transición desde v2
+# Migración a OpenCode v2 tools
 
-Únicamente se reutilizaron `bbva-engineering`, `bbva-apx`, `bbva-apx-testing`, `bbva-cells`, `bbva-cells-testing` desde `packages/orchestration/skills` del ZIP `pulso-bbva-v2.1-evolution-r1(1).zip` proporcionado en la Library. Se compararon también con `pulso-bbva-v2-review.zip`; las cinco copias coinciden byte por byte.
+La distribución actual sustituye por completo las adaptaciones anteriores: solo OpenCode v2, plugin de tools y core semántico. Ya no se mantiene CLI de operaciones ni adaptación VS Code.
 
-Cada carpeta fuente contiene un SKILL.md; no se omitieron recursos anexos de esas carpetas. `bbva-provenance.json` registra archivo fuente, hash del ZIP, ruta interna, tamaño y hash de cada copia. No se redujeron, reescribieron ni «actualizaron» sus reglas como parte de esta entrega.
+## Instalación global anterior de Pulso
 
-Todo otro componente de esta entrega fue escrito de cero. No se migran Work System, Capabilities MCP, plugins, state/runtime bindings, SQLite, logs, instalador, prompts ni protocolos anteriores. `pulso-integration-verification` pertenece a Pulso; no se presenta como skill original BBVA.
+`install.mjs` reconoce el manifest previo para verificar ownership y hashes. Puede retirar recursos de Pulso registrados e intactos de agentes/comandos legacy, VS Code, skills anteriores y binarios operativos. Un recurso modificado, un manifest inválido o una integración sin propiedad demostrable bloquean la actualización antes de escribir. No se cambia `opencode.json(c)` ni recursos ajenos.
 
-## Instalar sin colisiones
+Se exige OpenCode major 2. Si el preflight falla, no se escribe ningún recurso. Resuelve cualquier archivo modificado explícitamente y vuelve a ejecutar el instalador; no borres la configuración de usuario como atajo.
 
-Probar en un checkout de proyecto limpio respecto de Pulso v2. Mantener las configuraciones legítimas del host. Si `.pulso` ya pertenece a v2, respaldarlo fuera de las rutas de descubrimiento y conservarlo como archivo; no ejecutar comandos de borrado masivo ni desinstalar MCP ajenos. El instalador bloquea esta colisión para que decidas conscientemente.
+## Datos de proyecto
 
-Agentes antiguos del mismo nombre o skills duplicadas pueden alterar el descubrimiento. El instalador detecta rutas concretas dentro del proyecto; personalizaciones globales deben revisarse desde el runtime. No modifica home ni elimina agentes nativos. No inventa que una lista de disponibles identifica el agente activo.
+El instalador no recorre workspaces y no actualiza ni convierte Work/State/History. El plugin usa los formatos canónicos existentes. Si el workspace contiene datos legacy o incompatibles, las tools preservan y reportan el bloqueo; no se hace migración o repair automática.
 
-Para actualizar Pulso: ejecutar de nuevo el instalador. Archivos propios intactos se actualizan; iguales se preservan; modificados manualmente causan conflicto. Guardar modificaciones fuera y reconciliarlas explícitamente. Los trabajos/project/decisions/history no son archivos gestionados y nunca se reemplazan al actualizar.
+Los cinco archivos de skills BBVA conservan procedencia y bytes originales según `bbva-provenance.json`.
