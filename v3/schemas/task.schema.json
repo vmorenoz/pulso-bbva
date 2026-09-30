@@ -1,0 +1,112 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:pulso:v3:task:1",
+  "title": "Pulso v3 task",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "criterionIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+      },
+      "minItems": 1
+    },
+    "agent": {
+      "anyOf": [
+        {
+          "enum": [
+            "pulso-researcher",
+            "pulso-explorer",
+            "pulso-planner",
+            "pulso-plan-auditor",
+            "pulso-executor",
+            "pulso-qa-auditor",
+            "pulso-security-auditor",
+            "pulso-code-reviewer",
+            "pulso-ui-auditor"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "in_progress",
+        "blocked",
+        "paused",
+        "done",
+        "cancelled"
+      ]
+    },
+    "dependsOn": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+      },
+      "minItems": 0
+    },
+    "writeScope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?![A-Za-z]:)[^\\u0000]+$"
+      },
+      "minItems": 0
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 0
+    },
+    "acceptance": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "evidenceIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+      },
+      "minItems": 0
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "criterionIds",
+    "agent",
+    "status",
+    "dependsOn",
+    "writeScope",
+    "resources",
+    "acceptance",
+    "evidenceIds",
+    "summary"
+  ]
+}

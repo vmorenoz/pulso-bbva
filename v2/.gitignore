@@ -1,3 +1,10 @@
 node_modules/
 dist/
 .pulso-evidence/
+.DS_Store
+*.log
+*.zip
+*.diff
+*.patch
+coverage/
+evidence/

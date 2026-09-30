@@ -1,0 +1,19 @@
+{
+  "name": "pulso-v3",
+  "version": "3.0.4",
+  "private": true,
+  "description": "Orquestación nativa para OpenCode y VS Code Copilot; artefactos locales, sin runtime propio.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "install:pulso": "node install.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node scripts/check.mjs",
+    "verify": "node scripts/check.mjs && node --test tests/*.test.mjs",
+    "uninstall:pulso": "node uninstall.mjs"
+  },
+  "license": "UNLICENSED"
+}

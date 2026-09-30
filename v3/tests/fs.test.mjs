@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {safePath,atomicWrite,readText,writeJSON,readJSON,fingerprint} from '../lib/fs.mjs';
+import {temp} from './helpers.mjs';
+for(const p of ['../escape','/etc/passwd','C:/secret','a/../b','a\\b','a//b','a\0b'])test(`Rechaza ruta insegura ${JSON.stringify(p)}`,t=>assert.throws(()=>safePath(temp(t),p)));
+test('Ruta Unicode y espacios',t=>{const root=temp(t);atomicWrite(root,'carpeta á/dato prueba.txt','correcto');assert.equal(readText(root,'carpeta á/dato prueba.txt'),'correcto');});
+test('Symlink hacia fuera rechazado',t=>{const root=temp(t),other=temp(t);fs.symlinkSync(other,path.join(root,'enlace'));assert.throws(()=>atomicWrite(root,'enlace/leak','x'),/Symlink/);assert.equal(fs.readdirSync(other).length,0);});
+test('Symlink roto rechazado',t=>{const root=temp(t);fs.symlinkSync(path.join(root,'ausente'),path.join(root,'enlace'));assert.throws(()=>safePath(root,'enlace/a'),/Symlink/);});
+test('Escritura atómica deja JSON completo y sin temporales',t=>{const root=temp(t);writeJSON(root,'data/item.json',{a:1});writeJSON(root,'data/item.json',{b:2});assert.deepEqual(readJSON(root,'data/item.json'),{b:2});assert.deepEqual(fs.readdirSync(path.join(root,'data')),['item.json']);});
+test('Fingerprint responde al contenido real',t=>{const root=temp(t);atomicWrite(root,'a','uno');const a=fingerprint(root,'a');atomicWrite(root,'a','dos');assert.notEqual(a.sha256,fingerprint(root,'a').sha256);});
+test('Scopes son rutas, no globs ni caracteres de control',t=>{const r=temp(t);assert.throws(()=>safePath(r,'src/*.js'));assert.throws(()=>safePath(r,'src/a\nb'));});
