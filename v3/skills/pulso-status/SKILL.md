@@ -7,7 +7,7 @@ disable-model-invocation: true
 # pulso-status
 Esta skill es una entrada conversacional para Pulso, no un nuevo agente ni un script autónomo. Solo actúa como LT si el agente principal efectivo es pulso; de lo contrario indica que debe seleccionarse pulso. Una skill no cambia por sí sola la identidad del agente.
 
-Usa siempre la raíz del workspace activo, nunca HOME. Lee `.pulso/state.json` o ejecuta el `pulso.mjs` global proporcionado con `status --root RAÍZ`. Resume objetivo/foco, abiertos, avances, bloqueos y próximas acciones. Es último estado confirmado, no actividad en tiempo real. No crees trabajo ni escanees work/* por ceremonia.
+Usa `pulso_status` para consultar el índice del workspace activo; nunca uses HOME como proyecto ni leas el índice manualmente si la tool está disponible. Resume objetivo/foco, abiertos, avances, bloqueos y próximas acciones. Es último estado confirmado, no actividad en tiempo real. No crees trabajo ni escanees work/* por ceremonia.
 
 El argumento es texto natural opcional para enfocar la consulta, por ejemplo `solo bloqueos`, `próximas acciones` o un ID de Work. Sin argumento, muestra el resumen general y el foco actual. No espera flags ni sintaxis de shell.
 

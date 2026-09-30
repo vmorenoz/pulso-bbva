@@ -75,10 +75,10 @@ function putSummary(root,w,focus=false){
   s.revision++;s.updatedAt=now();writeJSON(root,'.pulso/state.json',assertSchema('state',s));return s;
 }
 export function syncWork(root,id,{focus=false}={}) {const w=readWork(root,id,{files:false});if(w.closure)recordClosure(root,w);putSummary(root,w,focus);return w;}
-export function createWork(root,{id,title,objective,criterion,verification}) {
+export function createWork(root,{id,title,objective,criterion,verification,priority='normal'}) {
   assertID(id);if(exists(root,wp(id)))throw new Error(`Trabajo ya existe: ${id}`);
   status(root);history(root);const ts=now();
-  const w={schemaVersion:1,id,revision:1,cycle:1,title,objective:{id:'OBJ-1',outcome:objective,criteria:[{id:'AC-1',description:criterion,verification,evidenceIds:[]}]},status:'pending',priority:'normal',createdAt:ts,updatedAt:ts,summary:'Trabajo creado; alcance pendiente de revisión.',blockers:[],decisionsPending:[],nextAction:'Revisar contexto y criterio de aceptación',documents:[],tasks:[],evidence:[],closure:null};
+  const w={schemaVersion:1,id,revision:1,cycle:1,title,objective:{id:'OBJ-1',outcome:objective,criteria:[{id:'AC-1',description:criterion,verification,evidenceIds:[]}]},status:'pending',priority,createdAt:ts,updatedAt:ts,summary:'Trabajo creado; alcance pendiente de revisión.',blockers:[],decisionsPending:[],nextAction:'Revisar contexto y criterio de aceptación',documents:[],tasks:[],evidence:[],closure:null};
   validateWork(root,w);writeJSON(root,wp(id),w);putSummary(root,w,true);return w;
 }
 export function completeProjectMap(root,id,{summary:result,limitations=[]}={}){

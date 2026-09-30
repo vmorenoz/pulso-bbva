@@ -1,96 +1,50 @@
-# Pulso · inicio diferido y delegado
+# Pulso · OpenCode v2
 
-Pulso es un **Asistente IA para desarrollo** que coordina especialistas nativos de OpenCode y VS Code. Conserva planes y contexto
-Markdown, trabajos JSON, un índice del proyecto activo y el historial de cierres en `.pulso/`.
-**No ejecuta su propio runtime de agentes.** Mantiene los 10 roles y las cinco skills
-BBVA originales, sin nuevas dependencias, perfiles, MCP, scheduler ni base de datos.
+Pulso es un **Asistente IA para desarrollo** que orquesta especialistas nativos de OpenCode v2 y conserva planes, contexto, trabajos, estado e historial en `.pulso/`. Sus delegaciones siguen siendo llamadas nativas inspeccionables; el plugin ofrece tools semánticas con recibos breves para reducir ruido de escrituras.
 
-## Instalar y comenzar
+El core valida y persiste artefactos localmente. Pulso no es runtime de agentes, MCP server, daemon, scheduler ni base de datos. OpenCode v2 es el único runtime distribuido; OpenCode v1 se rechaza y VS Code queda fuera hasta tener un adaptador propio.
 
-Requiere Node.js 22+; sin `npm install`. Puede ejecutarse desde cualquier directorio:
+## Instalar
+
+Requiere Node.js 22+ y OpenCode v2 disponible en `PATH`:
 
 ```sh
 node install.mjs
 ```
 
-Selecciona con flechas y Enter el runtime: **OpenCode** o
-**Visual Studio Code (Copilot)**. La instalación es siempre global.
+Para comprobar la vista previa sin escribir:
 
-La opción VS Code utiliza Copilot Agent Host. Después abre el runtime y selecciona
-**pulso** como agente principal. Agentes, skills, utilidades, schemas y plantillas se
-instalan globalmente; estado, trabajos e historial siguen separados en la `.pulso/`
-de cada proyecto.
+```sh
+node install.mjs --dry-run
+```
 
-Para desinstalar, el único selector es Runtime:
+Después reinicia OpenCode y selecciona `pulso` como agente principal. La instalación administra agentes, comandos, skills, plugin y core globales; cada workspace conserva sus propios datos `.pulso/`. Para desinstalar recursos globales:
 
 ```sh
 node install.mjs uninstall
 ```
 
-Se retira únicamente ese runtime de la instalación global. No se recorren proyectos
-ni se eliminan sus trabajos. [Detalles](docs/INSTALLER.md).
+El instalador no modifica la configuración del host, MCP, credenciales, modelos ni permisos del usuario. [Detalles](docs/INSTALLER.md).
 
-Un saludo como **«Hola Pulso»** solo recibe un saludo: no inicia herramientas,
-lecturas de `.pulso`, preparación o delegación. Puedes dar directamente el primer
-encargo real: **«Corrige este problema; el resultado esperado es …»**.
+## Uso
 
-Si falta contexto, Pulso aplica la receta única `skills/pulso-init/SKILL.md`:
-Explorador inspecciona compatibilidad; Ejecutor prepara los recursos **solo si faltan**;
-Explorador levanta `project.md` **solo si hace falta**. Pulso coordina y consolida
-los metadatos del trabajo real. `/pulso-init` permite solicitarlo explícitamente.
-No se inicia por una consulta de estado ni se repite un mapeo válido en cada sesión.
+- `/pulso-status`: consultar el snapshot guardado.
+- `/pulso-recap`: resumir cierres recientes y trabajos abiertos.
+- `/pulso-resume`: retomar un Work existente.
+- `/pulso-init`: solicitar contexto inicial cuando haga falta.
 
-Una `.pulso` legacy o incompatible se informa y se conserva; no se mezcla su estado
-ni se heredan autorizaciones antiguas. El instalador puede dejar un esqueleto vacío:
-esto no equivale a contexto técnico levantado.
+Las tools `pulso_work_create`, `pulso_work_apply`, `pulso_work_close` y `pulso_work_reopen` mantienen el estado canónico. Las mutaciones requieren revisión esperada; los lotes se validan y escriben una vez. Las delegaciones a especialistas permanecen visibles. El recibo no es una prueba de calidad ni de ejecución semántica.
 
-## Retomar trabajo
+Un saludo no inicia herramientas ni prepara el workspace. La preparación solo ocurre ante el primer encargo concreto o `/pulso-init`. Datos legacy o incompatibles se preservan y bloquean; no se migran automáticamente.
 
-| Necesidad | Acceso nativo | Texto opcional de ejemplo |
-|---|---|---|
-| Estado global | `/pulso-status` | `solo bloqueos` o un ID de Work |
-| Resumen del período | `/pulso-recap` | `últimos 7 días` o `2026-09-01 a 2026-09-29` |
-| Continuar un trabajo | `/pulso-resume` | `work-checkout, retoma desde las pruebas` |
-| Contexto inicial | `/pulso-init` | `enfoca el contexto en pagos` |
+## Verificación y desarrollo
 
-OpenCode recibe comandos generados; VS Code descubre las skills equivalentes. La
-lógica vive solo en `skills/pulso-*/SKILL.md`. También puedes conversar normalmente
-con Pulso. El texto opcional es lenguaje natural, no flags ni argumentos de shell; si
-se omite, el comando usa su comportamiento predeterminado. Un estado guardado es el
-último confirmado, no actividad en tiempo real.
+```sh
+cd v3
+npm run build
+npm run verify
+```
 
-## Límites que importan
+Las pruebas offline cubren core, schemas, plugin assets y migración del instalador. No equivalen a smoke test de TUI ni a aceptación live de modelos/tools; esos criterios quedan `NOT_RUN` hasta validarse en OpenCode v2 real.
 
-**Un coordinador por checkout compartido, también durante instalación/actualización.**
-Antes de pasar de un runtime a otro, termina la actividad anterior. Los especialistas
-pueden trabajar en paralelo con dependencias y recursos compatibles. No hay locking
-multiproceso ni sandbox propio; scopes y roles no reemplazan permisos del host.
-
-El instalador reemplaza versiones anteriores **registradas** y elimina sus recursos
-obsoletos. Conserva configuración, credenciales, archivos ajenos y datos de trabajo.
-Una instalación antigua sin manifiesto reconocido o un archivo editado produce un
-error explicativo, no un borrado a ciegas. Se mantiene la resolución canónica de
-ancestros y la protección de symlinks dentro de las rutas administradas.
-
-## Qué está comprobado
-
-| Comprobación | Resultado de la entrega |
-|---|---|
-| Suite de utilidades, composición e instalación global | 94/94 PASS en macOS |
-| Preparación de workspace sin instalación local | Comprobada offline |
-| Cinco skills BBVA | Bytes preservados según procedencia registrada |
-| Saludo e inicialización delegada con OpenCode/Copilot | NOT_RUN |
-| macOS y Windows para esta revisión | NOT_RUN |
-
-Los resultados reproducibles se obtienen con `npm run build` y `npm run verify`; logs
-e informes generados no se versionan. La receta y los límites del rol son instrucciones
-al modelo/runtime, no un control
-de ejecución añadido por Pulso. Un PASS de archivos no demuestra obediencia del modelo.
-
-Para desarrollar o verificar: ejecuta `npm run build` para comprobar la composición en
-memoria y después `npm run verify`. La instalación no depende de ejecutar `build` y genera
-solo los adaptadores seleccionados. No se versionan salidas nativas precompiladas.
-
-[Adaptadores y garantías](docs/RUNTIMES.md) · [Fuentes y build](docs/BUILD.md) ·
-[Ejemplos completos](docs/EXAMPLES.md) · [Operaciones](docs/OPERATIONS.md) ·
-[Seguridad](docs/SECURITY.md) · [Procedencia BBVA](docs/bbva-provenance.json).
+[Arquitectura](docs/ARCHITECTURE.md) · [Runtime](docs/RUNTIMES.md) · [Instalador](docs/INSTALLER.md) · [Operaciones](docs/OPERATIONS.md) · [Seguridad](docs/SECURITY.md) · [Procedencia BBVA](docs/bbva-provenance.json).

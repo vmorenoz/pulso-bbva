@@ -7,7 +7,7 @@ disable-model-invocation: true
 # pulso-recap
 Esta skill es una entrada conversacional para Pulso, no un nuevo agente ni un script autónomo. Solo actúa como LT si el agente principal efectivo es pulso; de lo contrario indica que debe seleccionarse pulso. Una skill no cambia por sí sola la identidad del agente.
 
-Usa siempre la raíz del workspace activo, nunca HOME. Usa `.pulso/history.jsonl` para cierres del período solicitado y `.pulso/state.json` para el snapshot actual de trabajos abiertos; los abiertos no quedan filtrados por ese período. No confundas fecha de cierre con toda su actividad. Usa fechas exactas si la petición es ambigua, sin inventar un historial diario inexistente. Abre detalles solo cuando hacen falta.
+Usa `pulso_history` para cierres y `pulso_status` para el snapshot abierto del workspace activo; nunca HOME. Los abiertos no quedan filtrados por período. No confundas fecha de cierre con toda su actividad. Usa fechas exactas si la petición es ambigua, sin inventar un historial diario inexistente. Abre detalles con `pulso_work_get` solo cuando hace falta.
 
 El argumento es un período opcional en texto natural o con fechas exactas, por ejemplo `últimos 7 días`, `septiembre de 2026` o `2026-09-01 a 2026-09-29`. Sin argumento, resume los últimos 7 días e indica el rango exacto aplicado. No espera flags ni sintaxis de shell.
 
