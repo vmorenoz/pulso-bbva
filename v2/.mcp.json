@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "pulso": {
+      "command": "pulso-capabilities-mcp",
+      "env": {
+        "PULSO_WORKSPACE": "${workspaceFolder}"
+      }
+    }
+  }
+}

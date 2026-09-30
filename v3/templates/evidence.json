@@ -1,0 +1,24 @@
+{
+  "id": "E-1",
+  "kind": "not_run",
+  "status": "not_run",
+  "checkedAt": "2026-09-29T00:00:00.000Z",
+  "criterionIds": [
+    "AC-1"
+  ],
+  "taskIds": [
+    "T-1"
+  ],
+  "report": ".pulso/work/EXAMPLE-1/evidence/E-1.md",
+  "command": null,
+  "cwd": ".",
+  "exitCode": null,
+  "basis": "Ejemplo: sustituir por fingerprint real",
+  "files": [
+    {
+      "path": "src/example.js",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "summary": "Ejemplo no ejecutado. No constituye evidencia positiva."
+}

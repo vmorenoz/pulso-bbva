@@ -1,0 +1,35 @@
+{
+  "protocol": "pulso-result/2",
+  "delegationId": "example-delegation",
+  "specialist": "explorer",
+  "workId": "example-work",
+  "workItemId": "example-item",
+  "status": "completed",
+  "summary": "EJEMPLO DE FORMATO: no describe trabajo ejecutado.",
+  "specialistResult": {
+    "kind": "explorer",
+    "findings": [
+      {
+        "summary": "EJEMPLO: el contrato de fixture permite limitaciones en la raíz.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "fixture/example.ts:1",
+            "note": "Referencia ficticia para mostrar la forma."
+          }
+        ],
+        "limitations": ["Campo deliberadamente inválido en este nivel."]
+      }
+    ],
+    "references": [
+      {
+        "kind": "symbol",
+        "ref": "FixtureContract",
+        "note": "Símbolo ficticio."
+      }
+    ],
+    "limitations": [
+      "EJEMPLO: no se ejecutaron pruebas; esta limitación está en la raíz."
+    ]
+  }
+}

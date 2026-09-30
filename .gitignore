@@ -1,6 +1,12 @@
-node_modules/
-.idea/
-.playwright-mcp/
 .DS_Store
-*.log
-*.tgz
+.idea/
+.pulso/
+*.diff
+*.patch
+*.zip
+**/node_modules/
+**/dist/
+**/coverage/
+**/*.log
+**/evidence/
+**/reports/

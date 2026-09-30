@@ -1,0 +1,24 @@
+{
+  "protocol": "pulso-result/2",
+  "delegationId": "example-delegation",
+  "specialist": "planner",
+  "workId": "example-work",
+  "workItemId": "example-item",
+  "status": "completed",
+  "summary": "EJEMPLO DE FORMATO: no describe trabajo ejecutado.",
+  "specialistResult": {
+    "kind": "planner",
+    "steps": [
+      {
+        "objective": "EJEMPLO: corregir un contrato de fixture sin cambiar su API pública.",
+        "acceptanceCriteria": [
+          "La fixture válida pasa y la inválida se rechaza."
+        ]
+      }
+    ],
+    "assumptions": [
+      "EJEMPLO ilustrativo, no un plan para un repositorio real."
+    ],
+    "risks": ["No confundir un ejemplo con evidencia."]
+  }
+}

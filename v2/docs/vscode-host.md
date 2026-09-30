@@ -1,0 +1,5 @@
+# VS Code Host
+
+The installer renders canonical agent definitions to `.github/agents/*.agent.md` and copies canonical skills to `.github/skills`. A `.github/.pulso-installer.json` manifest stores hashes of managed files and identifies the `vscode-copilot` runtime and scope. Existing unmanaged or user-modified files, and a conflicting `pulso` MCP entry, produce `CONFLICT` rather than being overwritten. Existing foreign MCP servers are preserved.
+
+The installed `pulso` server runs the distributable `pulso-capabilities-mcp` bin, not a source-tree path in the consumer workspace. It uses documented `.agent.md` custom agents, `user-invocable` / `disable-model-invocation`, per-agent `tools` allowlists, workspace skill locations, MCP configuration, and native subagents. Pulso explicitly lists the canonical specialist names in `agents`; specialists expose no `agent` tool. VS Code renders the same schema-derived Task/ResultContracts as OpenCode. The host presents subagents as collapsible tool calls; Pulso does not build a custom UI. The protocol guard is OpenCode-only; VS Code remains prompt-level until a supported enforcement hook exists.

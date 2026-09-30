@@ -1,0 +1,27 @@
+{
+  "protocol": "pulso-result/2",
+  "delegationId": "example-delegation",
+  "specialist": "security-auditor",
+  "workId": "example-work",
+  "workItemId": "example-item",
+  "status": "completed",
+  "summary": "EJEMPLO DE FORMATO: no describe trabajo ejecutado.",
+  "specialistResult": {
+    "kind": "security-auditor",
+    "findings": [
+      {
+        "severity": "medium",
+        "summary": "EJEMPLO ficticio de autorización ausente.",
+        "evidence": [
+          {
+            "kind": "file",
+            "ref": "fixture/handler.ts:1",
+            "note": "No corresponde al repositorio del usuario."
+          }
+        ],
+        "impact": "Impacto hipotético de la fixture.",
+        "remediation": "Comprobar la autorización antes del acceso."
+      }
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "protocol": "pulso-result/2",
+  "delegationId": "example-delegation",
+  "specialist": "executor",
+  "workId": "example-work",
+  "workItemId": "example-item",
+  "status": "blocked",
+  "summary": "EJEMPLO DE FORMATO: no describe trabajo ejecutado.",
+  "specialistResult": {
+    "kind": "executor",
+    "changes": [
+      {
+        "target": "fixture/example.ts",
+        "summary": "EJEMPLO de cambio, no un archivo modificado real."
+      }
+    ],
+    "validations": [
+      {
+        "command": "bun test fixture/example.test.ts",
+        "outcome": "not-run",
+        "note": "Ejemplo de formato; el comando no fue ejecutado."
+      }
+    ],
+    "unresolved": ["Sustituir los ejemplos por resultados reales."]
+  }
+}

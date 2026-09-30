@@ -1,0 +1,99 @@
+import { legacyPrimaryPrompt, semanticPrompt } from "../../agents/definitions";
+import type {
+  AgentDefinition,
+  CanonicalSkill,
+  RuntimeDefinition,
+  RuntimeRenderOptions,
+} from "../types";
+
+const toolNames: Record<string, string> = {
+  read: "read",
+  search: "search",
+  edit: "edit",
+  shell: "terminal",
+  skill: "skill",
+  delegate: "agent",
+  mcp: "pulso/*",
+};
+const list = (values: string[]) =>
+  `[${values.map((value) => `'${value}'`).join(", ")}]`;
+
+// Baseline legacy contract retained until VS Code receives the native bridge.
+const legacyPrimaryRuntimeContract =
+  "Delegate through VS Code's native agent/subagent tool. Set the Task JSON protocol field to pulso-task/2 and the returned AgentResult protocol field to pulso-result/2; omit unused optional Task fields and never send null.";
+
+export const vscodeCopilotRuntime: RuntimeDefinition = {
+  id: "vscode-copilot",
+  displayName: "VS Code / GitHub Copilot",
+  protocolEnforcement: { supported: false, mode: "prompt-only" },
+  capabilities: {
+    customAgents: true,
+    subagents: true,
+    agentSkills: true,
+    mcp: true,
+    perAgentModel: false,
+    inheritedAgentModel: true,
+  },
+  renderAgent(agent: AgentDefinition, _options?: RuntimeRenderOptions) {
+    const tools = [
+      ...new Set(
+        agent.capabilities.allow
+          .map((capability) => toolNames[capability])
+          .filter(Boolean),
+      ),
+    ];
+    const delegation =
+      agent.delegation?.allowedSpecialists.map(
+        (id) => agentDefinitions[id].displayName,
+      ) ?? [];
+    const frontmatter = [
+      `name: ${agent.displayName}`,
+      `description: ${agent.description}`,
+      `tools: ${list(tools)}`,
+      `agents: ${list(delegation)}`,
+      `user-invocable: ${agent.role === "primary"}`,
+    ];
+    if (agent.role === "specialist")
+      frontmatter.push("disable-model-invocation: false");
+    const contract =
+      agent.role === "primary"
+        ? legacyPrimaryRuntimeContract
+        : "This specialist is stateless and must not delegate. Follow the generated communication_protocol; omit unused optional fields and never send null for an omitted field.";
+    return {
+      path: `${agent.id}.agent.md`,
+      content: `---\n${frontmatter.join("\n")}\n---\n${semanticPrompt(agent, {
+        primaryPrompt: legacyPrimaryPrompt,
+      })}\n<runtime_contract>${contract}</runtime_contract>\n`,
+    };
+  },
+  renderSkill(skill: CanonicalSkill) {
+    return { path: `${skill.id}/SKILL.md`, content: skill.content };
+  },
+  buildRuntimeConfig(options) {
+    const path =
+      options.scope === "local"
+        ? ".vscode/mcp.json"
+        : "<discovered-vscode-user-mcp-config>";
+    const command = options.mcpCommand[0];
+    if (!command) throw new Error("VSCODE_MCP_COMMAND_EMPTY");
+    const artifact = {
+      servers: {
+        pulso: {
+          type: "stdio",
+          command,
+          args: options.mcpCommand.slice(1),
+          env: { PULSO_WORKSPACE: "$" + "{workspaceFolder}" },
+        },
+      },
+    };
+    return [
+      {
+        path,
+        content: `${JSON.stringify(artifact, null, 2)}\n`,
+        format: "json",
+      },
+    ];
+  },
+};
+
+import { agentDefinitions } from "../../agents/definitions";

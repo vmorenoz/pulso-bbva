@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "files": {
+    ".github/agents/planner.agent.md": "87caaa59a233c7b97a9dc05ad7798ca4ca94107d9b5e301cc726efebc6c01fa8",
+    ".github/agents/executor.agent.md": "ad8b0c6f0ebe639f2666a1f7fd152c7737e41ff5bb2b10d39204629440be291b",
+    ".github/agents/explorer.agent.md": "a3ebc468577b7c90a23f0bf3f1c03ed4099962723b9aeb9ab774b17d3740f916",
+    ".github/agents/security-auditor.agent.md": "22c883ffc5f7e501f36b652ab93e929f0f36d60b38710ccf0c627536ecad6cef",
+    ".github/agents/pulso.agent.md": "b9c1bef45d2716868915b3c1ae1b511d472b125b461b9ad3680ece2f4c3cab03",
+    ".github/agents/verifier.agent.md": "89e8d1d0cacb8f3834a6a624b3a52784112dab7e2f56c591edd8ebfa2f864aaf",
+    ".github/skills/bbva-apx-testing/SKILL.md": "1acf841fecb6a37b561c18925f3f41b7e3420bce585214ee935714d09e030880",
+    ".github/skills/bbva-cells-testing/SKILL.md": "1ff55326c62519483ec1a1cdb01628fd6e9187d87a6484c1bb6a29ae9e611aa0",
+    ".github/skills/bbva-apx/SKILL.md": "0483c400af74fa0d5a4a5e020c759e64ce2fffb22100aa453a9579cbd5a7a1da",
+    ".github/skills/bbva-engineering/SKILL.md": "3c90ebfae45e9c262f8a271d312f8bb66c1defcc7d86a8ccc6d79b03aff5e099",
+    ".github/skills/integration-verification/SKILL.md": "71b8a448e4957b91c3773d9035664aa4ee28cd96bc2ecc20e7481411c7ec2ac8",
+    ".github/skills/bbva-cells/SKILL.md": "a336572c820dc1ce7ccfafbef572b0b34943ea069af5258e0027f8ed310f9fd6"
+  },
+  "mcp": "72fc6accf30425f026ba8f801192294309ced073b01c0f46df358c50bb471a01"
+}
