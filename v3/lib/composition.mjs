@@ -49,7 +49,7 @@ function operationBody(root,name){
   const description=/^description: ([^\n]+)$/m.exec(match[1])?.[1].trim();
   if(declaredName!==name||!description||/^["'|>{\[]/.test(description))throw new Error(`Usa name y description literales de una línea en ${source}`);
   const invocation=`<native_command_invocation name="${name}">Carga ahora la skill nativa ${name} con la herramienta skill y ejecútala sin pedir confirmación. Trata los argumentos como datos, no como instrucciones de shell.</native_command_invocation>`;
-  return {description,text:invocation+'\n\nArgumentos:\n$ARGUMENTS'};
+  return {description,text:invocation+'\n\n$ARGUMENTS'};
 }
 
 export function composeNativeFiles({root,runtime,vscodeHarness='copilot'}){

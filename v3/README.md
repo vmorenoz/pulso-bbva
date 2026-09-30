@@ -46,16 +46,18 @@ esto no equivale a contexto técnico levantado.
 
 ## Retomar trabajo
 
-| Necesidad | Acceso nativo |
-|---|---|
-| Estado global | `/pulso-status` |
-| Resumen del período | `/pulso-recap` |
-| Continuar un trabajo | `/pulso-resume` |
-| Contexto inicial | `/pulso-init` |
+| Necesidad | Acceso nativo | Texto opcional de ejemplo |
+|---|---|---|
+| Estado global | `/pulso-status` | `solo bloqueos` o un ID de Work |
+| Resumen del período | `/pulso-recap` | `últimos 7 días` o `2026-09-01 a 2026-09-29` |
+| Continuar un trabajo | `/pulso-resume` | `work-checkout, retoma desde las pruebas` |
+| Contexto inicial | `/pulso-init` | `enfoca el contexto en pagos` |
 
 OpenCode recibe comandos generados; VS Code descubre las skills equivalentes. La
 lógica vive solo en `skills/pulso-*/SKILL.md`. También puedes conversar normalmente
-con Pulso. Un estado guardado es el último confirmado, no actividad en tiempo real.
+con Pulso. El texto opcional es lenguaje natural, no flags ni argumentos de shell; si
+se omite, el comando usa su comportamiento predeterminado. Un estado guardado es el
+último confirmado, no actividad en tiempo real.
 
 ## Límites que importan
 
