@@ -1,6 +1,6 @@
 # Runtime soportado: OpenCode v1
 
-Pulso se distribuye únicamente para OpenCode v1. La instalación exige una versión major 1 detectable en `PATH`; OpenCode v2 se rechaza. VS Code no forma parte de esta distribución.
+Pulso se distribuye únicamente para OpenCode v1. La instalación no ejecuta ni valida el binario de OpenCode, por lo que no requiere que esté en `PATH`; OpenCode v2 y VS Code no forman parte de esta distribución.
 
 ## Componentes instalados
 

@@ -1,6 +1,6 @@
 # Instalador de Pulso
 
-El único comando CLI de Pulso es bootstrap global de OpenCode v1; no administra Work/State/History ni ejecuta operaciones de proyecto. Requiere Node.js 22+ y OpenCode major 1 detectable en `PATH`.
+El único comando CLI de Pulso es bootstrap global de OpenCode v1; no administra Work/State/History ni ejecuta operaciones de proyecto. Requiere Node.js 22+; no ejecuta ni valida el binario de OpenCode.
 
 ```sh
 node install.mjs
@@ -8,7 +8,7 @@ node install.mjs --dry-run
 node install.mjs uninstall
 ```
 
-La instalación configura los archivos gestionados de Pulso en el directorio global de OpenCode y `~/.pulso/`. No usa `npm install`, sudo ni modifica `opencode.json(c)`, credenciales, modelos, MCP o configuración de permisos del usuario. Si el ejecutable reporta major 1, se cancela antes de escribir.
+La instalación configura los archivos gestionados de Pulso en el directorio global de OpenCode y `~/.pulso/`. No usa `npm install`, sudo ni modifica credenciales, modelos, MCP o configuración de permisos del usuario. Añade su plugin y `default_agent: "pulso"` a `opencode.jsonc`, preservando el valor anterior para desinstalar.
 
 ## Rutas globales
 
