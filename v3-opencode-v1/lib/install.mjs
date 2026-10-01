@@ -171,10 +171,21 @@ function checkRemovals(root,files,prior){
       throw new Error(`Archivo de Pulso modificado: ${dest}. No se borró nada. Conserva tu edición fuera de esta ruta o restáurala antes de continuar.`);
   }
 }
-function checkOpenCodeV1(env,probeVersion=()=>spawnSync(env.OPENCODE_BIN||'opencode',['--version'],{encoding:'utf8',timeout:8000,env:{...process.env,...env}}).stdout){
-  let result;try{result=probeVersion();}catch{result='';}
-  const version=String(result||'').trim(),match=/\b(?:v)?(\d+)\.\d+\.\d+\b/.exec(version);
-  if(!match)throw new Error('No se pudo detectar OpenCode en PATH. Pulso requiere OpenCode v1; instala OpenCode v1 y vuelve a intentar.');
+function openCodeVersion(env){
+  let binary=env.OPENCODE_BIN||'opencode';
+  // PowerShell commonly resolves the npm shim as .ps1, which Node cannot spawn directly.
+  if(process.platform==='win32'&&/\.ps1$/i.test(binary)){const cmd=binary.replace(/\.ps1$/i,'.cmd');if(fs.existsSync(cmd))binary=cmd;}
+  const options={encoding:'utf8',timeout:8000,env:{...process.env,...env}};
+  if(process.platform==='win32'&&/\.(?:cmd|bat)$/i.test(binary)){
+    const shell=env.ComSpec||process.env.ComSpec||'cmd.exe';
+    return spawnSync(shell,['/d','/s','/c',`"${binary}" --version`],options);
+  }
+  return spawnSync(binary,['--version'],options);
+}
+function checkOpenCodeV1(env,probeVersion){
+  let result;try{result=probeVersion?probeVersion():openCodeVersion(env);}catch(error){result={error};}
+  const output=typeof result==='string'?result:`${result?.stdout||''}\n${result?.stderr||''}`,version=output.trim(),match=/\b(?:v)?(\d+)\.\d+\.\d+\b/.exec(version);
+  if(!match){const detail=result&&typeof result==='object'?(result.error?.message||result.stderr?.trim()||`exit ${result.status??'desconocido'}`):'';throw new Error(`No se pudo detectar OpenCode v1. Ejecuta \`opencode --version\` en esta terminal o define OPENCODE_BIN a opencode.cmd. ${detail}`.trim());}
   if(Number(match[1])!==1)throw new Error(`Pulso requiere OpenCode v1. Detectado: ${version}. Instala OpenCode v1 antes de instalar Pulso.`);
   return version;
 }
