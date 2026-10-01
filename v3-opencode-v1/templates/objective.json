@@ -1,0 +1,12 @@
+{
+  "id": "OBJ-1",
+  "outcome": "Resultado observable del trabajo de ejemplo.",
+  "criteria": [
+    {
+      "id": "AC-1",
+      "description": "El resultado cumple el comportamiento acordado.",
+      "verification": "Comprobación específica por definir con el usuario/proyecto antes de ejecutar.",
+      "evidenceIds": []
+    }
+  ]
+}
