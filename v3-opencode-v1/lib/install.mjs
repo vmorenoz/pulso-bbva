@@ -185,7 +185,7 @@ function openCodeVersion(env){
 function checkOpenCodeV1(env,probeVersion){
   let result;try{result=probeVersion?probeVersion():openCodeVersion(env);}catch(error){result={error};}
   const output=typeof result==='string'?result:`${result?.stdout||''}\n${result?.stderr||''}`,version=output.trim(),match=/\b(?:v)?(\d+)\.\d+\.\d+\b/.exec(version);
-  if(!match){const detail=result&&typeof result==='object'?(result.error?.message||result.stderr?.trim()||`exit ${result.status??'desconocido'}`):'';throw new Error(`No se pudo detectar OpenCode v1. Ejecuta \`opencode --version\` en esta terminal o define OPENCODE_BIN a opencode.cmd. ${detail}`.trim());}
+  if(!match){const detail=result&&typeof result==='object'?(result.error?.message||result.stderr?.trim()||`exit ${result.status??'desconocido'}`):'';throw new Error(`No se pudo detectar OpenCode v1. Ejecuta \`opencode --version\` en esta terminal o define OPENCODE_BIN a la ruta de opencode.exe. ${detail}`.trim());}
   if(Number(match[1])!==1)throw new Error(`Pulso requiere OpenCode v1. Detectado: ${version}. Instala OpenCode v1 antes de instalar Pulso.`);
   return version;
 }
