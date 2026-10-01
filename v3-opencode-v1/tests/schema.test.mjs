@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {schema,assertSchema,validateSchema,checkSchemaVocabulary} from '../lib/schema.mjs';
+const example=name=>JSON.parse(fs.readFileSync(new URL(`../templates/${name}.json`,import.meta.url),'utf8'));
+for(const name of ['work','objective','task','delegation','result','evidence','state','history-entry'])test(`Plantilla JSON ${name} cumple su schema`,()=>assert.doesNotThrow(()=>assertSchema(name,example(name))));
+test('Campos requeridos',()=>{const w=example('work');delete w.objective;assert.throws(()=>assertSchema('work',w),/requerido/);});
+test('Rechaza propiedades no conocidas',()=>{const w=example('work');w.scheduler={};assert.throws(()=>assertSchema('work',w),/desconocido/);});
+test('Rechaza tipos erróneos',()=>{const w=example('work');w.tasks='T-1';assert.throws(()=>assertSchema('work',w),/tipo/);});
+test('Fechas imposibles no se normalizan silenciosamente',()=>{const w=example('work');w.createdAt='2026-02-30T00:00:00Z';assert.throws(()=>assertSchema('work',w),/fecha/);});
+test('Rechaza ID con traversal',()=>{const w=example('work');w.id='../otra';assert.throws(()=>assertSchema('work',w),/patrón/);});
+test('Rechaza estado no documentado',()=>{const w=example('work');w.status='PASS';assert.throws(()=>assertSchema('work',w),/enum/);});
+test('No ignora keywords JSON Schema desconocidas',()=>assert.throws(()=>validateSchema({type:'string',not:{}},'x'),/no soportada/));
+test('No importa schemas mediante nombres arbitrarios',()=>assert.throws(()=>schema('../secrets'),/inválido/));
+test('Todos los schemas usan el vocabulario implementado',()=>{for(const file of fs.readdirSync(new URL('../schemas/',import.meta.url)))checkSchemaVocabulary(JSON.parse(fs.readFileSync(new URL('../schemas/'+file,import.meta.url),'utf8')));});
