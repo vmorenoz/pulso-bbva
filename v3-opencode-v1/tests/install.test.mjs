@@ -7,19 +7,14 @@ import {prepareWorkspace} from '../lib/workspace.mjs';
 import {readWork} from '../lib/artifacts.mjs';
 import {temp} from './helpers.mjs';
 
-const v1=()=> 'opencode v1.18.33';
-const options=homeDir=>({homeDir,env:{},probeVersion:v1});
+const options=homeDir=>({homeDir,env:{}});
 
 test('OpenCode v1 installation includes only global Pulso resources and its plugin entry',t=>{
   const home=temp(t),result=install(options(home));
-  assert.deepEqual(result.runtimes,['opencode-v1']);assert.equal(result.opencodeVersion,v1());
+  assert.deepEqual(result.runtimes,['opencode-v1']);assert.equal(result.opencodeVersion,'NOT_CHECKED');
   for(const file of ['.config/opencode/agents/pulso.md','.config/opencode/plugins/pulso/index.mjs','.config/opencode/commands/pulso-init.md','.config/opencode/skills/pulso-init/SKILL.md','.pulso/lib/artifacts.mjs','.pulso/lib/memory.mjs','.pulso/installation.json'])assert.ok(fs.existsSync(path.join(home,file)),file);
   assert.match(fs.readFileSync(path.join(home,'.config/opencode/opencode.jsonc'),'utf8'),/file:.*plugins\/pulso\/index\.mjs/);
   assert.equal(fs.existsSync(path.join(home,'.pulso/state.json')),false);
-});
-
-test('Rechaza OpenCode v2 antes de escribir',t=>{
-  const home=temp(t);assert.throws(()=>install({...options(home),probeVersion:()=> 'opencode 2.0.20'}),/requiere OpenCode v1/);assert.equal(fs.existsSync(path.join(home,'.pulso')),false);
 });
 
 test('Añade el plugin a una configuración global vacía',t=>{

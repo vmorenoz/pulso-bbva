@@ -6,7 +6,7 @@ El core valida y persiste artefactos localmente. Pulso no es runtime de agentes,
 
 ## Instalar
 
-Requiere Node.js 22+ y OpenCode v1 disponible en `PATH`:
+Requiere Node.js 22+. La instalación no ejecuta ni valida el binario de OpenCode; está diseñada para OpenCode v1.
 
 ```sh
 node install.mjs
