@@ -2,6 +2,8 @@
 
 Pulso se distribuye únicamente para OpenCode v1. La instalación no ejecuta ni valida el binario de OpenCode, por lo que no requiere que esté en `PATH`; OpenCode v2 y VS Code no forman parte de esta distribución.
 
+El bootstrap migra integraciones globales OpenCode de Pulso v1/v2/v3 y conserva los recursos de Copilot y VS Code aunque aparezcan en manifests históricos. La versión histórica de Pulso no determina la versión del host. El inventario, la edición JSONC, los respaldos y el rollback se describen en [INSTALLER.md](INSTALLER.md).
+
 ## Componentes instalados
 
 | Recurso | Ubicación global |
@@ -22,7 +24,7 @@ El nombre del agente determina su ID. Pulso tiene modo `primary`; especialistas,
 
 ## Raíz del proyecto
 
-Cada ejecución toma el `sessionID` del contexto nativo de la tool y consulta esa sesión con `ctx.session.get()`, usando `session.location.directory`; no captura la raíz al cargar el plugin. Ninguna tool acepta `root` desde el modelo. La semántica exacta debe validarse en sesión v2 real, particularmente worktrees y directorios anidados; no se afirma aquí aceptación live.
+Cada ejecución toma el `sessionID` del contexto nativo de la tool y consulta esa sesión con `ctx.session.get()`, usando `session.location.directory`; no captura la raíz al cargar el plugin. Ninguna tool acepta `root` desde el modelo. La semántica exacta debe validarse en sesión OpenCode v1 real, particularmente worktrees y directorios anidados; no se afirma aquí aceptación live.
 
 ## Compatibilidad y evidencia
 

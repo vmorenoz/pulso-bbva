@@ -1,4 +1,4 @@
-import {closeWork,createWork,readWork,reopenWork,saveWork,status,history,validateProject,completeProjectMap} from './artifacts.mjs';
+import {closeWork,createWork,readWork,reopenWork,saveWork,status,history,validateProject,completeProjectMap,syncWork,repair} from './artifacts.mjs';
 import {assertID,fingerprint,now,safePath} from './fs.mjs';
 import {workReceipt} from './receipts.mjs';
 import {assertSchema} from './schema.mjs';
@@ -156,6 +156,16 @@ export function reopenWorkOperation(root,{workId,expectedRevision,reason}) {
 }
 
 export function readStatus(root){return status(root);}
+export function syncWorkOperation(root,{workId,expectedRevision}){
+  assertID(workId);const current=readWork(root,workId,{files:false});
+  if(!Number.isSafeInteger(expectedRevision)||current.revision!==expectedRevision)throw new Error(`Revisión obsoleta; actual=${current.revision}. Releer y reconciliar, no sobrescribir.`);
+  status(root);history(root);
+  return workReceipt(syncWork(root,workId),{changes:['proyecciones sincronizadas']});
+}
+export function recoverWorkspaceOperation(root){
+  const state=repair(root,{files:true});
+  return {operation:'workspace.recover',recovered:true,state,validation:validateProject(root)};
+}
 export function readHistory(root,{workId,since,until,limit=20}={}){
   if(!Number.isInteger(limit)||limit<1||limit>100)throw new Error('limit debe estar entre 1 y 100');
   const validDate=value=>value===undefined||typeof value==='string'&&Number.isFinite(Date.parse(value));
