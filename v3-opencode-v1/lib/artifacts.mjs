@@ -1,5 +1,6 @@
 /** Synchronous file helpers. No agent sessions, queue, scheduler, timers or runtime state. */
 import fs from 'node:fs';
+import {generateWorkId} from './identity.mjs';
 import {assertSchema} from './schema.mjs';
 import {safePath,exists,readJSON,readText,writeJSON,atomicWrite,assertID,now,fingerprint} from './fs.mjs';
 const terminal = status => ['done','cancelled'].includes(status);
@@ -75,7 +76,7 @@ function putSummary(root,w,focus=false){
   s.revision++;s.updatedAt=now();writeJSON(root,'.pulso/state.json',assertSchema('state',s));return s;
 }
 export function syncWork(root,id,{focus=false}={}) {const w=readWork(root,id,{files:false});if(w.closure)recordClosure(root,w);putSummary(root,w,focus);return w;}
-export function createWork(root,{id,title,objective,criterion,verification,priority='normal'}) {
+export function createWork(root,{id=generateWorkId(),title,objective,criterion,verification,priority='normal'}) {
   assertID(id);if(exists(root,wp(id)))throw new Error(`Trabajo ya existe: ${id}`);
   status(root);history(root);const ts=now();
   const w={schemaVersion:1,id,revision:1,cycle:1,title,objective:{id:'OBJ-1',outcome:objective,criteria:[{id:'AC-1',description:criterion,verification,evidenceIds:[]}]},status:'pending',priority,createdAt:ts,updatedAt:ts,summary:'Trabajo creado; alcance pendiente de revisión.',blockers:[],decisionsPending:[],nextAction:'Revisar contexto y criterio de aceptación',documents:[],tasks:[],evidence:[],closure:null};
@@ -138,14 +139,16 @@ export function reopenWork(root,id,reason){
   for(const t of w.tasks){t.status='pending';t.evidenceIds=[];t.summary='Revisión requerida tras reapertura';}
   validateWork(root,w,{files:false});writeJSON(root,wp(id),w);putSummary(root,w,true);return w;
 }
-export function repair(root){
+export function repair(root,{files=false}={}){
   const oldHistory=history(root);const folder=safePath(root,'.pulso/work');const works=[];
-  for(const item of fs.readdirSync(folder,{withFileTypes:true})){if(item.isSymbolicLink())throw new Error('Symlink en work');if(item.isDirectory()){assertID(item.name);works.push(readWork(root,item.name,{files:false}));}}
+  for(const item of fs.readdirSync(folder,{withFileTypes:true})){if(item.isSymbolicLink())throw new Error('Symlink en work');if(item.isDirectory()){assertID(item.name);works.push(readWork(root,item.name,{files}));}}
   // Validate every work before any changes; never use a partial successful subset.
   const ids=new Set(works.map(w=>w.id));
   for(const e of oldHistory)if(!ids.has(e.workId))throw new Error(`Historial apunta a trabajo ausente: ${e.workId}; restaurar carpeta antes de reparar.`);
   let old;try{old=status(root);}catch{old=null;}
   if(old)for(const e of old.works)if(!ids.has(e.id))throw new Error(`Índice apunta a trabajo ausente: ${e.id}; no se descartará.`);
+  // Reject every divergent closure before appending any missing one.
+  for(const w of works)if(w.closure){const archived=oldHistory.find(e=>e.closureId===w.closure.id);if(archived&&!same(archived,closureEntry(w)))throw new Error('Cierre existente diferente; requiere revisión humana');}
   for(const w of works)if(w.closure)recordClosure(root,w);
   const s=emptyState();s.revision=(old?.revision||0)+1;s.works=works.filter(w=>!terminal(w.status)).map(summary);
   s.focusWorkId=s.works.some(w=>w.id===old?.focusWorkId)?old.focusWorkId:null;

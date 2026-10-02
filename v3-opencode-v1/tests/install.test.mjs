@@ -6,6 +6,7 @@ import {install,uninstall} from '../lib/install.mjs';
 import {prepareWorkspace} from '../lib/workspace.mjs';
 import {readWork} from '../lib/artifacts.mjs';
 import {temp} from './helpers.mjs';
+import {parseConfig} from '../lib/install-jsonc.mjs';
 
 const options=homeDir=>({homeDir,env:{}});
 
@@ -35,22 +36,22 @@ test('Distribuye la migración automática de estado legacy en pulso-init',t=>{
 });
 
 test('La preparación conserva memoria y contexto del proyecto',t=>{
-  const project=temp(t);prepareWorkspace(project);fs.writeFileSync(path.join(project,'.pulso/project.md'),'Contexto confirmado');
-  assert.equal(prepareWorkspace(project).existingWorkspace,true);assert.equal(fs.readFileSync(path.join(project,'.pulso/project.md'),'utf8'),'Contexto confirmado');assert.ok(fs.existsSync(path.join(project,'.pulso/memory.json')));
+  const project=temp(t),homeDir=temp(t);prepareWorkspace(project,{homeDir});fs.writeFileSync(path.join(project,'.pulso/project.md'),'Contexto confirmado');
+  assert.equal(prepareWorkspace(project,{homeDir}).existingWorkspace,true);assert.equal(fs.readFileSync(path.join(project,'.pulso/project.md'),'utf8'),'Contexto confirmado');assert.ok(fs.existsSync(path.join(project,'.pulso/memory.json')));
 });
 
 test('La preparación migra una carpeta legacy vacía sin bloquear',t=>{
   const project=temp(t),legacy=path.join(project,'.pulso/tasks');fs.mkdirSync(legacy,{recursive:true});
-  const result=prepareWorkspace(project);assert.equal(result.legacyMigrated,true);assert.equal(result.migratedWorks,0);assert.ok(fs.existsSync(path.join(project,'.pulso/state.json')));assert.equal(fs.existsSync(legacy),false);
+  const result=prepareWorkspace(project,{homeDir:temp(t)});assert.equal(result.legacyMigrated,true);assert.equal(result.migratedWorks,0);assert.ok(fs.existsSync(path.join(project,'.pulso/state.json')));assert.equal(fs.existsSync(legacy),false);
 });
 
 test('La preparación convierte una tarea legacy en un Work pendiente de revisión',t=>{
   const project=temp(t),tasks=path.join(project,'.pulso/tasks');fs.mkdirSync(tasks,{recursive:true});fs.writeFileSync(path.join(tasks,'PULSO-001.json'),JSON.stringify({id:'PULSO-001',title:'Entrega anterior',objective:'Conservar el alcance',status:'implemented',acceptance_criteria:['El resultado cumple'],execution:{summary:'Implementación anterior',verification_gaps:['Falta validación actual']}}));
-  const result=prepareWorkspace(project),work=readWork(project,'PULSO-001',{files:false});assert.equal(result.migratedWorks,1);assert.equal(work.status,'paused');assert.match(work.summary,/Migrado desde legacy/);assert.match(work.blockers.join('\n'),/Falta validación actual/);assert.equal(fs.existsSync(tasks),false);
+  const result=prepareWorkspace(project,{homeDir:temp(t)}),work=readWork(project,'PULSO-001',{files:false});assert.equal(result.migratedWorks,1);assert.equal(work.status,'paused');assert.match(work.summary,/Migrado desde legacy/);assert.match(work.blockers.join('\n'),/Falta validación actual/);assert.equal(fs.existsSync(tasks),false);
 });
 
 test('Uninstall elimina la integración global y preserva los datos del workspace',t=>{
-  const home=temp(t),project=temp(t),config=path.join(home,'.config/opencode/opencode.jsonc');fs.mkdirSync(path.dirname(config),{recursive:true});fs.writeFileSync(config,'{"default_agent":"build"}\n');install(options(home));prepareWorkspace(project);const state=fs.readFileSync(path.join(project,'.pulso/state.json'));
-  const result=uninstall({homeDir:home,env:{}});assert.equal(result.uninstalled,true);assert.equal(fs.existsSync(path.join(home,'.config/opencode/plugins/pulso/index.mjs')),false);assert.match(fs.readFileSync(config,'utf8'),/"default_agent":"build"/);assert.equal(fs.existsSync(path.join(home,'.pulso/installation.json')),false);
+  const home=temp(t),project=temp(t),config=path.join(home,'.config/opencode/opencode.jsonc');fs.mkdirSync(path.dirname(config),{recursive:true});fs.writeFileSync(config,'{"default_agent":"build"}\n');install(options(home));prepareWorkspace(project,{homeDir:home});const state=fs.readFileSync(path.join(project,'.pulso/state.json'));
+  const result=uninstall({homeDir:home,env:{}});assert.equal(result.uninstalled,true);assert.equal(fs.existsSync(path.join(home,'.config/opencode/plugins/pulso/index.mjs')),false);assert.equal(parseConfig(fs.readFileSync(config,'utf8')).default_agent,'build');assert.equal(fs.existsSync(path.join(home,'.pulso/installation.json')),false);
   assert.deepEqual(fs.readFileSync(path.join(project,'.pulso/state.json')),state);
 });

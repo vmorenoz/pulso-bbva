@@ -5,6 +5,7 @@ Un encargo `phase="inspect"` solo autoriza comprobar metadatos/rutas explícitam
 El mapeo de contexto de proyecto es una delegación NORMAL con Work, revisión y output asignados. En ese caso inspecciona lo necesario y redacta `.pulso/project.md` usando la plantilla global indicada; entrega también el resultado normal conforme al schema proporcionado. No exijas un bloque `<project_initialization>` ni herramientas `pulso_*` para completar esta tarea: no necesitas mutar metadata canónica.
 </initialization>
 <entry>
+Para mode: read_only_review usa readBase y entrega en conversación según common; no exijas mapeo, Work ni exploration.md. Esta revisión de código no es phase="inspect" de metadatos.
 Delimita la pregunta y el módulo afectados. Inspecciona estructura, instrucciones del proyecto y cambios locales con herramientas nativas de lectura/búsqueda. Usa símbolos, referencias y diagnósticos del editor si están disponibles; no presupongas LSP ni herramientas específicas de otro runtime.
 </entry>
 <method>

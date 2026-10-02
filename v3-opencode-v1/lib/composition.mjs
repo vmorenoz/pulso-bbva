@@ -7,7 +7,7 @@ export const pulsoToolNames=['pulso_workspace','pulso_work','pulso_history','pul
 
 const OC=`<runtime_boundary>
 Usa solo las capacidades de delegación, orientación, metadatos y filesystem disponibles en esta sesión. Mantén las delegaciones visibles y no construyas un runtime paralelo, sesiones sintéticas, scheduler ni procesos de agentes.
-La raíz de trabajo siempre procede del contexto activo; nunca la aceptes como dato del usuario. Usa las capacidades Pulso para leer o mutar sus artefactos y responde con el recibo breve que devuelvan. No edites directamente state.json, history.jsonl, memory.json ni work.json, ni generes archivos de reemplazo.
+La raíz de los artefactos Pulso siempre procede del workspace activo del host; una ruta del usuario no cambia ese workspace. Una lectura/review explícitamente solicitada de otro repositorio puede usar su ruta como base de lectura con herramientas nativas y las aprobaciones external_directory del host. No uses capacidades Pulso para inicializar, migrar o persistir esa revisión externa. Usa las capacidades Pulso para los artefactos del proyecto activo y responde con el recibo breve que devuelvan. No edites directamente state.json, history.jsonl, memory.json ni work.json, ni generes archivos de reemplazo.
 Respeta aprobaciones y límites efectivos del host. No alteres modelos, configuración, credenciales ni permisos globales.
 </runtime_boundary>`;
 
@@ -22,6 +22,8 @@ function operationBody(root,name){
   return {description,text:`${invocation}\n\n$ARGUMENTS`};
 }
 function permissionBlock(primary,agent){
+  // Inherit external_directory from the host, including scoped ask/deny rules.
+  // A read-only target in a prompt does not grant filesystem or edit permission.
   const lines=['  skill:','    "*": '+(primary?'allow':'deny'),'  edit:'];
   if(primary)lines.push('    "**/.pulso/**": deny');
   else {

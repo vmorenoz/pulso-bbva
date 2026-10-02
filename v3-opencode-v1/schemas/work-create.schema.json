@@ -4,7 +4,7 @@
   "title": "Pulso work creation input",
   "type": "object",
   "additionalProperties": false,
-  "required": ["workId", "title", "objective", "criterion", "verification"],
+  "required": ["title", "objective", "criterion", "verification"],
   "properties": {
     "workId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
     "title": {"type": "string", "minLength": 1, "maxLength": 240},

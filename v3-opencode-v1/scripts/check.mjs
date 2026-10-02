@@ -18,9 +18,18 @@ try{
     const catalog=JSON.parse(read('agents/catalog.json')),files=composeNativeFiles({root});
     for(const agent of [catalog.orchestrator,...catalog.specialists]){const value=files.get(`.opencode/agents/${agent.id}.md`);assert.ok(value);assert.match(value,/<runtime_boundary>/);assert.doesNotMatch(value,/OpenCode v[12]|opencode-v[12]|CodeGraph/);assert.match(value,/permission:/);assert.doesNotMatch(value,/permissions:/);for(const tool of pulsoToolNames)assert.match(value,new RegExp(`${tool}: ${agent.id==='pulso'?'allow':'deny'}`));}
     for(const name of ['pulso-status','pulso-recap','pulso-resume','pulso-init'])assert.ok(files.has(`.opencode/commands/${name}.md`));
-    const plugin=read('plugins/opencode-v1/index.mjs');for(const tool of pulsoToolNames)assert.match(plugin,new RegExp(tool));assert.match(plugin,/@opencode-ai\/plugin/);assert.match(plugin,/Sin estado Pulso disponible/);assert.match(plugin,/createWorkOperation\(context\.directory,\{workId,title,objective,criterion,verification,priority\}\)/);assert.match(plugin,/completeMapOperation/);assert.doesNotMatch(plugin,/ctx\.tool\.transform|editor\.add|opencode-v2/);assert.ok(files.has('.opencode/plugins/pulso/index.mjs'));
+    const plugin=read('plugins/opencode-v1/index.mjs');for(const tool of pulsoToolNames)assert.match(plugin,new RegExp(tool));assert.match(plugin,/@opencode-ai\/plugin/);assert.match(plugin,/Sin estado Pulso disponible/);assert.match(plugin,/createWorkOperation\(context\.directory,input\)/);assert.match(plugin,/completeMapOperation/);assert.doesNotMatch(plugin,/ctx\.tool\.transform|editor\.add|opencode-v2/);assert.ok(files.has('.opencode/plugins/pulso/index.mjs'));
   });
-  test('Core local sin dependencias externas',()=>{for(const file of listFiles(path.join(root,'lib')).filter(file=>file.endsWith('.mjs')))for(const line of read(`lib/${file}`).split('\n').filter(line=>line.startsWith('import ')))assert.match(line,/from ['"](?:node:|\.\/|\.\.\/)/);});
+  test('Core local sin dependencias externas; jsonc-parser solo en instalador',()=>{
+    const installer=new Set(['install.mjs','install-cleanup.mjs','install-jsonc.mjs']);
+    for(const file of listFiles(path.join(root,'lib')).filter(file=>file.endsWith('.mjs'))){
+      const imports=[...read(`lib/${file}`).matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)['"]([^'"]+)['"]/g)].map(match=>match[1]);
+      for(const specifier of imports){
+        assert.ok(/^(?:node:|\.\/|\.\.\/)/.test(specifier)||file==='install-jsonc.mjs'&&specifier==='jsonc-parser',`${file}: dependencia externa ${specifier}`);
+        if(!installer.has(file)&&specifier.startsWith('.'))assert.ok(!installer.has(path.relative(path.join(root,'lib'),path.resolve(root,'lib',specifier))),`${file}: el core importa el instalador`);
+      }
+    }
+  });
   test('Composición reproducible en memoria',()=>{const render=()=>Object.fromEntries([...composeNativeFiles({root})].map(([p,text])=>[p,sha256(text)]));assert.deepEqual(render(),render());});
   console.log(JSON.stringify({status:'PASS',checks,nativeRuntime:'NOT_RUN',note:'Validación estructural; requiere smoke test en OpenCode v1 real.'},null,2));
 }catch(error){console.error(`CHECK FAIL: ${error.message}`);process.exitCode=1;}
