@@ -94,6 +94,7 @@
         "low",
         "normal",
         "high",
+        "urgent",
         "critical"
       ]
     },

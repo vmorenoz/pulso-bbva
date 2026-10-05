@@ -1,0 +1,8 @@
+.gitignore
+.vscodeignore
+node_modules/**
+tests/**
+scripts/**
+dist/**
+package-lock.json
+src/composition.mjs

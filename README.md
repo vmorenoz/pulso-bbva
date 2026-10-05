@@ -4,7 +4,9 @@
 
 ## Estado de la distribución
 
-La versión activa está en [`v3/`](v3/). Se distribuye exclusivamente como plugin de tools y agentes nativos para **OpenCode v2**. OpenCode v1 y VS Code no son runtimes soportados por esta distribución. `v1/` y `v2/` se conservan en el repositorio como referencias históricas; no son la instalación activa de Pulso v3.
+La base de la adaptación actual es [`v3-opencode-v1/`](v3-opencode-v1/), para **OpenCode v1**. Su distribución hermana [`v3-vscode/`](v3-vscode/) se empaqueta como extensión de **VS Code**, con nombre público **Pulso**, agentes, skills y cuatro tools nativas. Consulta allí instalación y estado de verificación para Copilot / Agent Host y Local.
+
+`v3/` contiene la distribución anterior para **OpenCode v2**, cuya documentación se conserva a continuación. `v1/` y `v2/` son referencias históricas; ninguno de estos tres directorios es base de la adaptación VS Code.
 
 Pulso no es un runtime propio de agentes, servicio MCP, daemon, scheduler ni base de datos. OpenCode mantiene la ejecución de agentes, delegación visible, herramientas y aprobaciones. Los artefactos de coordinación se guardan localmente dentro de `.pulso/` en cada workspace.
 
