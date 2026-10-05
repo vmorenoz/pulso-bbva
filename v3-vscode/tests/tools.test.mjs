@@ -81,15 +81,15 @@ test('project and user memory isolated; user preferences persist across workspac
   await success(run,'pulso_context',{action:'summary'});
   assert.deepEqual(snapshot(root),[]);
   assert.deepEqual(snapshot(homeDir),[]);
-  await success(run,'pulso_context',{action:'set_context',context:' Contexto de prueba '});
-  await success(run,'pulso_context',{action:'set_preference',key:'idioma',value:'es',scope:'project'});
-  await success(run,'pulso_context',{action:'add_learning',note:'Aprendizaje',source:'observed'});
+  await success(run,'pulso_context',{action:'set_context',scope:'project',expectedRevision:1,context:' Contexto de prueba '});
+  await success(run,'pulso_context',{action:'set_preference',key:'idioma',value:'es',scope:'project',expectedRevision:2,source:'user'});
+  await success(run,'pulso_context',{action:'add_learning',note:'Aprendizaje',scope:'project',expectedRevision:3,source:'observed'});
   assert.match((await success(run,'pulso_context',{action:'summary'})).output,/1 del proyecto, 0 del usuario · aprendizajes: 1/);
-  await success(run,'pulso_context',{action:'remove_preference',key:'idioma'});
+  await success(run,'pulso_context',{action:'remove_preference',scope:'project',expectedRevision:4,key:'idioma'});
   const before = snapshot(root);
-  await success(run,'pulso_context',{action:'set_preference',scope:'user',key:'idioma',value:'es'});
-  await success(run,'pulso_context',{action:'set_context',scope:'user',context:'Contexto usuario'});
-  await success(run,'pulso_context',{action:'add_learning',scope:'user',note:'Aprendizaje usuario'});
+  await success(run,'pulso_context',{action:'set_preference',scope:'user',expectedRevision:1,key:'idioma',value:'es',source:'user'});
+  await success(run,'pulso_context',{action:'set_context',scope:'user',expectedRevision:2,context:'Contexto usuario'});
+  await success(run,'pulso_context',{action:'add_learning',scope:'user',expectedRevision:3,note:'Aprendizaje usuario',source:'user'});
   const secondRoot = path.join(path.dirname(root),'second-workspace');
   fs.mkdirSync(secondRoot);
   const secondTools = await createPulsoTools({coreDir,homeDir});
@@ -102,7 +102,7 @@ test('project and user memory isolated; user preferences persist across workspac
   assert.equal(saved.context,'Contexto usuario');
   assert.equal(saved.learning[0].note,'Aprendizaje usuario');
   assert.equal(saved.preferences[0].value,'es');
-  await success(secondRun,'pulso_context',{action:'remove_preference',scope:'user',key:'idioma'});
+  await success(secondRun,'pulso_context',{action:'remove_preference',scope:'user',expectedRevision:4,key:'idioma'});
   assert.match((await success(run,'pulso_context',{action:'summary'})).output,/0 del proyecto, 0 del usuario/);
   assert.deepEqual(snapshot(root),before);
   assert.deepEqual(snapshot(secondRoot),[]);
@@ -185,8 +185,8 @@ test('context rejection precedes input validation for every tool',async t => {
 test('context rejection before or after lazy imports prevents workspace and memory writes',async t => {
   for (const [name,input] of [
     ['pulso_workspace',{action:'prepare'}],
-    ['pulso_context',{action:'set_context',context:'No escribir'}],
-    ['pulso_context',{action:'set_preference',scope:'user',key:'idioma',value:'es'}]
+    ['pulso_context',{action:'set_context',scope:'project',expectedRevision:1,context:'No escribir'}],
+    ['pulso_context',{action:'set_preference',scope:'user',expectedRevision:1,key:'idioma',value:'es',source:'user'}]
   ]) {
     for (const rejectAt of [2,3]) {
       let calls = 0;
@@ -214,9 +214,9 @@ test('memory summaries expose applicable fields only for the requested scope wit
     assert.deepEqual(snapshot(homeDir),[]);
   }
   for (const scope of ['project','user']) {
-    await success(run,'pulso_context',{action:'set_context',scope,context:`${scope}-context-secret`});
-    await success(run,'pulso_context',{action:'set_preference',scope,key:`${scope}-key`,value:`${scope}-value`,source:'delegated'});
-    await success(run,'pulso_context',{action:'add_learning',scope,note:`${scope}-lesson`,source:'observed'});
+    await success(run,'pulso_context',{action:'set_context',scope,expectedRevision:1,context:`${scope}-context-secret`});
+    await success(run,'pulso_context',{action:'set_preference',scope,expectedRevision:2,key:`${scope}-key`,value:`${scope}-value`,source:'delegated'});
+    await success(run,'pulso_context',{action:'add_learning',scope,expectedRevision:3,note:`${scope}-lesson`,source:'observed'});
   }
   const before = snapshot(root), homeBefore = snapshot(homeDir);
   for (const scope of ['project','user']) {
@@ -237,8 +237,8 @@ test('memory summaries expose applicable fields only for the requested scope wit
 test('memory summary enforces a global content limit and reports truncation',async t => {
   const {root,homeDir,run} = await fixture(t);
   for (const scope of ['project','user']) {
-    await success(run,'pulso_context',{action:'set_context',scope,context:'c'.repeat(4000)});
-    for (let index = 0; index < 6; index++) await success(run,'pulso_context',{action:'set_preference',scope,key:`key-${index}`,value:'v'.repeat(1000)});
+    await success(run,'pulso_context',{action:'set_context',scope,expectedRevision:1,context:'c'.repeat(4000)});
+    for (let index = 0; index < 6; index++) await success(run,'pulso_context',{action:'set_preference',scope,expectedRevision:index+2,source:'user',key:`key-${index}`,value:'v'.repeat(1000)});
   }
   const before = snapshot(root), homeBefore = snapshot(homeDir);
   for (const scope of [undefined,'project','user']) {
@@ -314,4 +314,63 @@ test('VSC-03 queries preserve unfocused works, detailed sections and paginated c
   assert.ok(older.data.items[0].summary.length>160);
   assert.deepEqual(older.data.items[0].limitations,['Not executed']);
   assert.equal(older.data.hasMore,false);
+});
+
+test('canonical memory read pages retain provenance, scope and CAS; binding is host-only',async t => {
+  const {root,homeDir,run}=await fixture(t);
+  const empty=await success(run,'pulso_context',{action:'read',scope:'all',section:'preferences',limit:1});
+  assert.deepEqual(empty.data.revisions,{project:1,user:1});
+  assert.deepEqual(snapshot(root),[]);assert.deepEqual(snapshot(homeDir),[]);
+  await success(run,'pulso_context',{action:'set_preference',scope:'project',expectedRevision:1,expectedBindingId:'host-only',key:'language',value:'es',source:'user'});
+  await success(run,'pulso_context',{action:'set_preference',scope:'user',expectedRevision:1,key:'tone',value:'brief',source:'observed'});
+  const before=snapshot(root),homeBefore=snapshot(homeDir);
+  const first=await success(run,'pulso_context',{action:'read',scope:'all',section:'preferences',limit:1});
+  assert.equal(first.data.entries[0].provenance,'explicit');assert.equal(first.data.hasMore,true);
+  const second=await success(run,'pulso_context',{action:'read',scope:'all',section:'preferences',limit:1,cursor:first.data.nextCursor});
+  assert.equal(second.data.entries[0].scope,'user');assert.equal(second.data.hasMore,false);
+  for(const input of [
+    {action:'set_preference',scope:'project',expectedRevision:1,key:'language',value:'fr',source:'user'},
+    {action:'set_preference',scope:'project',expectedRevision:2,key:'language',value:'fr'},
+    {action:'set_context',expectedRevision:2,context:'implicit scope'},
+    {action:'read',scope:'project',source:'user'},
+    {request:{action:'read'}}
+  ])assert.equal((await run('pulso_context',input)).ok,false);
+  assert.deepEqual(snapshot(root),before);assert.deepEqual(snapshot(homeDir),homeBefore);
+  await success(run,'pulso_context',{action:'set_context',scope:'project',expectedRevision:2,context:'Changed'});
+  const stale=await run('pulso_context',{action:'read',scope:'all',section:'preferences',limit:1,cursor:first.data.nextCursor});
+  assert.equal(stale.ok,false);assert.match(stale.output,/CURSOR_OBSOLETO/);
+});
+
+test('evidence requires observed report hashes and acceptance; no automatic PASS or hash backfill',async t => {
+  const {root,run}=await fixture(t);
+  await success(run,'pulso_workspace',{action:'prepare'});await success(run,'pulso_work',create);
+  fs.writeFileSync(path.join(root,'report.txt'),'Observed PASS');
+  const view=await success(run,'pulso_work',{action:'get',workId:'WORK-1'});
+  assert.equal(view.data.acceptanceBasis.criteria[0].id,'AC-1');
+  const observed={id:'E-1',kind:'static',status:'pass',criterionIds:['AC-1'],taskIds:[],report:'report.txt',command:null,exitCode:null,cwd:'.',basis:'Reviewed report',files:[{path:'report.txt',sha256:createHash('sha256').update('Observed PASS').digest('hex')}],acceptanceBasis:view.data.acceptanceBasis,checkedAt:new Date().toISOString(),summary:'Observed result'};
+  const before=snapshot(root);
+  for(const evidence of [{...observed,files:['report.txt']},{...observed,files:[{path:'report.txt',sha256:'0'.repeat(64)}]},Object.fromEntries(Object.entries(observed).filter(([key])=>key!=='acceptanceBasis'))]){
+    assert.equal((await run('pulso_work',{action:'update',workId:'WORK-1',expectedRevision:1,actions:[{type:'evidence.add',evidence}]})).ok,false);
+    assert.deepEqual(snapshot(root),before);
+  }
+  assert.equal((await run('pulso_work',{action:'complete_map',workId:'WORK-1',expectedRevision:1,summary:'Template is not evidence'})).ok,false);
+  assert.deepEqual(snapshot(root),before);
+  await success(run,'pulso_work',{action:'update',workId:'WORK-1',expectedRevision:1,actions:[{type:'evidence.add',evidence:observed}]});
+  const saved=await success(run,'pulso_work',{action:'get',workId:'WORK-1',section:'evidence'});
+  assert.deepEqual(saved.data.evidence.items[0],observed);
+});
+
+test('validate_result uses packaged catalog, validates canonical JSON and never writes',async t => {
+  const {root,homeDir,run}=await fixture(t);
+  await success(run,'pulso_workspace',{action:'prepare'});await success(run,'pulso_work',create);
+  const output='.pulso/work/WORK-1/plan.md';
+  await success(run,'pulso_work',{action:'update',workId:'WORK-1',expectedRevision:1,actions:[{type:'task.add',task:{id:'T-1',title:'Plan',criterionIds:['AC-1'],agent:'pulso-planner',status:'pending',dependsOn:[],writeScope:[output],resources:[],acceptance:['Plan reviewed'],evidenceIds:[],summary:''}}]});
+  const resourceRoot=path.dirname(coreDir);
+  const delegation={...JSON.parse(fs.readFileSync(path.join(resourceRoot,'templates/delegation.json'),'utf8')),workId:'WORK-1',workRevision:2,inputs:['.pulso/work/WORK-1/work.json'],output,writeScope:[output]};
+  const result={...JSON.parse(fs.readFileSync(path.join(resourceRoot,'templates/result.json'),'utf8')),workId:'WORK-1',workRevision:2};
+  const before=snapshot(root),homeBefore=snapshot(homeDir);
+  const validated=await success(run,'pulso_work',{action:'validate_result',delegation,result});
+  assert.equal(validated.data.valid,true);assert.equal(validated.data.semanticAcceptance,'PENDING_REVIEW');
+  for(const invalid of [{...result,workRevision:1},{...result,agent:'pulso-executor'},{...result,status:'completed',artifacts:[]}])assert.equal((await run('pulso_work',{action:'validate_result',delegation,result:invalid})).ok,false);
+  assert.deepEqual(snapshot(root),before);assert.deepEqual(snapshot(homeDir),homeBefore);
 });

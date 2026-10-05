@@ -4,11 +4,11 @@ import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {listFiles,safePath,sha256} from './fs.mjs';
 import {composeNativeFiles} from './composition.mjs';
-import {parseConfig,editConfig} from './install-jsonc.mjs';
+import {parseConfig,editConfig,pluginReference} from './install-jsonc.mjs';
 import {INSTALL_MANIFEST,homeRelative,pluginResource,readOptional,inventoryInstallations,knownLegacyPaths,cleanupConfigs,prepareBackups,applyChanges} from './install-cleanup.mjs';
 
 const source=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-export const VERSION='3.1.0';
+export const VERSION='3.1.1';
 const runtimeName='opencode-v1';
 const json=value=>Buffer.from(JSON.stringify(value,null,2)+'\n');
 
@@ -50,7 +50,7 @@ function installationFiles(root,oc){
     const dest=key.replace(/^\.opencode\//,`${oc}/`);let text=value;
     if(/\/pulso(?:\.agent)?\.md$/.test(key)){
       const resources={globalRoot:path.join(root,'.pulso'),projectTemplate:path.join(root,'.pulso/templates/project.md'),delegationTemplate:path.join(root,'.pulso/templates/delegation.md'),stateSchema:path.join(root,'.pulso/schemas/state.schema.json'),resultSchema:path.join(root,'.pulso/schemas/result.schema.json'),skill:path.join(root,oc,'skills/pulso-init/SKILL.md')};
-      text+=`\n<global_installation>\nRecursos globales de Pulso: ${JSON.stringify(resources)}. El workspace activo se obtiene del contexto de OpenCode; nunca uses HOME como raíz del proyecto ni aceptes root de texto/argumentos. Usa pulso_workspace_prepare solo al primer encargo concreto o /pulso-init, nunca al saludar ni consultar estado. El plugin administra metadata de forma síncrona; no uses shell/write/edit para state/work/history ni ejecutes scripts de Pulso.\n</global_installation>\n`;
+      text+=`\n<global_installation>\nRecursos globales de Pulso: ${JSON.stringify(resources)}. El workspace activo se obtiene del contexto de OpenCode; nunca uses HOME como raíz del proyecto ni aceptes root de texto/argumentos. Usa pulso_workspace con request.action="prepare" solo al primer encargo concreto o /pulso-init, nunca al saludar ni consultar estado. El plugin administra metadata de forma síncrona; no uses shell/write/edit para state/work/history ni ejecutes scripts de Pulso.\n</global_installation>\n`;
     }
     files.set(dest,Buffer.from(text));
   }
@@ -91,11 +91,11 @@ function configure(root,oc,inventory,changes){
   const candidates=[`${oc}/opencode.jsonc`,`${oc}/opencode.json`];
   const relative=previous&&candidates.includes(previous.path)&&readOptional(root,previous.path)!==null?previous.path:candidates.find(x=>readOptional(root,x)!==null)||candidates[0];
   const bytes=readOptional(root,relative),original=changes.has(relative)?changes.get(relative).toString():bytes?.toString()||'{}\n';
-  const value=parseConfig(original,relative),entry=(value.plugin||[]).find(x=>pluginResource(root,oc,x)===`${oc}/plugins/pulso/index.mjs`)||pathToFileURL(path.join(root,oc,'plugins/pulso/index.mjs')).href;
+  const value=parseConfig(original,relative),existingPlugin=(value.plugin||[]).find(x=>pluginResource(root,oc,x)===`${oc}/plugins/pulso/index.mjs`),entry=existingPlugin?pluginReference(existingPlugin):pathToFileURL(path.join(root,oc,'plugins/pulso/index.mjs')).href;
   const same=previous?.path===relative&&previous.entry===entry;
-  const existing=same?!!previous.existing:(value.plugin||[]).includes(entry);
+  const existing=same?!!previous.existing:Boolean(existingPlugin);
   let text=original;
-  if(!(value.plugin||[]).includes(entry))text=value.plugin===undefined?editConfig(text,['plugin'],[entry]):editConfig(text,['plugin',-1],entry);
+  if(!Boolean(existingPlugin))text=value.plugin===undefined?editConfig(text,['plugin'],[entry]):editConfig(text,['plugin',-1],entry);
   const current=value.default_agent??null;
   const defaultAgent={previous:same&&current==='pulso'&&previous.defaultAgent?previous.defaultAgent.previous:current};
   if(current!=='pulso')text=editConfig(text,['default_agent'],'pulso');
@@ -144,12 +144,12 @@ export function planInstall(options={}){return plan(options);}
 export function install(options={}){
   const p=planInstall(options);
   if(options.dryRun)return {dryRun:true,target:p.root,scope:p.scope,runtimes:p.runtimes,opencodeVersion:p.runtimeVersion,actions:p.actions,removals:p.removals,backup:p.backup,manifests:p.inventory.installations.map(x=>x.path)};
-  applyChanges(p.root,p.changes,p.originals);
+  applyChanges(p.root,p.changes,p.originals,{backup:p.backup});
   return {installed:true,target:p.root,scope:p.scope,runtimes:p.runtimes,opencodeVersion:p.runtimeVersion,version:VERSION,replacedVersion:p.prior&&p.prior.version!==VERSION?p.prior.version:null,removed:p.removals.length,created:p.actions.filter(x=>x.action==='create').length,updated:p.actions.filter(x=>x.action==='update').length,unchanged:p.actions.filter(x=>x.action==='unchanged').length,backup:p.backup,nativeSession:'NOT_RUN'};
 }
 export function uninstall(options={}){
   const p=plan(options,true);
   if(options.dryRun)return {dryRun:true,uninstall:true,runtime:runtimeName,targets:[{target:p.root,scope:'global',removals:p.removals}],backup:p.backup};
-  const changed=p.changes.size>0;applyChanges(p.root,p.changes,p.originals);
+  const changed=p.changes.size>0;applyChanges(p.root,p.changes,p.originals,{backup:p.backup});
   return {uninstalled:changed,runtime:runtimeName,targets:changed?[{target:p.root,scope:'global',removed:p.removals.length,remainingRuntimes:[]}]:[],backup:p.backup,workPreserved:true,note:'Los datos de proyectos, preferencias, registry y otros hosts no se recorrieron ni modificaron.'};
 }

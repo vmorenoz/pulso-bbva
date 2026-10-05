@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
+import {createHash} from 'node:crypto';
 
 const coreDir=process.env.PULSO_TEST_CORE_DIR||fileURLToPath(new URL('../resources/lib/',import.meta.url));
 const artifacts=await import(pathToFileURL(path.join(coreDir,'artifacts.mjs')));
@@ -21,13 +22,16 @@ function fixture(t){
   return root;
 }
 function update(root,actions){return applyWorkMutation(root,{workId,expectedRevision:readWork(root,workId,{files:false}).revision,actions});}
-function evidence(id='E-1'){
-  return {id,kind:'static',status:'pass',criterionIds:['AC-1'],taskIds:['T-1'],report:'report.txt',cwd:'.',basis:'Revisión explícita',files:['source.txt'],summary:'Verificación positiva'};
+function evidence(root,id='E-1',criterionIds=['AC-1'],taskIds=['T-1']){
+  const work=readWork(root,workId,{files:false});
+  return {id,kind:'static',status:'pass',criterionIds,taskIds,report:'report.txt',command:null,exitCode:null,cwd:'.',basis:'Revisión explícita',files:['source.txt','report.txt'].map(file=>({path:file,sha256:createHash('sha256').update(fs.readFileSync(path.join(root,file))).digest('hex')})),acceptanceBasis:artifacts.acceptanceBasis(work,{criterionIds,taskIds}),checkedAt:new Date().toISOString(),summary:'Verificación positiva'};
 }
 function ready(root){
   update(root,[
-    {type:'task.add',task:{id:'T-1',title:'Implementar',criterionIds:['AC-1'],agent:'pulso-executor',status:'done',dependsOn:[],writeScope:['source.txt'],resources:[],acceptance:['Aceptación inicial'],evidenceIds:[],summary:'Completada'}},
-    {type:'evidence.add',evidence:evidence()},
+    {type:'task.add',task:{id:'T-1',title:'Implementar',criterionIds:['AC-1'],agent:'pulso-executor',status:'done',dependsOn:[],writeScope:['source.txt'],resources:[],acceptance:['Aceptación inicial'],evidenceIds:[],summary:'Completada'}}
+  ]);
+  update(root,[
+    {type:'evidence.add',evidence:evidence(root)},
     {type:'document.register',document:{kind:'evidence',path:'report.txt',templateVersion:'qa@1.0'}}
   ]);
   return readWork(root,workId);
@@ -48,7 +52,7 @@ function expectPartial(callback,revision){
   });
 }
 
-for(const field of ['description','verification'])test(`criterion ${field} changes invalidate prior acceptance and persist reason, snapshots and revision`,t=>{
+for(const field of ['description','verification'])test(`criterion ${field} changes invalidate prior acceptance and persist reason and canonical acceptance snapshots`,t=>{
   const root=fixture(t),before=ready(root);
   update(root,[{type:'criterion.update',criterionId:'AC-1',[field]:'Nuevo requisito',reason:'Cambio solicitado por el usuario'}]);
   const changed=readWork(root,workId);
@@ -58,15 +62,14 @@ for(const field of ['description','verification'])test(`criterion ${field} chang
   assert.deepEqual(changed.evidence,before.evidence);
   const record=changed.acceptanceChanges[0];
   assert.equal(record.reason,'Cambio solicitado por el usuario');
-  assert.equal(record.revision,changed.revision);
-  assert.equal(record.targetType,'criterion');
-  assert.deepEqual(record.before,before.objective.criteria[0]);
-  assert.deepEqual(record.after,changed.objective.criteria[0]);
+  assert.equal(record.entity,'criterion');
+  assert.deepEqual(record.before,{description:before.objective.criteria[0].description,verification:before.objective.criteria[0].verification});
+  assert.deepEqual(record.after,{description:changed.objective.criteria[0].description,verification:changed.objective.criteria[0].verification});
   assert.ok(Number.isFinite(Date.parse(record.at)));
   assert.throws(()=>closeWork(root,workId,{summary:'No debe cerrar'}),/tareas abiertas/);
   update(root,[{type:'task.set_status',taskId:'T-1',status:'done'}]);
   assert.throws(()=>closeWork(root,workId,{summary:'Tampoco debe cerrar'}),/Falta evidencia positiva/);
-  update(root,[{type:'evidence.add',evidence:evidence('E-2')}]);
+  update(root,[{type:'evidence.add',evidence:evidence(root,'E-2')}]);
   assert.equal(closeWork(root,workId,{summary:'Aceptación nueva explícita'}).status,'done');
 });
 
@@ -76,8 +79,8 @@ test('task acceptance changes invalidate task and objective evidence; metadata-o
   let work=readWork(root,workId);
   assert.equal(work.tasks[0].status,'done');
   assert.deepEqual(work.tasks[0].evidenceIds,['E-1']);
-  assert.equal(work.acceptanceChanges,undefined);
-  update(root,[{type:'task.update',taskId:'T-1',patch:{acceptance:['Aceptación más estricta']}}]);
+  assert.deepEqual(work.acceptanceChanges,[]);
+  update(root,[{type:'task.update',taskId:'T-1',reason:'Cambio de aceptación solicitado',patch:{acceptance:['Aceptación más estricta']}}]);
   work=readWork(root,workId);
   assert.equal(work.tasks[0].status,'pending');
   assert.deepEqual(work.tasks[0].evidenceIds,[]);
@@ -91,7 +94,7 @@ test('task acceptance changes invalidate task and objective evidence; metadata-o
 
 test('changing a task criterion reopens it and clears acceptance links on old and new criteria',t=>{
   const root=fixture(t);ready(root);
-  update(root,[{type:'criterion.add',criterion:{id:'AC-2',description:'Segundo criterio',verification:'Revisión'}},{type:'task.update',taskId:'T-1',patch:{criterionIds:['AC-2']}}]);
+  update(root,[{type:'criterion.add',criterion:{id:'AC-2',description:'Segundo criterio',verification:'Revisión'}},{type:'task.update',taskId:'T-1',reason:'Cambio de criterio solicitado',patch:{criterionIds:['AC-2']}}]);
   const work=readWork(root,workId);
   assert.equal(work.tasks[0].status,'pending');
   assert.ok(work.objective.criteria.every(criterion=>criterion.evidenceIds.length===0));
@@ -107,27 +110,30 @@ test('acceptance audit records and invalidated historical evidence cannot be rew
   assert.throws(()=>saveWork(root,candidate,work.revision),/Historial de aceptación inmutable/);
   candidate.acceptanceChanges=[];
   assert.throws(()=>saveWork(root,candidate,work.revision),/Historial de aceptación inmutable/);
-  assert.throws(()=>update(root,[{type:'evidence.update',evidenceId:'E-1',patch:{summary:'Reinterpretada'}}]),/Evidencia archivada inmutable/);
+  const altered=structuredClone(work);altered.evidence[0].files[0].sha256='0'.repeat(64);
+  assert.throws(()=>saveWork(root,altered,work.revision),/Observación de evidencia inmutable/);
   assert.deepEqual(snapshot(root),before);
 });
 
-test('criterion no-op still records the reason without invalidating acceptance',t=>{
+test('criterion no-op preserves acceptance without inventing an acceptance change',t=>{
   const root=fixture(t),before=ready(root);
   update(root,[{type:'criterion.update',criterionId:'AC-1',description:before.objective.criteria[0].description,reason:'Confirmar texto vigente'}]);
   const work=readWork(root,workId);
   assert.deepEqual(work.objective.criteria,before.objective.criteria);
   assert.equal(work.tasks[0].status,'done');
-  assert.equal(work.acceptanceChanges[0].reason,'Confirmar texto vigente');
+  assert.deepEqual(work.acceptanceChanges,before.acceptanceChanges);
 });
 
 test('independent criterion and task evidence both remain immutable after acceptance invalidation',t=>{
   const root=fixture(t);ready(root);
   update(root,[{type:'evidence.remove',evidenceId:'E-1'},
-    {type:'evidence.add',evidence:{...evidence('E-criterion'),taskIds:[]}},
-    {type:'evidence.add',evidence:{...evidence('E-task'),criterionIds:[]}}]);
-  update(root,[{type:'task.update',taskId:'T-1',patch:{acceptance:['Requisito nuevo']}}]);
-  for(const evidenceId of ['E-criterion','E-task'])assert.throws(()=>update(root,[{type:'evidence.remove',evidenceId}]),/Evidencia archivada inmutable/);
-  assert.deepEqual(readWork(root,workId).acceptanceChanges.map(change=>change.targetType),['task','criterion']);
+    {type:'evidence.add',evidence:evidence(root,'E-criterion',['AC-1'],[])},
+    {type:'evidence.add',evidence:evidence(root,'E-task',[],['T-1'])}]);
+  update(root,[{type:'task.update',taskId:'T-1',reason:'Cambio de aceptación solicitado',patch:{acceptance:['Requisito nuevo']}}]);
+  const observed=structuredClone(readWork(root,workId).evidence);
+  for(const evidenceId of ['E-criterion','E-task'])update(root,[{type:'evidence.remove',evidenceId}]);
+  assert.deepEqual(readWork(root,workId).evidence,observed);
+  assert.deepEqual(readWork(root,workId).acceptanceChanges.map(change=>change.entity),['task']);
 });
 
 test('update index failure reports persisted revision and sync repairs without repeating mutation',t=>{
@@ -153,11 +159,11 @@ test('create index failure exposes the newly persisted work and safe recovery',t
 
 for(const file of ['history.jsonl','state.json'])test(`close ${file} failure preserves canonical closure and repairs projections`,t=>{
   const root=fixture(t);ready(root);const fault=failRename(t,path.join('.pulso',file));
-  expectPartial(()=>closeWork(root,workId,{summary:'Completado'}),3);
+  expectPartial(()=>closeWork(root,workId,{summary:'Completado'}),4);
   const persisted=readWork(root,workId,{files:false});
   assert.equal(persisted.closure.id,`${workId}:c1`);
   fault.mock.restore();syncWork(root,workId);syncWork(root,workId);
-  assert.equal(readWork(root,workId).revision,3);
+  assert.equal(readWork(root,workId).revision,4);
   assert.equal(history(root).length,1);
   assert.equal(validateProject(root).valid,true);
 });
@@ -165,39 +171,17 @@ for(const file of ['history.jsonl','state.json'])test(`close ${file} failure pre
 test('reopen index failure identifies the new canonical cycle',t=>{
   const root=fixture(t);ready(root);closeWork(root,workId,{summary:'Hecho'});
   const fault=failRename(t,path.join('.pulso','state.json'));
-  expectPartial(()=>reopenWork(root,workId,'Nuevo alcance'),4);
+  expectPartial(()=>reopenWork(root,workId,'Nuevo alcance'),5);
   assert.equal(readWork(root,workId).cycle,2);
   fault.mock.restore();syncWork(root,workId);
   assert.equal(validateProject(root).valid,true);
 });
 
-test('complete_map prevalidates all closure inputs and leaves every file unchanged on rejection',t=>{
+test('legacy complete_map cannot manufacture acceptance from a project template',t=>{
   const root=fixture(t);fs.writeFileSync(path.join(root,'.pulso','project.md'),'<!-- template: project@1.0 -->\nContexto');
   const before=snapshot(root);
-  for(const limitations of [[''],['   '],['x'.repeat(1001)],[42]]){
-    assert.throws(()=>completeMapOperation(root,{workId,expectedRevision:1,summary:'Mapeo listo',limitations}),/limitation/);
-    assert.throws(()=>completeProjectMap(root,workId,{summary:'Mapeo listo',limitations}),/limitations/);
-    assert.deepEqual(snapshot(root),before);
-  }
-});
-
-for(const file of ['history.jsonl','state.json'])test(`complete_map commits once and identical retry repairs ${file} without duplicating data`,t=>{
-  const root=fixture(t);fs.writeFileSync(path.join(root,'.pulso','project.md'),'<!-- template: project@1.0 -->\nContexto');
-  const input={workId,expectedRevision:1,summary:'Mapeo listo',limitations:['Revisión estática']};
-  const fault=failRename(t,path.join('.pulso',file));
-  expectPartial(()=>completeMapOperation(root,input),2);
-  const persisted=readWork(root,workId,{files:false});
-  assert.equal(persisted.status,'done');assert.equal(persisted.tasks.length,1);assert.equal(persisted.evidence.length,1);
-  fault.mock.restore();
-  const receipt=completeMapOperation(root,input);
-  assert.equal(receipt.revision,2);assert.equal(history(root).length,1);
-  assert.equal(validateProject(root).valid,true);
-  const before=snapshot(root);
-  assert.deepEqual(completeMapOperation(root,input),receipt);
-  assert.deepEqual(completeMapOperation(root,{...input,expectedRevision:2}),receipt);
-  assert.deepEqual(snapshot(root),before);
-  assert.throws(()=>completeMapOperation(root,{...input,summary:'Otro resultado'}),/Revisión obsoleta/);
-  assert.throws(()=>completeMapOperation(root,{...input,expectedRevision:2,limitations:[]}),/otro resultado/);
+  assert.equal(completeMapOperation,undefined);
+  assert.equal(completeProjectMap,undefined);
   assert.deepEqual(snapshot(root),before);
 });
 
@@ -217,7 +201,7 @@ test('active missing reports and stale evidence remain rejected, while cancellat
   const root=fixture(t);ready(root);
   fs.unlinkSync(path.join(root,'report.txt'));
   assert.throws(()=>update(root,[{type:'work.set_overview',summary:'No debe guardar'}]),/Documento no existe|Informe no existe/);
-  assert.throws(()=>closeWork(root,workId,{summary:'No debe cerrar'}),/Informe no existe/);
+  assert.throws(()=>closeWork(root,workId,{summary:'No debe cerrar'}),/Evidencia obsoleta.*report.txt/);
   fs.writeFileSync(path.join(root,'report.txt'),'PASS');fs.writeFileSync(path.join(root,'source.txt'),'changed');
   assert.throws(()=>closeWork(root,workId,{summary:'Tampoco debe cerrar'}),/Evidencia obsoleta/);
   fs.unlinkSync(path.join(root,'report.txt'));

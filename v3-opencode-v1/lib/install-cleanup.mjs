@@ -3,7 +3,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import {safePath,sha256,atomicWrite} from './fs.mjs';
-import {parseConfig,editConfig,removePlugins} from './install-jsonc.mjs';
+import {parseConfig,editConfig,removePlugins,pluginReference} from './install-jsonc.mjs';
 
 export const INSTALL_MANIFEST='.pulso/installation.json';
 const record=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
@@ -102,6 +102,7 @@ function pluginEntries(root,dir){
   return new Set([...legacyPlugins.map(x=>`plugins/${x}`),'plugins/pulso/index.mjs'].flatMap(x=>[`./${x}`,path.join(root,dir,x),pathToFileURL(path.join(root,dir,x)).href]));
 }
 export function pluginResource(root,dir,entry){
+  entry=pluginReference(entry);
   try{
     if(entry.startsWith('file:'))return homeRelative(root,fileURLToPath(entry));
     if(path.isAbsolute(entry))return homeRelative(root,entry);
@@ -141,7 +142,7 @@ export function cleanupConfigs(root,inventory,changes,{keepCurrent=false,install
 }
 
 /** One transaction for configs, resources, manifests and recoverable backups. */
-export function applyChanges(root,changes,originals){
+export function applyChanges(root,changes,originals,{backup=null}={}){
   const undo=new Map(),createdDirs=new Set();
   const noteDirs=relative=>{
     let dir=path.dirname(safePath(root,relative));
@@ -159,14 +160,21 @@ export function applyChanges(root,changes,originals){
       else{noteDirs(relative);atomicWrite(root,relative,value);if(original!==null)fs.chmodSync(target,undo.get(relative).mode);}
     }
   }catch(error){
-    const failures=[];
-    for(const [relative,original] of [...undo].reverse())try{
+    const failures=[],isBackup=relative=>backup!==null&&relative.startsWith(backup+'/');
+    const restore=([relative,original])=>{try{
       const target=safePath(root,relative);
       if(original.bytes===null){if(fs.existsSync(target))fs.unlinkSync(target);}
       else{atomicWrite(root,relative,original.bytes);fs.chmodSync(target,original.mode);}
-    }catch(e){failures.push(`${relative}: ${e.message}`);}
+    }catch(e){failures.push(`${relative}: ${e.message}`);}};
+    const entries=[...undo].reverse();
+    for(const entry of entries.filter(([relative])=>!isBackup(relative)))restore(entry);
+    // Keep the complete archive and its index until every resource is restored.
+    const retainedBackup=failures.length?backup:null;
+    if(!failures.length)for(const entry of entries.filter(([relative])=>isBackup(relative)))restore(entry);
     for(const dir of [...createdDirs].sort((a,b)=>b.length-a.length))try{fs.rmdirSync(dir);}catch(e){if(!['ENOENT','ENOTEMPTY'].includes(e.code))failures.push(`${dir}: ${e.message}`);}
-    throw new Error(`Operación no completada; ${failures.length?'rollback incompleto: '+failures.join('; '):'archivos gestionados restaurados'}. ${error.message}`,{cause:error});
+    const failure=new Error(`Operación no completada; ${failures.length?'rollback incompleto: '+failures.join('; '):'archivos gestionados restaurados'}.${retainedBackup?` Respaldo conservado: ${safePath(root,retainedBackup)}; índice: ${safePath(root,`${retainedBackup}/index.json`)}.`:''} ${error.message}`,{cause:error});
+    if(retainedBackup)failure.backup=retainedBackup;
+    throw failure;
   }
 }
 

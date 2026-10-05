@@ -1,5 +1,14 @@
 # Cambios
 
+## 3.1.4
+
+- Integra main tras PR #11 sin modificar el árbol OpenCode ni sus skills BBVA.
+- Adapta instrucciones al contrato plano VS Code; añade read revisionado, validate_result y acceptanceBasis.
+- Usa contratos canónicos de memoria, bloqueo compartido, prioridad critical y evidencia observada inmutable.
+- Retira complete_map: el mapeo requiere aceptación por el flujo ordinario, nunca un PASS sintético por marcador.
+- Conserva bindings, resultados paginados, recuperación parcial, iconos y README sin imagen.
+- Verificación de conversación Copilot/Local pendiente (NOT_RUN).
+
 ## 3.1.3
 
 - Retirada la imagen del README de la extensión; se conserva el icono de Pulso.

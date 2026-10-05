@@ -2,7 +2,7 @@
   "name": "pulso",
   "displayName": "Pulso",
   "icon": "assets/pulso-256.png",
-  "version": "3.1.3",
+  "version": "3.1.4",
   "publisher": "pulso-local",
   "repository": {
     "type": "git",
@@ -182,12 +182,20 @@
       {
         "name": "pulso_work",
         "displayName": "Pulso · Trabajo",
-        "modelDescription": "Mutaciones requieren expectedBindingId de una consulta del proyecto previsto. get devuelve data completo por section y páginas offset/limit: sigue nextOffset mientras hasMore. Consulta o actualiza un objetivo de trabajo. create permite omitir workId; las demás acciones requieren ID explícito.",
+        "modelDescription": "Mutaciones requieren expectedBindingId de una consulta del proyecto previsto. get devuelve data completo por section y páginas offset/limit: sigue nextOffset mientras hasMore. Consulta o actualiza un objetivo de trabajo. get devuelve acceptanceBasis para observar evidencia. validate_result recibe delegation y result y no escribe. create permite omitir workId; las mutaciones restantes requieren ID explícito.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "pulso_work",
         "inputSchema": {
           "type": "object",
           "properties": {
+            "delegation": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "result": {
+              "type": "object",
+              "additionalProperties": true
+            },
             "expectedBindingId": {
               "type": "string",
               "maxLength": 80
@@ -218,12 +226,12 @@
               "type": "string",
               "enum": [
                 "get",
+                "validate_result",
                 "create",
                 "update",
                 "block",
                 "close",
-                "reopen",
-                "complete_map"
+                "reopen"
               ]
             },
             "workId": {
@@ -254,7 +262,7 @@
                 "low",
                 "normal",
                 "high",
-                "urgent"
+                "critical"
               ]
             },
             "expectedRevision": {
@@ -340,7 +348,7 @@
       {
         "name": "pulso_context",
         "displayName": "Pulso · Contexto",
-        "modelDescription": "Toda escritura requiere expectedBindingId confirmado para el proyecto previsto. Consulta o registra contexto relevante, preferencias y aprendizajes. summary devuelve contexto, preferencias key/value/source y aprendizajes note/source del ámbito solicitado; sin scope incluye proyecto y usuario. Salida limitada a 8000 caracteres con aviso de truncación. Las preferencias de usuario se conservan entre workspaces y sesiones.",
+        "modelDescription": "Toda escritura requiere expectedBindingId confirmado para el proyecto previsto. Consulta o registra contexto relevante, preferencias y aprendizajes. read devuelve entries, revisions y nextCursor: sigue hasMore. Antes de mutar lee la revisión y envía scope, expectedRevision y source explícito para preferencias/aprendizajes. summary es solo resumen limitado a 8000 caracteres. Las preferencias de usuario se conservan entre workspaces y sesiones.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "pulso_context",
         "inputSchema": {
@@ -350,9 +358,32 @@
               "type": "string",
               "maxLength": 80
             },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "section": {
+              "type": "string",
+              "enum": [
+                "context",
+                "preferences",
+                "learning",
+                "all"
+              ]
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "cursor": {
+              "type": "string",
+              "maxLength": 4000
+            },
             "action": {
               "type": "string",
               "enum": [
+                "read",
                 "summary",
                 "set_context",
                 "set_preference",
@@ -376,7 +407,8 @@
               "type": "string",
               "enum": [
                 "project",
-                "user"
+                "user",
+                "all"
               ]
             },
             "note": {

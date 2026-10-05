@@ -5,8 +5,8 @@ Organiza objetivos, coordina nueve especialistas y conserva el contexto de tu pr
 ## Instalar
 
 1. Necesitas VS Code **1.139.1 o posterior**, un proyecto local de confianza y acceso al chat con las capacidades de agentes y herramientas requeridas.
-2. Abre la paleta de comandos y elige **Extensions: Install from VSIX…**. Selecciona **pulso-3.1.3.vsix** y recarga la ventana si VS Code lo solicita.
-3. En Extensiones, comprueba que Pulso muestra la versión **3.1.3** y su icono.
+2. Abre la paleta de comandos y elige **Extensions: Install from VSIX…**. Selecciona **pulso-3.1.4.vsix** y recarga la ventana si VS Code lo solicita.
+3. En Extensiones, comprueba que Pulso muestra la versión **3.1.4** y su icono.
 
 No necesitas descargar el repositorio ni instalar herramientas de desarrollo. La extensión no cambia tu configuración ni instala otras extensiones. Es una distribución privada; el publisher local no implica publicación en Marketplace.
 

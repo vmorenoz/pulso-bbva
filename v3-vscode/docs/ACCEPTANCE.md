@@ -1,6 +1,14 @@
-# Evidencia histórica y comprobación actual
+# Verificación de integración 3.1.4 — 5 de octubre de 2026
 
-Los resultados anteriores de este archivo corresponden a versiones previas. No certifican Pulso 3.1.2 ni conversaciones actuales en Copilot/Local. Para esta versión, usa [LIVE-CHECK](LIVE-CHECK.md); la comprobación real permanece NOT_RUN.
+Base: main 72e7cd1 (PR #11 integrado). Se conservan los 110 archivos del árbol OpenCode, incluidos las skills BBVA, con hashes Git idénticos. No se modifica su código ni sus tests.
+
+- OpenCode: build y check PASS; 204/204 tests aislados PASS con Node 24.19.0 y el paquete oficial OpenCode 1.18.2 existente en el entorno.
+- Core VS Code ensamblado: 149 tests canónicos PASS, además de regresiones de recuperación/paginación específicas.
+- VS Code: build/check PASS, 66 recursos y 79/79 tests offline PASS, sin omitidos. Incluye memoria revisionada, evidencia observada, validate_result contra catálogo empaquetado, rechazo de complete_map y protección de binding.
+- Los contratos planos y la API de registro/confirmación se contrastaron con la [documentación oficial](https://code.visualstudio.com/api/extension-guides/ai/tools).
+- Extension Host real, conversaciones Copilot y Local: NOT_RUN para 3.1.4. Los resultados siguientes son históricos y no acreditan esta versión. El recorrido breve vigente está en [LIVE-CHECK](LIVE-CHECK.md).
+
+## Registros históricos (3.1.1)
 
 # Aceptación de Pulso
 
@@ -43,7 +51,7 @@ npm run test:host
 npm run package
 ```
 
-`npm ci` necesita un lockfile coherente; si falta, registrar el bloqueo antes de continuar. Build genera `resources/` y actualiza las contribuciones del manifiesto. Verify repite build y ejecuta check y tests; package repite verify. Revisar el inventario del VSIX, incluidos documentación, licencia, core, agentes, skills, templates, schemas y provenance. Comprobar los hashes de provenance, las prioridades `low/normal/high/urgent` y la conservación de la severidad de resultados.
+`npm ci` necesita un lockfile coherente; si falta, registrar el bloqueo antes de continuar. Build genera `resources/` y actualiza las contribuciones del manifiesto. Verify repite build y ejecuta check y tests; package repite verify. Revisar el inventario del VSIX, incluidos documentación, licencia, core, agentes, skills, templates, schemas y provenance. Comprobar los hashes de provenance, las prioridades `low/normal/high/critical` y la conservación de la severidad de resultados.
 
 ## Preparación del run LIVE
 

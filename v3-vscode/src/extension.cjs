@@ -4,7 +4,7 @@ const {pathToFileURL} = require('node:url');
 
 // Injection is for isolated tests; activation uses the public VS Code API only.
 async function activateWith(vscode, context, {homeDir = os.homedir()} = {}) {
-  const [{toolDefinitions, createPulsoTools, validateInput, isMutating}, {createWorkspaceResolver}] = await Promise.all([
+  const [{toolDefinitions, createPulsoTools, validateToolInput, isMutating}, {createWorkspaceResolver}] = await Promise.all([
     import(pathToFileURL(path.join(__dirname, 'tools.mjs')).href),
     import(pathToFileURL(path.join(__dirname, 'workspace.mjs')).href),
   ]);
@@ -13,11 +13,11 @@ async function activateWith(vscode, context, {homeDir = os.homedir()} = {}) {
   for (const definition of toolDefinitions) {
     context.subscriptions.push(vscode.lm.registerTool(definition.name, {
       prepareInvocation(options) {
-        validateInput(definition.inputSchema, options?.input);
+        validateToolInput(definition, options?.input);
         return {invocationMessage: `${definition.displayName} · ${options.input.action || 'consulta'}`};
       },
       async invoke(options, token) {
-        validateInput(definition.inputSchema, options?.input);
+        validateToolInput(definition, options?.input);
         // Single-folder windows need no selection; multi-root windows retain
         // one explicit binding until the user switches or folders change.
         const root = await project.resolve({token, toolName: definition.name, action: options.input.action});

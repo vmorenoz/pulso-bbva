@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import {generateWorkId} from './identity.mjs';
 import {assertSchema} from './schema.mjs';
-import {safePath,exists,readJSON,readText,writeJSON,atomicWrite,assertID,now,fingerprint} from './fs.mjs';
+import {safePath,exists,readJSON,readText,writeJSON,atomicWrite,assertID,now,fingerprint,sha256} from './fs.mjs';
 const terminal = status => ['done','cancelled'].includes(status);
 const wp = id => `.pulso/work/${assertID(id)}/work.json`;
 const unique = (values,label) => {if(new Set(values).size!==values.length)throw new Error(`${label}: duplicados`);};
@@ -54,15 +54,16 @@ export function validateWork(root,w,{files=true,fresh=false}={}) {
     const reports=w.evidence.filter(e=>e.report===d.path);
     if(files&&(!reports.length||reports.some(e=>activeEvidence.has(e.id)))&&!exists(root,d.path))throw new Error(`Documento no existe: ${d.path}`);
   }
+
   for(const e of w.evidence){
     refs(e.criterionIds,criteria,`Evidencia ${e.id} criterios`);refs(e.taskIds,tasks,`Evidencia ${e.id} tareas`);
     safePath(root,e.report);safePath(root,e.cwd,{allowDot:true});unique(e.files.map(f=>f.path),`Evidencia ${e.id} archivos`);
     if(files&&activeEvidence.has(e.id)&&!exists(root,e.report))throw new Error(`Informe no existe: ${e.report}`);
-    for(const f of e.files){safePath(root,f.path);} // Historical paths may be deleted; current acceptance checks freshness at close.
+    for(const f of e.files){safePath(root,f.path);} if(e.acceptanceBasis){unique(e.acceptanceBasis.criteria.map(item=>item.id),`Base de criterio ${e.id}`);unique(e.acceptanceBasis.tasks.map(item=>item.id),`Base de tarea ${e.id}`);} // Historical paths may be deleted; current acceptance checks freshness at close.
     if(e.kind==='not_run' && e.status!=='not_run' && e.status!=='blocked')throw new Error(`Evidencia ${e.id}: not_run no puede aprobar`);
     if(e.kind==='executed' && e.status==='pass' && (e.exitCode!==0 || !e.command?.trim()))throw new Error(`Evidencia ${e.id}: ejecución PASS requiere comando y exitCode=0`);
     if(e.kind!=='executed' && e.exitCode!==null)throw new Error(`Evidencia ${e.id}: exitCode solo para ejecución`);
-    if(e.status==='pass' && fresh && activeEvidence.has(e.id))checkFresh(root,e);
+    if(e.status==='pass' && fresh && !terminal(w.status) && (w.objective.criteria.some(c=>c.evidenceIds.includes(e.id)) || w.tasks.some(t=>t.evidenceIds.includes(e.id))))checkFresh(root,e,w,{criterionIds:w.objective.criteria.filter(c=>c.evidenceIds.includes(e.id)).map(c=>c.id),taskIds:w.tasks.filter(t=>t.evidenceIds.includes(e.id)).map(t=>t.id)});
   }
   for(const c of w.objective.criteria)for(const id of c.evidenceIds)if(!ev.get(id).criterionIds.includes(c.id))throw new Error(`Enlace de criterio ${c.id}/${id} no es recíproco`);
   for(const t of w.tasks)for(const id of t.evidenceIds)if(!ev.get(id).taskIds.includes(t.id))throw new Error(`Enlace de tarea ${t.id}/${id} no es recíproco`);
@@ -70,7 +71,48 @@ export function validateWork(root,w,{files=true,fresh=false}={}) {
   if(w.status==='done')assertCompletion(root,w,{fresh:false});
   return w;
 }
-function checkFresh(root,e){if(!exists(root,e.report))throw new Error(`Informe no existe: ${e.report}`);for(const f of e.files)if(fingerprint(root,f.path).sha256!==f.sha256)throw new Error(`Evidencia obsoleta ${e.id}: ${f.path}`);}
+/** Stable acceptance fingerprints are observed by QA before and after checking.
+ * The change counter prevents restoring old acceptance text from reviving an old PASS.
+ * Neither these fingerprints nor file hashes prove execution or complete coverage.
+ */
+export function acceptanceBasis(work,{criterionIds=work.objective.criteria.map(c=>c.id),taskIds=work.tasks.map(t=>t.id)}={}){
+  const count=(entity,id)=>(work.acceptanceChanges||[]).filter(change=>change.entity===entity&&change.entityId===id).length;
+  const criterionHash=id=>{
+    const c=work.objective.criteria.find(c=>c.id===id);if(!c)throw new Error(`Criterio inexistente: ${id}`);
+    return {id,sha256:sha256(JSON.stringify({workId:work.id,cycle:work.cycle,id,description:c.description,verification:c.verification,changes:count('criterion',id)}))};
+  };
+  const pending=new Set(),memo=new Map();
+  const taskHash=id=>{
+    if(memo.has(id))return memo.get(id);if(pending.has(id))throw new Error(`Ciclo de dependencias: ${id}`);
+    const t=work.tasks.find(t=>t.id===id);if(!t)throw new Error(`Tarea inexistente: ${id}`);pending.add(id);
+    const result={id,sha256:sha256(JSON.stringify({workId:work.id,cycle:work.cycle,id,criterionIds:t.criterionIds,criteria:t.criterionIds.map(criterionHash),acceptance:t.acceptance,writeScope:t.writeScope,resources:t.resources,dependsOn:t.dependsOn,dependencies:t.dependsOn.map(taskHash),changes:count('task',id)}))};
+    pending.delete(id);memo.set(id,result);return result;
+  };
+  return {criteria:criterionIds.map(criterionHash),tasks:taskIds.map(taskHash)};
+}
+function checkAcceptance(work,e,{criterionIds=e.criterionIds,taskIds=e.taskIds}={}){
+  if(!e.acceptanceBasis)throw new Error(`Evidencia ${e.id} sin base observada de aceptación; requiere nueva observación`);
+  const current=acceptanceBasis(work,{criterionIds,taskIds});
+  for(const section of ['criteria','tasks'])for(const item of current[section]){
+    if(e.acceptanceBasis[section].find(entry=>entry.id===item.id)?.sha256!==item.sha256)throw new Error(`Aceptación obsoleta ${e.id}: ${item.id}`);
+  }
+}
+export function checkFresh(root,e,work,selection){
+  for(const f of e.files){
+    if(f.absent===true){if(exists(root,f.path))throw new Error(`Evidencia obsoleta ${e.id}: ${f.path} ya no está ausente`);}
+    else if(!exists(root,f.path)||fingerprint(root,f.path).sha256!==f.sha256)throw new Error(`Evidencia obsoleta ${e.id}: ${f.path}`);
+  }
+  if(work)checkAcceptance(work,e,selection);
+}
+export function assertObservedEvidence(root,work,e){
+  if(!e.acceptanceBasis)throw new Error(`Evidencia ${e.id} sin base observada de aceptación`);
+  for(const [section,ids] of [['criteria',e.criterionIds],['tasks',e.taskIds]]){
+    const observed=e.acceptanceBasis[section].map(entry=>entry.id);unique(observed,`Base observada ${section}`);
+    if(!same([...observed].sort(),[...ids].sort()))throw new Error(`Base observada ${section} no corresponde a los vínculos`);
+  }
+  if(!e.files.some(file=>file.path===e.report&&typeof file.sha256==='string'))throw new Error('El informe/salida observado debe incluir su fingerprint en files');
+  checkFresh(root,e,work);
+}
 export function readWork(root,id,options={}) {const w=readJSON(root,wp(id));if(w.id!==id)throw new Error('ID y ruta de Work no coinciden');return validateWork(root,w,options);}
 export function status(root){const s=assertSchema('state',readJSON(root,'.pulso/state.json'));unique(s.works.map(w=>w.id),'Índice del proyecto');for(const w of s.works){if(w.path!==wp(w.id))throw new Error('Ruta del índice incoherente');if(w.progress.done>w.progress.total)throw new Error('Progreso del índice incoherente');}if(s.focusWorkId&&!s.works.some(w=>w.id===s.focusWorkId))throw new Error('Foco inexistente');return s;}
 export function history(root){
@@ -102,61 +144,36 @@ export function syncWork(root,id,{focus=false}={}) {return projectWork(root,read
 export function createWork(root,{id=generateWorkId(),title,objective,criterion,verification,priority='normal'}) {
   assertID(id);if(exists(root,wp(id)))throw new Error(`Trabajo ya existe: ${id}`);
   status(root);history(root);const ts=now();
-  const w={schemaVersion:1,id,revision:1,cycle:1,title,objective:{id:'OBJ-1',outcome:objective,criteria:[{id:'AC-1',description:criterion,verification,evidenceIds:[]}]},status:'pending',priority,createdAt:ts,updatedAt:ts,summary:'Trabajo creado; alcance pendiente de revisión.',blockers:[],decisionsPending:[],nextAction:'Revisar contexto y criterio de aceptación',documents:[],tasks:[],evidence:[],closure:null};
+  const w={schemaVersion:1,id,revision:1,cycle:1,title,objective:{id:'OBJ-1',outcome:objective,criteria:[{id:'AC-1',description:criterion,verification,evidenceIds:[]}]},status:'pending',priority,createdAt:ts,updatedAt:ts,summary:'Trabajo creado; alcance pendiente de revisión.',blockers:[],decisionsPending:[],nextAction:'Revisar contexto y criterio de aceptación',documents:[],tasks:[],evidence:[],acceptanceChanges:[],closure:null};
   validateWork(root,w);return commitWork(root,w,{focus:true});
-}
-export function completeProjectMap(root,id,{summary:result,limitations=[]}={}){
-  validateClosureInput('done',result,limitations);
-  const w=readWork(root,id,{files:false});
-  const document='.pulso/project.md',taskId='T-1',evidenceId='E-1';
-  if(w.closure){
-    if(!isCompletedProjectMap(w,result,limitations))throw new Error('El trabajo de mapeo ya está cerrado con otro resultado');
-    syncWork(root,id);return mapReceipt(w);
-  }
-  status(root);history(root);
-  if(w.tasks.length||w.evidence.length||w.documents.length||w.objective.criteria.length!==1)
-    throw new Error('complete-map solo admite un trabajo nuevo de contexto sin consolidación previa');
-  if(!exists(root,document))throw new Error(`Documento no existe: ${document}`);
-  if(!readText(root,document).includes('<!-- template: project@1.0 -->'))throw new Error('project.md no declara template project@1.0');
-  const criterion=w.objective.criteria[0],checkedAt=now();
-  w.status='in_progress';w.summary=result;w.nextAction='Cerrar el mapeo con su evidencia estática';
-  w.documents=[{kind:'project',path:document,templateVersion:'project@1.0'}];
-  w.tasks=[{id:taskId,title:'Inspeccionar y redactar contexto inicial',criterionIds:[criterion.id],agent:'pulso-explorer',status:'done',dependsOn:[],writeScope:[document],resources:['templates/project.md'],acceptance:[criterion.description],evidenceIds:[evidenceId],summary:result}];
-  w.evidence=[{id:evidenceId,kind:'static',status:'pass',checkedAt,criterionIds:[criterion.id],taskIds:[taskId],report:document,command:null,cwd:'.',exitCode:null,basis:'Documento producido por pulso-explorer y aceptado por Pulso tras revisar el resultado delegado.',files:[fingerprint(root,document)],summary:result}];
-  criterion.evidenceIds=[evidenceId];
-  // Validate both phases before one canonical commit. A failed projection can
-  // be retried without creating another task, evidence record or closure.
-  validateWork(root,w);prepareClosure(root,w,{outcome:'done',summary:result,limitations});
-  commitWork(root,w);return mapReceipt(w);
-}
-function mapReceipt(w){return {schemaVersion:1,id:w.id,status:w.status,revision:w.revision,document:'.pulso/project.md',evidenceId:'E-1',closureId:w.closure.id};}
-export function isCompletedProjectMap(w,result,limitations){
-  return w.closure?.outcome==='done'&&w.closure.summary===result&&same(w.closure.limitations,limitations)
-    &&w.objective.criteria.length===1&&w.tasks.length===1&&w.tasks[0].id==='T-1'&&w.tasks[0].agent==='pulso-explorer'
-    &&w.documents.length===1&&w.documents[0].kind==='project'&&w.documents[0].path==='.pulso/project.md'
-    &&w.evidence.length===1&&w.evidence[0].id==='E-1'&&w.evidence[0].report==='.pulso/project.md';
 }
 export function saveWork(root,candidate,expectedRevision){
   assertSchema('work',candidate);const old=readWork(root,candidate.id,{files:false});
   if(!Number.isSafeInteger(expectedRevision)||old.revision!==expectedRevision||candidate.revision!==expectedRevision)throw new Error(`Revisión obsoleta; actual=${old.revision}. Releer y reconciliar, no sobrescribir.`);
   if(terminal(old.status)||terminal(candidate.status))throw new Error('Usar close/reopen para estados terminales');
   if(candidate.cycle!==old.cycle||candidate.createdAt!==old.createdAt||candidate.objective.id!==old.objective.id)throw new Error('Identidad/ciclo/fecha de creación inmutables');
-  const oldChanges=old.acceptanceChanges||[],newChanges=candidate.acceptanceChanges||[];
-  if(!same(oldChanges,newChanges.slice(0,oldChanges.length)))throw new Error('Historial de aceptación inmutable');
   status(root);const priorHistory=history(root); // Preflight before persisting canonical data.
   const archivedIDs=new Set(priorHistory.filter(e=>e.workId===old.id).flatMap(e=>e.evidenceIds));
-  for(const change of newChanges)if(!same(change.before,change.after))for(const id of change.before.evidenceIds||[])if(old.evidence.some(e=>e.id===id))archivedIDs.add(id);
   for(const id of archivedIDs){const before=old.evidence.find(e=>e.id===id),after=candidate.evidence.find(e=>e.id===id);if(!same(before,after))throw new Error(`Evidencia archivada inmutable: ${id}`);}
   const w=structuredClone(candidate);w.revision++;w.updatedAt=now();validateWork(root,w);
+  const oldChanges=old.acceptanceChanges||[],newChanges=w.acceptanceChanges||[];
+  if(newChanges.length<oldChanges.length||!same(newChanges.slice(0,oldChanges.length),oldChanges))throw new Error('Historial de aceptación inmutable');
+  for(const before of old.evidence){
+    const after=w.evidence.find(e=>e.id===before.id);if(!after)throw new Error(`La observación se conserva; retirar solo sus vínculos: ${before.id}`);
+    const observed=e=>{const {summary,editedAt,...rest}=e;return rest;};
+    if(!same(observed(before),observed(after)))throw new Error(`Observación de evidencia inmutable: ${before.id}; repetir con un ID nuevo`);
+  }
+  for(const evidence of w.evidence.filter(e=>!old.evidence.some(previous=>previous.id===e.id)))assertObservedEvidence(root,w,evidence);
   return commitWork(root,w);
 }
+function assertObservedReport(e){if(!e.files.some(file=>file.path===e.report&&typeof file.sha256==='string'))throw new Error(`Evidencia ${e.id} sin informe/salida observado fingerprintado`);}
 function assertCompletion(root,w,{fresh=true}={}){
   if(w.blockers.length||w.decisionsPending.length)throw new Error('Trabajo con bloqueos o decisiones pendientes');
   if(w.tasks.some(t=>!terminal(t.status)))throw new Error('Hay tareas abiertas');
   const ev=new Map(w.evidence.map(e=>[e.id,e]));const used=new Set();
-  const covering=(ids,predicate,label)=>{if(ids.some(id=>ev.get(id)?.status!=='pass'))throw new Error(`Aceptación contiene evidencia no positiva: ${label}`);const es=ids.map(id=>ev.get(id)).filter(e=>e&&e.status==='pass'&&e.kind!=='not_run'&&predicate(e));if(!es.length)throw new Error(`Falta evidencia positiva: ${label}`);for(const e of es){if(fresh)checkFresh(root,e);used.add(e.id);}};
-  for(const c of w.objective.criteria)covering(c.evidenceIds,e=>e.criterionIds.includes(c.id),c.id);
-  for(const t of w.tasks.filter(t=>t.status==='done'))covering(t.evidenceIds,e=>e.taskIds.includes(t.id),t.id);
+  const covering=(ids,predicate,label,selection)=>{if(ids.some(id=>ev.get(id)?.status!=='pass'))throw new Error(`Aceptación contiene evidencia no positiva: ${label}`);const es=ids.map(id=>ev.get(id)).filter(e=>e&&e.status==='pass'&&e.kind!=='not_run'&&predicate(e));if(!es.length)throw new Error(`Falta evidencia positiva: ${label}`);for(const e of es){if(fresh){assertObservedReport(e);checkFresh(root,e,w,selection);}used.add(e.id);}};
+  for(const c of w.objective.criteria)covering(c.evidenceIds,e=>e.criterionIds.includes(c.id),c.id,{criterionIds:[c.id],taskIds:[]});
+  for(const t of w.tasks.filter(t=>t.status==='done'))covering(t.evidenceIds,e=>e.taskIds.includes(t.id),t.id,{criterionIds:[],taskIds:[t.id]});
   return [...used];
 }
 function prepareClosure(root,w,{outcome,summary:result,limitations}){
@@ -210,11 +227,26 @@ export function validateProject(root,{fresh=false}={}){
   for(const entry of h)if(!seen.has(entry.workId))throw new Error(`Historial apunta a trabajo ausente: ${entry.workId}`);
   return {valid:true,works:count,active:s.works.length,closures:h.length,freshnessChecked:fresh};
 }
-export function validateResult(root,delegation,result){
+export function validateResult(root,delegation,result,{globalRoot}={}){
   assertSchema('delegation',delegation);assertSchema('result',result);
-  for(const p of [...delegation.inputs,delegation.template,delegation.output,...delegation.writeScope])safePath(root,p);
   for(const [left,right] of [['id','delegationId'],['workId','workId'],['workRevision','workRevision'],['agent','agent']])if(delegation[left]!==result[right])throw new Error(`Resultado no corresponde al encargo: ${right}`);
-  const allowed=p=>delegation.writeScope.some(scope=>p===scope||p.startsWith(scope+'/'));
-  for(const p of [...result.artifacts,...result.changedFiles]){safePath(root,p);if(!allowed(p))throw new Error(`Resultado fuera del alcance de escritura: ${p}`);if(!exists(root,p))throw new Error(`Archivo declarado inexistente: ${p}`);}
-  return {valid:true,semanticAcceptance:'PENDING_REVIEW',note:'No prueba ejecución, identidad nativa ni ausencia de otros cambios. Revisar diff y evidencia.'};
+  const work=readWork(root,delegation.workId,{files:false});
+  if(work.revision!==delegation.workRevision)throw new Error('Revisión del encargo obsoleta; releer y reconciliar');
+  if(!globalRoot)throw new Error('Falta la raíz global confiable de plantillas');
+  const catalog=readJSON(globalRoot,'catalog.json'),template=catalog.templates?.[delegation.templateId];
+  if(!template||!catalog.specialists.some(a=>a.id===delegation.agent))throw new Error('Plantilla o agente fuera del catálogo global');
+  readText(globalRoot,template); // Resolve and actually read the installed template through the same path guard.
+  unique(delegation.taskIds,'Tareas del encargo');
+  const tasks=delegation.taskIds.map(id=>{const task=work.tasks.find(t=>t.id===id);if(!task||task.agent!==delegation.agent)throw new Error(`Tarea no asignada al agente: ${id}`);return task;});
+  for(const p of [...delegation.inputs,delegation.output,...delegation.writeScope])safePath(root,p);
+  const inScope=(p,scopes)=>scopes.some(scope=>p===scope||p.startsWith(scope+'/'));
+  if(!inScope(delegation.output,delegation.writeScope))throw new Error('Output fuera del alcance de escritura');
+  for(const scope of delegation.writeScope)if(!tasks.some(t=>inScope(scope,t.writeScope)))throw new Error(`Encargo fuera del alcance de la tarea: ${scope}`);
+  for(const p of [...result.artifacts,...result.changedFiles]){
+    safePath(root,p);if(!inScope(p,delegation.writeScope))throw new Error(`Resultado fuera del alcance de escritura: ${p}`);
+    if(!exists(root,p))throw new Error(`Archivo declarado inexistente: ${p}`);
+  }
+  if(result.status==='completed'&&!result.artifacts.includes(delegation.output))throw new Error('Resultado completed no declara el output del encargo');
+  for(const check of result.checks)if(check.evidenceRef){safePath(root,check.evidenceRef);if(!exists(root,check.evidenceRef))throw new Error('Referencia de evidencia inexistente');}
+  return {valid:true,templateId:delegation.templateId,semanticAcceptance:'PENDING_REVIEW',note:'No prueba ejecución, identidad nativa ni ausencia de otros cambios. Revisar diff y evidencia.'};
 }

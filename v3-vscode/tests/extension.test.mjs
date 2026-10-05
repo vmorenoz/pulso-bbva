@@ -179,13 +179,13 @@ test('single root is automatic and multi-root binding is reused across tools unt
   assert.equal(host.picks.length, 1);
   assert.equal(host.picks[0].items.length, 2);
   assert.match((await success('pulso_workspace', {action: 'prepare'})).output, /Ya estaba/);
-  const create = {action: 'create', workId: 'WORK-EXT', title: 'Integración', objective: 'Verificar core empaquetado', criterion: 'Contrato público correcto', verification: 'Fixture temporal', priority: 'urgent'};
+  const create = {action: 'create', workId: 'WORK-EXT', title: 'Integración', objective: 'Verificar core empaquetado', criterion: 'Contrato público correcto', verification: 'Fixture temporal', priority: 'critical'};
   await success('pulso_work', create);
   // Read canonical artifacts, never manufacture metadata in the fixture.
   const workFiles = listFiles(path.join(second, '.pulso')).filter(file => file.endsWith('/work.json'));
   assert.equal(workFiles.length, 1);
   const canonicalWorkPath = path.join(second, '.pulso', workFiles[0]);
-  assert.equal(json(canonicalWorkPath).priority, 'urgent');
+  assert.equal(json(canonicalWorkPath).priority, 'critical');
   assert.equal(json(canonicalWorkPath).revision, 1);
   await success('pulso_work', {action: 'update', workId: 'WORK-EXT', expectedRevision: 1, actions: [{type: 'work.set_overview', summary: 'Avance verificado', nextAction: 'Cerrar'}]});
   assert.equal(json(canonicalWorkPath).revision, 2);
@@ -218,10 +218,10 @@ test('single root is automatic and multi-root binding is reused across tools unt
 
 test('context is project-local and user preferences share injected HOME across roots and activations', async t => {
   const {extensionPath, roots: [first, second], homeDir, host, activateWith, before, initial, success} = await fixture(t);
-  await success('pulso_context', {action: 'set_context', context: 'Notas del primer proyecto'});
-  await success('pulso_context', {action: 'set_preference', scope: 'project', key: 'formato', value: 'breve'});
+  await success('pulso_context', {action: 'set_context', scope: 'project', expectedRevision: 1, context: 'Notas del primer proyecto'});
+  await success('pulso_context', {action: 'set_preference', scope: 'project', expectedRevision: 2, source: 'user', key: 'formato', value: 'breve'});
   const projectSaved = snapshot(first);
-  await success('pulso_context', {action: 'set_preference', scope: 'user', key: 'idioma', value: 'es'});
+  await success('pulso_context', {action: 'set_preference', scope: 'user', expectedRevision: 1, source: 'user', key: 'idioma', value: 'es'});
   assert.deepEqual(snapshot(first), projectSaved);
   const preferences = json(path.join(homeDir, '.pulso/preferences.json'));
   assert.equal(preferences.preferences.find(item => item.key === 'idioma').value, 'es');
@@ -317,8 +317,8 @@ test('root errors, cancellation and trust rejection prevent project and HOME wri
   const {roots: [first, second], homeDir, host, before, initial} = await fixture(t);
   const inputs = [
     ['pulso_workspace', {action: 'prepare'}],
-    ['pulso_work', {action: 'create', workId: 'REJECTED', title: 'Rechazado', objective: 'No escribir'}],
-    ['pulso_context', {action: 'set_preference', scope: 'user', key: 'idioma', value: 'es'}],
+    ['pulso_work', {action: 'create', workId: 'REJECTED', title: 'Rechazado', objective: 'No escribir', criterion: 'No state mutation', verification: 'Snapshot'}],
+    ['pulso_context', {action: 'set_preference', scope: 'user', expectedRevision: 1, source: 'user', key: 'idioma', value: 'es'}],
   ];
   const scenarios = [
     {error: /No open local/, setup() {host.vscode.workspace.workspaceFolders = [];}},
@@ -377,10 +377,11 @@ test('VSC-01 stale or absent bindings reject every mutating action before writes
   const saved = before();
   for (const [name, action] of [
     ...['prepare','sync','recover'].map(action=>['pulso_workspace',action]),
-    ...['create','update','block','close','reopen','complete_map'].map(action=>['pulso_work',action]),
+    ...['create','update','block','close','reopen'].map(action=>['pulso_work',action]),
     ...['set_context','set_preference','remove_preference','add_learning'].map(action=>['pulso_context',action])
   ]) for (const expectedBindingId of [undefined,a.bindingId]) {
-    const receipt = await raw(name,{action,...(expectedBindingId ? {expectedBindingId} : {})});
+    const payloads={prepare:{},sync:{workId:'W',expectedRevision:1},recover:{},create:{title:'Title',objective:'Objective',criterion:'Criterion',verification:'Verify'},update:{workId:'W',expectedRevision:1,actions:[{type:'work.set_overview',summary:'Changed'}]},block:{workId:'W',expectedRevision:1,summary:'Blocked',reason:'Reason'},close:{workId:'W',expectedRevision:1,summary:'Closed'},reopen:{workId:'W',expectedRevision:1,reason:'Reason'},set_context:{scope:'project',expectedRevision:1,context:'Context'},set_preference:{scope:'user',expectedRevision:1,key:'key',value:'value',source:'user'},remove_preference:{scope:'user',expectedRevision:1,key:'key'},add_learning:{scope:'project',expectedRevision:1,note:'Note',source:'observed'}};
+    const receipt = await raw(name,{action,...payloads[action],...(expectedBindingId ? {expectedBindingId} : {})});
     assert.equal(receipt.ok,false);
     assert.match(receipt.output,/binding changed or missing/);
     assert.deepEqual(before(),saved);

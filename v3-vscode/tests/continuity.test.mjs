@@ -61,7 +61,7 @@ function assertWork(root,artifacts,workId,revision,cycle,priority) {
   return work;
 }
 
-test('urgent work continues from packaged VS Code tools to OpenCode source and back on the same root',async t => {
+test('critical work continues from packaged VS Code tools to OpenCode source and back on the same root',async t => {
   const {root,homeDir,artifacts,mutations,run,success} = await fixture(t);
   await success('pulso_workspace',{action:'prepare'});
   const localPath = path.join(root,'.pulso/project.json');
@@ -70,11 +70,11 @@ test('urgent work continues from packaged VS Code tools to OpenCode source and b
   const registry = fs.readFileSync(registryPath,'utf8');
   assert.deepEqual(json(registryPath).locations,[root]);
   assert.equal(prepareWorkspace(root,{homeDir}).projectId,identity.projectId);
-  const workId = 'CONTINUITY-URGENT';
-  await success('pulso_work',{action:'create',workId,...input,priority:'urgent'});
-  const initial = assertWork(root,artifacts,workId,1,1,'urgent');
+  const workId = 'CONTINUITY-CRITICAL';
+  await success('pulso_work',{action:'create',workId,...input,priority:'critical'});
+  const initial = assertWork(root,artifacts,workId,1,1,'critical');
   assert.equal(sourceMutations.applyWorkMutation(root,{workId,expectedRevision:1,actions:[{type:'work.set_overview',summary:'Continúa en OpenCode'}]}).revision,2);
-  assertWork(root,artifacts,workId,2,1,'urgent');
+  assertWork(root,artifacts,workId,2,1,'critical');
   const beforeStale = snapshot(root);
   assert.throws(() => sourceMutations.applyWorkMutation(root,{workId,expectedRevision:1,actions:[{type:'work.set_overview',summary:'Obsoleto'}]}),/Revisión obsoleta; actual=2/);
   const stale = await run('pulso_work',{action:'update',workId,expectedRevision:1,actions:[{type:'work.set_overview',summary:'Obsoleto'}]});
@@ -82,7 +82,7 @@ test('urgent work continues from packaged VS Code tools to OpenCode source and b
   assert.match(stale.output,/Revisión obsoleta; actual=2/);
   assert.deepEqual(snapshot(root),beforeStale);
   assert.equal(sourceMutations.closeWorkOperation(root,{workId,expectedRevision:2,outcome:'cancelled',summary:'Cierre en OpenCode'}).revision,3);
-  const closed = assertWork(root,artifacts,workId,3,1,'urgent');
+  const closed = assertWork(root,artifacts,workId,3,1,'critical');
   const history = sourceMutations.readHistory(root,{workId});
   assert.equal(history.length,1);
   assert.equal(history[0].closureId,`${workId}:c1`);
@@ -93,7 +93,7 @@ test('urgent work continues from packaged VS Code tools to OpenCode source and b
   assert.deepEqual(mutations.readHistory(root,{workId}),history);
   const closedSnapshot = snapshot(root), homeSnapshot = snapshot(homeDir);
   assert.match(await success('pulso_work',{action:'get',workId}),/rev\. 3 · cancelled/);
-  assert.match(await success('pulso_history',{workId}),/CONTINUITY-URGENT · cancelled · Cierre en OpenCode/);
+  assert.match(await success('pulso_history',{workId}),/CONTINUITY-CRITICAL · cancelled · Cierre en OpenCode/);
   const staleReopen = await run('pulso_work',{action:'reopen',workId,expectedRevision:2,reason:'Obsoleto'});
   assert.equal(staleReopen.ok,false);
   assert.match(staleReopen.output,/Revisión obsoleta; actual=3/);
@@ -101,13 +101,13 @@ test('urgent work continues from packaged VS Code tools to OpenCode source and b
   assert.deepEqual(snapshot(root),closedSnapshot);
   assert.deepEqual(snapshot(homeDir),homeSnapshot);
   await success('pulso_work',{action:'reopen',workId,expectedRevision:3,reason:'Retomar desde VS Code'});
-  const reopened = assertWork(root,artifacts,workId,4,2,'urgent');
+  const reopened = assertWork(root,artifacts,workId,4,2,'critical');
   assert.equal(reopened.createdAt,initial.createdAt);
   assert.deepEqual(reopened.objective,initial.objective);
   assert.equal(reopened.closure,null);
   assert.deepEqual(sourceMutations.readHistory(root,{workId}),history);
   await success('pulso_work',{action:'close',workId,expectedRevision:4,outcome:'cancelled',summary:'Segundo ciclo en VS Code'});
-  assertWork(root,artifacts,workId,5,2,'urgent');
+  assertWork(root,artifacts,workId,5,2,'critical');
   const cycles = sourceMutations.readHistory(root,{workId});
   assert.deepEqual(cycles.map(entry => entry.closureId),[`${workId}:c2`,`${workId}:c1`]);
   assert.deepEqual(cycles[1],history[0]);
@@ -123,11 +123,11 @@ test('urgent work continues from packaged VS Code tools to OpenCode source and b
   assert.deepEqual(fs.readdirSync(path.join(root,'.pulso/work')),[workId]);
 });
 
-test('legacy critical created through the source Work API is preserved by packaged reads and reopen',async t => {
+test('critical created through the source Work API is preserved by packaged reads and reopen',async t => {
   const {root,homeDir,artifacts,mutations,success} = await fixture(t);
   prepareWorkspace(root,{homeDir});
   // The low-level Work API takes id, unlike createWorkOperation's workId,
-  // and accepts recognized legacy priorities without the new-input enum.
+  // and uses the same canonical priority vocabulary.
   const workId = 'CONTINUITY-CRITICAL';
   const initial = sourceArtifacts.createWork(root,{id:workId,...input,priority:'critical'});
   assertWork(root,artifacts,workId,1,1,'critical');
@@ -137,11 +137,11 @@ test('legacy critical created through the source Work API is preserved by packag
   await success('pulso_workspace',{action:'validate',fresh:true});
   assertWork(root,artifacts,workId,1,1,'critical');
   assert.deepEqual(snapshot(root),before);
-  sourceMutations.closeWorkOperation(root,{workId,expectedRevision:1,outcome:'cancelled',summary:'Cierre legacy'});
+  sourceMutations.closeWorkOperation(root,{workId,expectedRevision:1,outcome:'cancelled',summary:'Cierre del core'});
   const history = sourceMutations.readHistory(root,{workId});
   assert.deepEqual(mutations.readHistory(root,{workId}),history);
   assert.match(await success('pulso_history',{workId}),/CONTINUITY-CRITICAL · cancelled/);
-  await success('pulso_work',{action:'reopen',workId,expectedRevision:2,reason:'Continuar legacy'});
+  await success('pulso_work',{action:'reopen',workId,expectedRevision:2,reason:'Continuar desde el core'});
   const reopened = assertWork(root,artifacts,workId,3,2,'critical');
   assert.equal(reopened.createdAt,initial.createdAt);
   assert.deepEqual(sourceMutations.readHistory(root,{workId}),history);

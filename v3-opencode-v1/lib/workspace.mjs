@@ -1,15 +1,46 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {createWork,initArtifacts,saveWork,status,history,validateProject} from './artifacts.mjs';
-import {atomicWrite,exists,safePath,readJSON,idOK,listFiles} from './fs.mjs';
+import {createWork,emptyState,initArtifacts,saveWork,status,history,validateProject} from './artifacts.mjs';
+import {atomicWrite,exists,safePath,readJSON,writeJSON,idOK,listFiles} from './fs.mjs';
 import {planProjectIdentity} from './identity.mjs';
 
+const preparationFile='.pulso/preparation.json';
+const json=value=>JSON.stringify(value,null,2)+'\n';
+function seedFiles(at){return new Map([
+  ['.pulso/state.json',json({...emptyState(),updatedAt:at})],
+  ['.pulso/history.jsonl',''],
+  ['.pulso/project.md','# Proyecto\n\nContexto todavía no levantado. Usa la plantilla global proporcionada por Pulso y evidencia del repositorio.\n'],
+  ['.pulso/decisions.md','# Índice de decisiones\n\nSin decisiones registradas. Añadir referencias; no inventar aprobaciones.\n'],
+  ['.pulso/memory.json',json({schemaVersion:1,revision:1,updatedAt:at,context:'',preferences:[],learning:[]})],
+]);}
 function seed(root){
   initArtifacts(root);
-  if(!exists(root,'.pulso/project.md'))atomicWrite(root,'.pulso/project.md','# Proyecto\n\nContexto todavía no levantado. Usa la plantilla global proporcionada por Pulso y evidencia del repositorio.\n');
-  if(!exists(root,'.pulso/decisions.md'))atomicWrite(root,'.pulso/decisions.md','# Índice de decisiones\n\nSin decisiones registradas. Añadir referencias; no inventar aprobaciones.\n');
-  if(!exists(root,'.pulso/memory.json'))atomicWrite(root,'.pulso/memory.json',JSON.stringify({schemaVersion:1,revision:1,updatedAt:new Date().toISOString(),context:'',preferences:[],learning:[]},null,2)+'\n');
+  for(const [file,bytes] of seedFiles(new Date().toISOString()))if(!exists(root,file))atomicWrite(root,file,bytes);
+}
+function finishBootstrap(root,identity){
+  const marker=readJSON(root,preparationFile),files=seedFiles(marker?.startedAt);
+  if(marker?.schemaVersion!==1||marker.kind!=='bootstrap'||typeof marker.startedAt!=='string'||!Number.isFinite(Date.parse(marker.startedAt))||
+    !Array.isArray(marker.files)||new Set(marker.files).size!==marker.files.length||marker.files.some(file=>!files.has(file))||
+    !['.pulso/state.json','.pulso/history.jsonl'].every(file=>marker.files.includes(file)))throw new Error('Marcador de preparación inválido; datos conservados');
+  if(exists(root,'.pulso/tasks'))throw new Error('Preparación mezclada con datos legacy; datos conservados');
+  const work=safePath(root,'.pulso/work');
+  if(fs.existsSync(work)&&(!fs.statSync(work).isDirectory()||fs.readdirSync(work).length))throw new Error('Preparación con trabajo existente; datos conservados');
+  // Only untouched seed bytes establish ownership; never repair arbitrary partial data.
+  for(const [file,bytes] of files){
+    const target=safePath(root,file),present=fs.existsSync(target),owned=marker.files.includes(file);
+    if(!present&&!owned||present&&(!fs.statSync(target).isFile()||owned&&fs.readFileSync(target,'utf8')!==bytes))throw new Error(`Preparación modificada o incompleta: ${file}; datos conservados`);
+  }
+  for(const file of marker.files)if(!exists(root,file))atomicWrite(root,file,files.get(file));
+  fs.mkdirSync(work,{recursive:true});
+  identity.commit();
+  fs.unlinkSync(safePath(root,preparationFile));
+}
+function startBootstrap(root,identity){
+  const startedAt=new Date().toISOString(),files=[...seedFiles(startedAt).keys()];
+  for(const file of files)if(exists(root,file)&&!fs.statSync(safePath(root,file)).isFile())throw new Error(`No es archivo: ${file}`);
+  writeJSON(root,preparationFile,{schemaVersion:1,kind:'bootstrap',startedAt,files:files.filter(file=>!exists(root,file))});
+  finishBootstrap(root,identity);
 }
 const nonempty=value=>typeof value==='string'&&Boolean(value.trim());
 function legacyRecords(root){
@@ -67,6 +98,10 @@ export function prepareWorkspace(root,options={}){
   const folder=safePath(root,'.pulso');
   if(fs.existsSync(folder)&&!fs.statSync(folder).isDirectory())throw new Error(`No es directorio: ${folder}`);
   const identity=planProjectIdentity(root,options);
+  if(exists(root,preparationFile)){
+    finishBootstrap(root,identity);
+    return {prepared:true,target:root,existingWorkspace:false,projectId:identity.projectId,bootstrapRecovered:true};
+  }
   let legacyState=false;
   if(exists(root,'.pulso/state.json')){
     const saved=readJSON(root,'.pulso/state.json');
@@ -75,12 +110,14 @@ export function prepareWorkspace(root,options={}){
       // Invalid current state is never evidence of a legacy workspace.
       status(root);history(root);
       if(!fs.existsSync(safePath(root,'.pulso/work'))||!fs.statSync(safePath(root,'.pulso/work')).isDirectory())
-        throw new Error(`Workspace Pulso incompleto en ${root}; datos conservados. Usa recuperación explícita.`);
+        throw new Error(`Workspace Pulso incompleto en ${root}; datos conservados. Restaura los archivos ausentes desde un respaldo.`);
+      for(const file of ['.pulso/project.md','.pulso/decisions.md','.pulso/memory.json'])if(!exists(root,file)||!fs.statSync(safePath(root,file)).isFile())
+        throw new Error(`Workspace Pulso incompleto: ${file}; sin marcador propio no se reconstruye. Restaura el archivo desde un respaldo.`);
       identity.commit();
       return {prepared:true,target:root,existingWorkspace:true,projectId:identity.projectId};
     }
   }
-  if(exists(root,'.pulso/work')||exists(root,'.pulso/history.jsonl'))throw new Error('Workspace actual incompleto; usa recuperación explícita');
+  if(exists(root,'.pulso/work')||exists(root,'.pulso/history.jsonl'))throw new Error('Workspace actual incompleto; sin marcador propio no se reconstruye. Restaura los archivos ausentes desde un respaldo.');
   const records=legacyRecords(root);
   if(records){
     const result=migrateLegacy(root,records,{legacyState});identity.commit();
@@ -88,6 +125,6 @@ export function prepareWorkspace(root,options={}){
   }
   if(exists(root,'.pulso/tasks'))throw new Error('Formato legacy no reconocido; datos conservados');
   if(legacyState)throw new Error('Estado legacy sin tareas reconocidas; datos conservados');
-  seed(root);identity.commit();
+  startBootstrap(root,identity);
   return {prepared:true,target:root,existingWorkspace:false,projectId:identity.projectId};
 }

@@ -8,20 +8,20 @@ const enumeration = values => ({type:'string', enum:values});
 const id = {type:'string', pattern:'^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$', minLength:1, maxLength:80};
 const integer = (minimum, maximum) => ({type:'integer', minimum, ...(maximum === undefined ? {} : {maximum})});
 const schema = (properties, required = []) => ({type:'object', properties, required, additionalProperties:false});
-export const isMutating = (name, input) => name === 'pulso_work' ? input.action !== 'get' : name === 'pulso_context' ? input.action !== 'summary' : name === 'pulso_workspace' && ['prepare','sync','recover'].includes(input.action);
+export const isMutating = (name, input) => name === 'pulso_work' ? !['get','validate_result'].includes(input.action) : name === 'pulso_context' ? !['summary','read'].includes(input.action) : name === 'pulso_workspace' && ['prepare','sync','recover'].includes(input.action);
 const definition = (name, displayName, modelDescription, inputSchema) => ({name, displayName, modelDescription, canBeReferencedInPrompt:true, toolReferenceName:name, inputSchema});
 
 export const toolDefinitions = [
   definition('pulso_workspace', 'Pulso · Workspace', 'Antes de mutar consulta status, conserva workspace/bindingId y pasa expectedBindingId. status incluye data.works por páginas offset/limit. Prepara, consulta, valida, sincroniza o recupera Pulso explícitamente. attempts/reconcile_attempts consultan telemetría sin declarar agentes vivos ni modificar Work.', schema({
     expectedBindingId:string(80), offset:integer(0), action:enumeration(['prepare','status','validate','sync','recover','attempts','reconcile_attempts']), fresh:{type:'boolean'}, workId:id, expectedRevision:integer(1), sessionID:string(160), limit:integer(1,100)
   }, ['action'])),
-  definition('pulso_work', 'Pulso · Trabajo', 'Mutaciones requieren expectedBindingId de una consulta del proyecto previsto. get devuelve data completo por section y páginas offset/limit: sigue nextOffset mientras hasMore. Consulta o actualiza un objetivo de trabajo. create permite omitir workId; las demás acciones requieren ID explícito.', schema({
-    expectedBindingId:string(80), section:enumeration(['overview','tasks','criteria','evidence','documents','decisions','acceptanceChanges','all']), offset:integer(0), limit:integer(1,20), action:enumeration(['get','create','update','block','close','reopen','complete_map']), workId:id, title:string(240), objective:string(4000), criterion:string(2000), verification:string(2000), priority:enumeration(['low','normal','high','urgent']), expectedRevision:integer(1),
+  definition('pulso_work', 'Pulso · Trabajo', 'Mutaciones requieren expectedBindingId de una consulta del proyecto previsto. get devuelve data completo por section y páginas offset/limit: sigue nextOffset mientras hasMore. Consulta o actualiza un objetivo de trabajo. get devuelve acceptanceBasis para observar evidencia. validate_result recibe delegation y result y no escribe. create permite omitir workId; las mutaciones restantes requieren ID explícito.', schema({
+    delegation:{type:'object',additionalProperties:true}, result:{type:'object',additionalProperties:true}, expectedBindingId:string(80), section:enumeration(['overview','tasks','criteria','evidence','documents','decisions','acceptanceChanges','all']), offset:integer(0), limit:integer(1,20), action:enumeration(['get','validate_result','create','update','block','close','reopen']), workId:id, title:string(240), objective:string(4000), criterion:string(2000), verification:string(2000), priority:enumeration(['low','normal','high','critical']), expectedRevision:integer(1),
     actions:{type:'array', minItems:1, maxItems:20, items:{type:'object', additionalProperties:true}}, outcome:enumeration(['done','cancelled']), summary:string(4000), limitations:{type:'array', maxItems:30, items:{...string(1000),minLength:1,pattern:'\\S'}}, reason:string(2000)
   }, ['action'])),
   definition('pulso_history', 'Pulso · Historial', 'Consulta cierres con fechas, ciclos, resumen completo, limitaciones y referencias. data.items está paginado por offset/limit; sigue nextOffset mientras hasMore.', schema({offset:integer(0), workId:id, since:string(), until:string(), limit:integer(1,20)})),
-  definition('pulso_context', 'Pulso · Contexto', 'Toda escritura requiere expectedBindingId confirmado para el proyecto previsto. Consulta o registra contexto relevante, preferencias y aprendizajes. summary devuelve contexto, preferencias key/value/source y aprendizajes note/source del ámbito solicitado; sin scope incluye proyecto y usuario. Salida limitada a 8000 caracteres con aviso de truncación. Las preferencias de usuario se conservan entre workspaces y sesiones.', schema({
-    expectedBindingId:string(80), action:enumeration(['summary','set_context','set_preference','remove_preference','add_learning']), context:string(4000), key:string(120), value:string(1000), scope:enumeration(['project','user']), note:string(2000), source:enumeration(['user','observed','delegated'])
+  definition('pulso_context', 'Pulso · Contexto', 'Toda escritura requiere expectedBindingId confirmado para el proyecto previsto. Consulta o registra contexto relevante, preferencias y aprendizajes. read devuelve entries, revisions y nextCursor: sigue hasMore. Antes de mutar lee la revisión y envía scope, expectedRevision y source explícito para preferencias/aprendizajes. summary es solo resumen limitado a 8000 caracteres. Las preferencias de usuario se conservan entre workspaces y sesiones.', schema({
+    expectedBindingId:string(80), expectedRevision:integer(1), section:enumeration(['context','preferences','learning','all']), limit:integer(1,100), cursor:string(4000), action:enumeration(['read','summary','set_context','set_preference','remove_preference','add_learning']), context:string(4000), key:string(120), value:string(1000), scope:enumeration(['project','user','all']), note:string(2000), source:enumeration(['user','observed','delegated'])
   }, ['action']))
 ];
 
@@ -48,6 +48,40 @@ export function validateInput(schema, value, location = 'input') {
   } else if (schema.type === 'boolean' && typeof value !== 'boolean') invalid('se requiere booleano');
   if (schema.enum && !schema.enum.includes(value)) invalid('valor no admitido');
   return value;
+}
+
+// A flat host schema is paired with action-specific checks before resolving a workspace.
+const actionFields = {
+  pulso_workspace: {
+    prepare:[[],[]], status:[['offset','limit'],[]], validate:[['fresh'],[]],
+    sync:[['workId','expectedRevision'],['workId','expectedRevision']], recover:[[],[]],
+    attempts:[['sessionID','workId','limit'],[]], reconcile_attempts:[['sessionID','workId','limit'],[]]
+  },
+  pulso_work: {
+    get:[['workId','section','offset','limit'],['workId']],
+    validate_result:[['delegation','result'],['delegation','result']],
+    create:[['workId','title','objective','criterion','verification','priority'],['title','objective','criterion','verification']],
+    update:[['workId','expectedRevision','actions'],['workId','expectedRevision','actions']],
+    block:[['workId','expectedRevision','summary','reason'],['workId','expectedRevision','summary','reason']],
+    close:[['workId','expectedRevision','outcome','summary','limitations'],['workId','expectedRevision','summary']],
+    reopen:[['workId','expectedRevision','reason'],['workId','expectedRevision','reason']]
+  },
+  pulso_context: {
+    read:[['scope','section','key','limit','cursor'],[]], summary:[['scope'],[]],
+    set_context:[['scope','expectedRevision','context'],['scope','expectedRevision','context']],
+    set_preference:[['scope','expectedRevision','key','value','source'],['scope','expectedRevision','key','value','source']],
+    remove_preference:[['scope','expectedRevision','key'],['scope','expectedRevision','key']],
+    add_learning:[['scope','expectedRevision','note','source'],['scope','expectedRevision','note','source']]
+  }
+};
+export function validateToolInput(definition,input) {
+  validateInput(definition.inputSchema,input);
+  if (definition.name === 'pulso_history') return input;
+  const [allowed,required] = actionFields[definition.name][input.action];
+  for (const key of Object.keys(input)) if (!['action','expectedBindingId',...allowed].includes(key)) throw new Error(`input.${key}: campo no admitido para ${input.action}`);
+  for (const key of required) if (!Object.hasOwn(input,key)) throw new Error(`input: falta ${key} para ${input.action}`);
+  if (definition.name === 'pulso_context' && isMutating(definition.name,input) && !['project','user'].includes(input.scope)) throw new Error('input.scope: escritura requiere project o user');
+  return input;
 }
 
 const ok = (title,output,data) => ({title:`Pulso · ${title}`, output, ok:true, ...(data === undefined ? {} : {data})});
@@ -98,7 +132,8 @@ export async function createPulsoTools({coreDir,homeDir = os.homedir(),assertCon
         return ok('sincronización',formatReceipt(await mutations.syncWorkOperation(root,{workId:args.workId,expectedRevision:args.expectedRevision})));
       }
       if (args.action === 'recover') {
-        const mutations = await core('work-mutations.mjs');
+        const mutations = await core('work-mutations.mjs'), {exists} = await core('fs.mjs');
+        if (exists(root,'.pulso/preparation.json')) { const {prepareWorkspace} = await core('workspace.mjs'); prepareWorkspace(root,{homeDir}); }
         await mutations.recoverWorkspaceOperation(root);
         return ok('recuperación','Recuperación completada. Consulta status para revisar el índice; no se reanudaron sesiones nativas.');
       }
@@ -125,13 +160,18 @@ export async function createPulsoTools({coreDir,homeDir = os.homedir(),assertCon
       return ok('validación',`${value.works} trabajos válidos${args.fresh ? ' · evidencia vigente comprobada' : ''}`);
     },
     async pulso_work(args,root) {
-      if (args.action !== 'create' && !args.workId) throw new Error(`${args.action} requiere workId`);
+      if (!['create','validate_result'].includes(args.action) && !args.workId) throw new Error(`${args.action} requiere workId`);
+      if (args.action === 'validate_result') {
+        const {validateResult} = await core('artifacts.mjs');
+        const data = validateResult(root,args.delegation,args.result,{globalRoot:path.dirname(directory)});
+        return ok('resultado',data.note,data);
+      }
       const mutations = await core('work-mutations.mjs'), receipts = await core('receipts.mjs');
       if (args.action === 'get') {
-        const {readWork} = await core('artifacts.mjs');
+        const {readWork,acceptanceBasis} = await core('artifacts.mjs');
         const value = readWork(root,args.workId,{files:false});
         const sections = ['tasks','evidence','documents','decisions','acceptanceChanges'];
-        const data = {...value,objective:{...value.objective}};
+        const data = {...value,acceptanceBasis:acceptanceBasis(value),objective:{...value.objective}};
         for (const key of sections) data[key] = args.section === 'all' || args.section === key ? page(value[key] || [],args) : {total:(value[key] || []).length,readWith:{section:key}};
         data.objective.criteria = args.section === 'all' || args.section === 'criteria' ? page(value.objective.criteria,args) : {total:value.objective.criteria.length,readWith:{section:'criteria'}};
         return ok('trabajo',`${value.id} · rev. ${value.revision} · ${value.status} · tareas ${value.tasks.filter(task => task.status === 'done').length}/${value.tasks.length} · siguiente: ${value.nextAction || 'sin acción'}`,data);
@@ -143,10 +183,6 @@ export async function createPulsoTools({coreDir,homeDir = os.homedir(),assertCon
       if (args.action === 'update') return ok('trabajo',receipts.formatReceipt(mutations.applyWorkMutation(root,{workId:args.workId,expectedRevision:args.expectedRevision,actions:args.actions})));
       if (args.action === 'block') return ok('trabajo',receipts.formatReceipt(mutations.applyWorkMutation(root,{workId:args.workId,expectedRevision:args.expectedRevision,actions:[{type:'work.set_overview',status:'blocked',summary:args.summary,blockers:[args.reason],nextAction:'Resolver el bloqueo antes de continuar'}]})));
       if (args.action === 'close') return ok('trabajo',receipts.formatReceipt(mutations.closeWorkOperation(root,{workId:args.workId,expectedRevision:args.expectedRevision,outcome:args.outcome,summary:args.summary,limitations:args.limitations || []})));
-      if (args.action === 'complete_map') {
-        const value = mutations.completeMapOperation(root,{workId:args.workId,expectedRevision:args.expectedRevision,summary:args.summary,limitations:args.limitations || []});
-        return ok('mapeo',`${value.id} cerrado · rev. ${value.revision}`);
-      }
       return ok('trabajo',receipts.formatReceipt(mutations.reopenWorkOperation(root,{workId:args.workId,expectedRevision:args.expectedRevision,reason:args.reason})));
     },
     async pulso_history(args,root) {
@@ -160,16 +196,24 @@ export async function createPulsoTools({coreDir,homeDir = os.homedir(),assertCon
     },
     async pulso_context(args,root) {
       const memory = await core('memory.mjs');
-      if (args.action !== 'summary') memory.updateMemory(root,args,{homeDir});
+      const {expectedBindingId, ...request} = args;
+      if (args.action === 'read') {
+        const data = memory.readMemory(root,request,{homeDir});
+        return ok('contexto',`${data.entries.length} entradas · consulta revisionada${data.hasMore ? ' · sigue nextCursor' : ''}`,data);
+      }
+      if (args.action !== 'summary') {
+        const data = memory.updateMemory(root,request,{homeDir});
+        return ok('contexto',`${data.scope} · rev. ${data.revision}`,data);
+      }
       const project = args.scope === 'user' ? null : memory.readMemory(root,'project',{homeDir});
       const user = args.scope === 'project' ? null : memory.readMemory(root,'user',{homeDir});
-      return ok('contexto',memorySummary(project,user));
+      return ok('contexto',memorySummary(project,user),{revisions:{...(project ? {project:project.revision} : {}),...(user ? {user:user.revision} : {})},next:'Usa action=read para obtener contenido completo y procedencia.'});
     }
   };
   return Object.fromEntries(toolDefinitions.map(def => [def.name,{execute:async (input,root) => {
     try {
       assertContext();
-      validateInput(def.inputSchema,input);
+      validateToolInput(def,input);
       if (typeof root !== 'string' || !path.isAbsolute(root)) throw new Error('El adaptador debe proporcionar root absoluto');
       return await handlers[def.name](input,root);
     } catch (error) {return fail(def.displayName.replace('Pulso · ',''),error);}

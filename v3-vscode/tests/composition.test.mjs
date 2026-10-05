@@ -178,15 +178,14 @@ test('expected binding precedes mutations and guards session continuity', () => 
   assert.ok(!runtimeBoundary.includes('Cada delegación es stateless'));
 });
 
-test('runtime allowlist and source parity exclude installation dependencies and preserve priority aliases', () => {
+test('runtime allowlist and source parity exclude installation dependencies and preserve canonical priority contracts', () => {
   assert.deepEqual([...composed.files.keys()].filter(file => file.startsWith('lib/')).sort(), runtimeModules.map(name => `lib/${name}.mjs`).sort());
-  for (const module of runtimeModules.filter(name => !['artifacts','work-mutations','memory'].includes(name))) assert.ok(composed.files.get(`lib/${module}.mjs`).equals(original(`lib/${module}.mjs`)));
+  for (const module of runtimeModules.filter(name => !['artifacts','work-mutations'].includes(name))) assert.ok(composed.files.get(`lib/${module}.mjs`).equals(original(`lib/${module}.mjs`)));
   for (const file of ['work.schema.json', 'state.schema.json']) {
     const source = JSON.parse(original(`schemas/${file}`));
     const built = JSON.parse(text(`schemas/${file}`));
-    if (file === 'work.schema.json') { assert.ok(built.properties.acceptanceChanges); delete built.properties.acceptanceChanges; }
     assert.deepEqual(built, source);
-    assert.ok(text(`schemas/${file}`).includes('"urgent"'));
+    assert.ok(!text(`schemas/${file}`).includes('"urgent"'));
     assert.ok(text(`schemas/${file}`).includes('"critical"'));
   }
   assert.ok(text('schemas/result.schema.json').includes('"critical"'));
