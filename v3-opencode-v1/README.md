@@ -27,6 +27,14 @@ node install.mjs uninstall
 
 El instalador usa un parser JSONC para registrar su plugin y agente principal y limpiar integraciones globales OpenCode de Pulso v1/v2/v3. Conserva entradas ajenas, skills BBVA compartidas, preferencias y registry de proyectos; respalda recursos modificados y revierte la operación si falla una escritura. No requiere OpenCode en `PATH` ni modifica credenciales, modelos o permisos del usuario. [Detalles y recuperación de respaldos](docs/INSTALLER.md).
 
+## Cambios 3.1.1
+
+Las tools multiaction reciben `{request:{action:...}}`; el historial mantiene filtros directos. Hay lecturas paginadas de Work/memoria, validación de resultados y evidencia ligada a archivos y aceptación observados. La evidencia antigua se conserva, pero un nuevo cierre requiere una observación con el contrato actual. El LT no tiene edit/bash; Executor y QA usan aprobación nativa para shell. Reinicia OpenCode tras instalar.
+
+Los cinco archivos de skills BBVA se conservan exactamente como en main `6bf3da9`. La diferencia histórica ya existente de bbva-engineering respecto de `docs/bbva-provenance.json` no se restaura ni se presenta como coincidencia de origen.
+
+[Guía de prueba y límites](docs/HARDENING-3.1.1.md).
+
 ## Uso
 
 - `/pulso-status`: consultar el snapshot guardado.

@@ -5,7 +5,7 @@
 <objective>{{Resultado observable del encargo, no una instrucción vaga.}}</objective>
 <context>{{Referencias mínimas, decisiones confirmadas, cambios previos y base.}}</context>
 <skills>{{Nombres y rutas de skills aplicables, cargadas bajo demanda.}}</skills>
-<template>{{Identificador relativo de la plantilla global; incluye su ruta real en resources.}}</template>
+<templateId>{{ID del catálogo global; incluye la ruta global real para que el especialista lea la plantilla.}}</templateId>
 <output>{{Ruta única asignada; indica si basta respuesta en chat.}}</output>
 <write_scope>{{Rutas y recursos permitidos; fuera de ellos no escribir.}}</write_scope>
 <acceptance>{{Qué debe demostrar la entrega.}}</acceptance>

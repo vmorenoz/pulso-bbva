@@ -1,46 +1,112 @@
 import os from 'node:os';
-import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-
-const ok=(title,output)=>({title:`Pulso · ${title}`,output,metadata:{pulso:true,ok:true}});
-const fail=(title,error)=>({title:`Pulso · ${title}`,output:`No se completó: ${String(error?.message||'operación inválida').slice(0,240)}`,metadata:{pulso:true,ok:false}});
-const memorySummary=(project,user)=>`Contexto: ${project.context?project.context.slice(0,180):'sin notas'} · preferencias: ${project.preferences.length} del proyecto, ${user.preferences.length} del usuario · aprendizajes: ${project.learning.length}`;
-
+import {createHash} from 'node:crypto';
+import {contracts} from './contracts.mjs';
+const ok=(title,value)=>({title:`Pulso · ${title}`,output:typeof value==='string'?value:JSON.stringify(value),metadata:{pulso:true,ok:true}});
+const fail=(title,error)=>({title:`Pulso · ${title}`,output:`No se completó: ${String(error?.message||'operación inválida').slice(0,400)}`,metadata:{pulso:true,ok:false}});
+const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+function page(values,{limit=20,cursor}={},identity){
+  const signature=digest(identity),decode=()=>{try{return JSON.parse(Buffer.from(cursor,'base64url').toString());}catch{throw new Error('Cursor inválido');}};
+  const state=cursor?decode():{signature,offset:0};
+  if(state.signature!==signature||!Number.isSafeInteger(state.offset)||state.offset<0||state.offset>values.length)throw new Error('Cursor obsoleto; releer desde la primera página');
+  const entries=values.slice(state.offset,state.offset+limit),offset=state.offset+entries.length,hasMore=offset<values.length;
+  return {entries,total:values.length,hasMore,nextCursor:hasMore?Buffer.from(JSON.stringify({signature,offset})).toString('base64url'):null};
+}
 export async function PulsoPlugin({directory,homeDir=os.homedir(),coreDir=path.join(homeDir,'.pulso','lib')}){
-  const core=name=>import(pathToFileURL(path.join(coreDir,name)).href);
-  const {tool}=await import('@opencode-ai/plugin');
-  const {z}=await import('zod');
-  const id=z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/);
-  // Lazy import: startup, greetings and unrelated tools produce no project files.
+  const core=name=>import(pathToFileURL(path.join(coreDir,name)).href),globalRoot=path.dirname(coreDir);
+  const {tool}=await import('@opencode-ai/plugin'),{z}=await import('zod'),schemas=contracts(z);
+  // Every request, including reads, participates in effective native permissions.
+  const run=(name,schema,handler)=>async(input,context)=>{
+    let args;
+    try{
+      if(input.request&&Object.keys(input).some(key=>key!=='request'))throw new Error('Campo fuera de request no admitido');
+      args=schema.parse(input.request??input);
+      if(typeof context.ask!=='function')throw new Error('Aprobación nativa no disponible; operación bloqueada');
+    }catch(error){return fail(name,error);}
+    const action=args.action||'read',resource=args.scope||args.workId||'workspace';
+    // Native denial/cancellation is not converted into a normal tool result or retried.
+    await context.ask({permission:name,patterns:[`${action}:${resource}`],always:[`${action}:${resource}`],metadata:{action,resource}});
+    try{return await handler(args,context);}catch(error){return fail(name,error);}
+  };
   let observer;
+  const observedCalls=new Set();
   const observe=hook=>async(...args)=>{try{
-    if(hook!=='event'&&args[0]?.tool!=='task')return;
-    if(hook==='event'&&!['message.part.updated','session.error','session.status'].includes(args[0]?.event?.type))return;
+    // Do not instantiate telemetry for unrelated task tools or unprepared projects.
+    const {exists,readJSON}=await core('fs.mjs');
+    if(!exists(directory,'.pulso/state.json'))return;
+    const catalog=readJSON(globalRoot,'catalog.json');
+    if(hook!=='event'){
+      if(args[0]?.tool!=='task')return;
+      const taskArgs=hook==='tool.execute.before'?args[1]?.args:args[0]?.args;
+      if(!catalog.specialists.some(a=>a.id===taskArgs?.subagent_type))return;
+      const prompt=taskArgs?.prompt||'',match=label=>[...prompt.matchAll(new RegExp(`(?:^|[\\s{,])"?${label}"?\\s*[:=]\\s*"?([A-Za-z0-9][A-Za-z0-9_-]{0,79})(?=["\\s,}]|$)`,'g'))].map(m=>m[1]);
+      const works=match('workId'),tasks=match('taskId');
+      if(new Set(works).size!==1||new Set(tasks).size!==1)return;
+      const {readWork}=await core('artifacts.mjs'),work=readWork(directory,works[0],{files:false});
+      if(!work.tasks.some(t=>t.id===tasks[0]&&t.agent===taskArgs.subagent_type))return;
+      observedCalls.add(JSON.stringify([args[0].sessionID,args[0].callID]));
+    }else {
+      if(!observer)return;
+      const event=args[0]?.event;
+      if(event?.type==='message.part.updated'){
+        const part=event.properties?.part;
+        if(!observedCalls.has(JSON.stringify([part?.sessionID,part?.callID])))return;
+      }
+    }
     observer??=(await core('delegation-observer.mjs')).createDelegationObserver(directory);
     await observer[hook](...args);
   }catch{}};
   return {'tool.execute.before':observe('tool.execute.before'),'tool.execute.after':observe('tool.execute.after'),event:observe('event'),tool:{
-    pulso_workspace:tool({description:'Prepara, consulta, valida, sincroniza o recupera Pulso explícitamente. attempts/reconcile_attempts consultan telemetría sin declarar agentes vivos ni modificar Work.',args:{action:z.enum(['prepare','status','validate','sync','recover','attempts','reconcile_attempts']),fresh:z.boolean().optional(),workId:id.optional(),expectedRevision:z.number().int().positive().optional(),sessionID:z.string().max(160).optional(),limit:z.number().int().min(1).max(100).optional()},execute:async(args,context)=>{try{
-      if(args.action==='attempts'||args.action==='reconcile_attempts'){const {readDelegationAttempts}=await core('delegation-observer.mjs');const values=readDelegationAttempts(context.directory,args);return ok('intentos',values.length?values.map(value=>`${value.sessionID}/${value.callID} · workId=${value.workId||'sin correlación'} · taskId=${value.taskId||'sin correlación'} · ${value.status} · vida desconocida${value.requiresReview?' · revisar artefactos y cambios manuales antes de retomar':''}`).join('\n'):'Sin intentos observados.');}
-      if(args.action==='sync'){if(!args.workId||!args.expectedRevision)throw new Error('sync requiere workId y expectedRevision');const mutations=await core('work-mutations.mjs'),{formatReceipt}=await core('receipts.mjs');return ok('sincronización',formatReceipt(await mutations.syncWorkOperation(context.directory,{workId:args.workId,expectedRevision:args.expectedRevision})));}
-      if(args.action==='recover'){const mutations=await core('work-mutations.mjs');await mutations.recoverWorkspaceOperation(context.directory);return ok('recuperación','Recuperación completada. Consulta status para revisar el índice; no se reanudaron sesiones nativas.');}
-      if(args.action==='prepare'){const {prepareWorkspace}=await core('workspace.mjs');const result=prepareWorkspace(context.directory,{homeDir});return ok('workspace',result.existingWorkspace?'Ya estaba preparado.':result.legacyMigrated?`Preparado y migrados ${result.migratedWorks} trabajos legacy.`:'Preparado para el encargo actual.');}
-       if(args.action==='status'){const statePath=path.join(context.directory,'.pulso','state.json');if(!fs.existsSync(statePath))return ok('estado','Sin estado Pulso disponible en este workspace.');const {readStatus}=await core('work-mutations.mjs');let value;try{value=readStatus(context.directory);}catch(error){const saved=JSON.parse(fs.readFileSync(statePath,'utf8'));if(saved&&saved.schemaVersion===undefined&&saved.schema_version===1)return ok('estado','Estado legacy detectado. Usa prepare para migrarlo al contrato actual.');throw error;}const focus=value.works.find(work=>work.id===value.focusWorkId);return ok('estado',focus?`${focus.id} · ${focus.status} · ${focus.progress.done}/${focus.progress.total} · siguiente: ${focus.nextAction||'sin acción'}`:`${value.works.length} trabajos abiertos · sin foco`);}
-      const {validateWorkspace}=await core('work-mutations.mjs');const value=validateWorkspace(context.directory,{fresh:args.fresh||false});return ok('validación',`${value.works} trabajos válidos${args.fresh?' · evidencia vigente comprobada':''}`);
-    }catch(error){return fail('workspace',error);}}}),
-    pulso_work:tool({description:'Consulta o actualiza un objetivo de trabajo. create permite omitir workId; las demás acciones requieren ID explícito.',args:{action:z.enum(['get','create','update','block','close','reopen','complete_map']),workId:id.optional(),title:z.string().max(240).optional(),objective:z.string().max(4000).optional(),criterion:z.string().max(2000).optional(),verification:z.string().max(2000).optional(),priority:z.enum(['low','normal','high','urgent']).optional(),expectedRevision:z.number().int().positive().optional(),actions:z.array(z.record(z.string(),z.unknown())).min(1).max(20).optional(),outcome:z.enum(['done','cancelled']).optional(),summary:z.string().max(4000).optional(),limitations:z.array(z.string().max(1000)).max(30).optional(),reason:z.string().max(2000).optional()},execute:async(args,context)=>{try{
-      if(args.action!=='create'&&!args.workId)throw new Error(`${args.action} requiere workId`);
-      const mutations=await core('work-mutations.mjs'),receipts=await core('receipts.mjs');
-      if(args.action==='get'){const {readWork}=await core('artifacts.mjs');const value=readWork(context.directory,args.workId,{files:false});return ok('trabajo',`${value.id} · rev. ${value.revision} · ${value.status} · tareas ${value.tasks.filter(task=>task.status==='done').length}/${value.tasks.length} · siguiente: ${value.nextAction||'sin acción'}`);}
-      if(args.action==='create'){const {workId,title,objective,criterion,verification,priority}=args;const input=Object.fromEntries(Object.entries({workId,title,objective,criterion,verification,priority}).filter(([,value])=>value!==undefined));return ok('trabajo',receipts.formatReceipt(mutations.createWorkOperation(context.directory,input)));}
+    pulso_workspace:tool({description:'Consulta todos los Work y sus bloqueos; prepara/migra, valida, sincroniza o recupera explícitamente. request discrimina cada acción; las lecturas no preparan el proyecto.',args:{request:schemas.workspace},execute:run('pulso_workspace',schemas.workspace,async(args,context)=>{
+      const mutations=await core('work-mutations.mjs');
+      if(['attempts','reconcile_attempts'].includes(args.action)){const {readDelegationAttempts}=await core('delegation-observer.mjs');return ok('intentos',readDelegationAttempts(context.directory,args));}
+      if(args.action==='sync'){const {formatReceipt}=await core('receipts.mjs');return ok('sincronización',formatReceipt(mutations.syncWorkOperation(context.directory,args)));}
+      if(args.action==='recover'){
+        const {exists}=await core('fs.mjs');
+        if(exists(context.directory,'.pulso/preparation.json')){const {prepareWorkspace}=await core('workspace.mjs');prepareWorkspace(context.directory,{homeDir});}
+        return ok('recuperación',mutations.recoverWorkspaceOperation(context.directory));
+      }
+      if(args.action==='prepare'){const {prepareWorkspace}=await core('workspace.mjs');return ok('workspace',prepareWorkspace(context.directory,{homeDir}));}
+      if(args.action==='status'){
+        const {exists,readJSON}=await core('fs.mjs');
+        if(!exists(context.directory,'.pulso/state.json'))return ok('estado','Sin estado Pulso disponible en este workspace.');
+        const saved=readJSON(context.directory,'.pulso/state.json');
+        if(saved?.schemaVersion===undefined&&saved?.schema_version===1)return ok('estado','Estado legacy detectado. Usa prepare para migrarlo al contrato actual.');
+        const value=mutations.readStatus(context.directory),values=value.works.filter(w=>!args.status||w.status===args.status);
+        return ok('estado',{revision:value.revision,focusWorkId:value.focusWorkId,...page(values,args,[value,args.status])});
+      }
+      return ok('validación',mutations.validateWorkspace(context.directory,{fresh:args.fresh||false}));
+    })}),
+    pulso_work:tool({description:'Consulta Work completo o por sección, con acceptanceBasis para una NUEVA observación. Actualizaciones tipadas y revisión esperada. validate_result comprueba correlación/plantilla global; nunca certifica semántica.',args:{request:schemas.work},execute:run('pulso_work',schemas.work,async(args,context)=>{
+      const mutations=await core('work-mutations.mjs'),receipts=await core('receipts.mjs'),artifacts=await core('artifacts.mjs');
+      if(args.action==='validate_result')return ok('resultado',artifacts.validateResult(context.directory,args.delegation,args.result,{globalRoot}));
+      if(args.action==='get'){
+        const value=artifacts.readWork(context.directory,args.workId,{files:false}),section=args.section||'all';
+        const {objective,tasks,documents,evidence,acceptanceChanges=[],...overview}=value;
+        const sections={criteria:objective.criteria,tasks,documents,evidence,acceptanceChanges};
+        const values=section==='overview'?[]:Object.entries(sections).filter(([name])=>section==='all'||section===name).flatMap(([section,items])=>items.map(value=>({section,value})));
+        return ok('trabajo',{...overview,objective:{id:objective.id,outcome:objective.outcome},acceptanceBasis:artifacts.acceptanceBasis(value),...page(values,args,[value.id,value.revision,section])});
+      }
+      if(args.action==='create'){const {action,...input}=args;return ok('trabajo',receipts.formatReceipt(mutations.createWorkOperation(context.directory,input)));}
       if(args.action==='update')return ok('trabajo',receipts.formatReceipt(mutations.applyWorkMutation(context.directory,{workId:args.workId,expectedRevision:args.expectedRevision,actions:args.actions})));
-      if(args.action==='block'){const receipt=mutations.applyWorkMutation(context.directory,{workId:args.workId,expectedRevision:args.expectedRevision,actions:[{type:'work.set_overview',status:'blocked',summary:args.summary,blockers:[args.reason],nextAction:'Resolver el bloqueo antes de continuar'}]});return ok('trabajo',receipts.formatReceipt(receipt));}
-      if(args.action==='close')return ok('trabajo',receipts.formatReceipt(mutations.closeWorkOperation(context.directory,{workId:args.workId,expectedRevision:args.expectedRevision,outcome:args.outcome,summary:args.summary,limitations:args.limitations||[]})));
-      if(args.action==='complete_map'){const value=mutations.completeMapOperation(context.directory,{workId:args.workId,expectedRevision:args.expectedRevision,summary:args.summary,limitations:args.limitations||[]});return ok('mapeo',`${value.id} cerrado · rev. ${value.revision}`);}
-      return ok('trabajo',receipts.formatReceipt(mutations.reopenWorkOperation(context.directory,{workId:args.workId,expectedRevision:args.expectedRevision,reason:args.reason})));
-    }catch(error){return fail('trabajo',error);}}}),
-    pulso_history:tool({description:'Consulta cierres recientes de Pulso con resultado resumido.',args:{workId:id.optional(),since:z.string().optional(),until:z.string().optional(),limit:z.number().int().min(1).max(20).optional()},execute:async(args,context)=>{try{const {readHistory}=await core('work-mutations.mjs');const values=readHistory(context.directory,args);return ok('historial',values.length?values.map(value=>`${value.workId} · ${value.outcome} · ${value.summary.slice(0,160)}`).join('\n'):'Sin cierres para esta consulta.');}catch(error){return fail('historial',error);}}}),
-    pulso_context:tool({description:'Consulta o registra contexto relevante, preferencias y aprendizajes. Las preferencias de usuario se conservan entre workspaces y sesiones.',args:{action:z.enum(['summary','set_context','set_preference','remove_preference','add_learning']),context:z.string().max(4000).optional(),key:z.string().max(120).optional(),value:z.string().max(1000).optional(),scope:z.enum(['project','user']).optional(),note:z.string().max(2000).optional(),source:z.enum(['user','observed','delegated']).optional()},execute:async(args,context)=>{try{const memory=await core('memory.mjs');if(args.action!=='summary')memory.updateMemory(context.directory,args);return ok('contexto',memorySummary(memory.readMemory(context.directory),memory.readMemory(context.directory,'user')));}catch(error){return fail('contexto',error);}}})
+      if(args.action==='block')return ok('trabajo',receipts.formatReceipt(mutations.applyWorkMutation(context.directory,{workId:args.workId,expectedRevision:args.expectedRevision,actions:[{type:'work.set_overview',status:'blocked',summary:args.summary,blockers:[args.reason],nextAction:'Resolver el bloqueo antes de continuar'}]})));
+      if(args.action==='close')return ok('trabajo',receipts.formatReceipt(mutations.closeWorkOperation(context.directory,args)));
+      return ok('trabajo',receipts.formatReceipt(mutations.reopenWorkOperation(context.directory,args)));
+    })}),
+    pulso_history:tool({description:'Cierres con fecha, resultado, limitaciones y cursor estable; no prepara ni modifica.',args:schemas.history.shape,execute:run('pulso_history',schemas.history,async(args,context)=>{
+      const {history}=await core('artifacts.mjs');
+      const entries=history(context.directory).filter(e=>(!args.workId||e.workId===args.workId)&&(!args.since||Date.parse(e.closedAt)>=Date.parse(args.since))&&(!args.until||Date.parse(e.closedAt)<=Date.parse(args.until))).sort((a,b)=>b.closedAt.localeCompare(a.closedAt)||b.closureId.localeCompare(a.closureId));
+      return ok('historial',page(entries,args,[entries,args.workId,args.since,args.until]));
+    })}),
+    pulso_context:tool({description:'Lee contenido real por scope/sección y páginas. Mutaciones requieren scope, expectedRevision y procedencia explícita para preferencias/aprendizajes; conflicto exige releer.',args:{request:schemas.context},execute:run('pulso_context',schemas.context,async(args,context)=>{
+      const memory=await core('memory.mjs');
+      if(args.action==='read')return ok('contexto',memory.readMemory(context.directory,args,{homeDir}));
+      if(args.action==='summary'){
+        const project=memory.readMemory(context.directory,'project',{homeDir}),user=memory.readMemory(context.directory,'user',{homeDir});
+        return ok('contexto',{project:{revision:project.revision,preferences:project.preferences.length,learning:project.learning.length},user:{revision:user.revision,preferences:user.preferences.length,learning:user.learning.length},next:'Usa request.action=read para recuperar valores, contexto y procedencia.'});
+      }
+      return ok('contexto',memory.updateMemory(context.directory,args,{homeDir}));
+    })})
   }};
 }

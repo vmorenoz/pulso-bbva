@@ -18,7 +18,25 @@
     {
       "path": "src/example.js",
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "path": ".pulso/work/EXAMPLE-1/evidence/E-1.md",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }
   ],
-  "summary": "Ejemplo no ejecutado. No constituye evidencia positiva."
+  "summary": "Ejemplo no ejecutado. No constituye evidencia positiva.",
+  "acceptanceBasis": {
+    "criteria": [
+      {
+        "id": "AC-1",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "T-1",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  }
 }

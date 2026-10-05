@@ -24,7 +24,7 @@ export function safePath(root,relative,{allowDot=false}={}) {
 export function readText(root,relative) {return fs.readFileSync(safePath(root,relative),'utf8');}
 export function readJSON(root,relative) {
   try {return JSON.parse(readText(root,relative));}
-  catch(e) {throw new Error(`No se puede leer JSON ${relative}: ${e.message}`,{cause:e});}
+  catch(e) {throw new Error(`No se puede leer JSON ${relative}: ${e instanceof SyntaxError ? "JSON inválido; contenido preservado" : e.message}`,{cause:e});}
 }
 export function atomicWrite(root,relative,data) {
   const dest=safePath(root,relative);
