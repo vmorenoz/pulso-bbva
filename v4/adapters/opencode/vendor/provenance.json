@@ -1,0 +1,14 @@
+{
+  "sdk": {
+    "package": "@opencode-ai/plugin",
+    "version": "1.18.2",
+    "license": "MIT",
+    "note": "Official runtime tool helper; only bare Zod import relocated."
+  },
+  "zod": {
+    "package": "zod",
+    "version": "4.1.8",
+    "license": "MIT",
+    "note": "Unmodified import-reachable ESM runtime closure."
+  }
+}
