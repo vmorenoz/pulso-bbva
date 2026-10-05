@@ -6,3 +6,10 @@ scripts/**
 dist/**
 package-lock.json
 src/composition.mjs
+
+# Keep the vector master and extension branding in the VSIX.
+!assets/**
+
+core/**
+schemas/**
+docs/BUILD.md

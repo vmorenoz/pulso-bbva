@@ -1,7 +1,8 @@
 {
   "name": "pulso",
   "displayName": "Pulso",
-  "version": "3.1.1",
+  "icon": "assets/pulso-256.png",
+  "version": "3.1.2",
   "publisher": "pulso-local",
   "repository": {
     "type": "git",
@@ -123,12 +124,20 @@
       {
         "name": "pulso_workspace",
         "displayName": "Pulso · Workspace",
-        "modelDescription": "Prepara, consulta, valida, sincroniza o recupera Pulso explícitamente. attempts/reconcile_attempts consultan telemetría sin declarar agentes vivos ni modificar Work.",
+        "modelDescription": "Antes de mutar consulta status, conserva workspace/bindingId y pasa expectedBindingId. status incluye data.works por páginas offset/limit. Prepara, consulta, valida, sincroniza o recupera Pulso explícitamente. attempts/reconcile_attempts consultan telemetría sin declarar agentes vivos ni modificar Work.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "pulso_workspace",
         "inputSchema": {
           "type": "object",
           "properties": {
+            "expectedBindingId": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
             "action": {
               "type": "string",
               "enum": [
@@ -173,12 +182,38 @@
       {
         "name": "pulso_work",
         "displayName": "Pulso · Trabajo",
-        "modelDescription": "Consulta o actualiza un objetivo de trabajo. create permite omitir workId; las demás acciones requieren ID explícito.",
+        "modelDescription": "Mutaciones requieren expectedBindingId de una consulta del proyecto previsto. get devuelve data completo por section y páginas offset/limit: sigue nextOffset mientras hasMore. Consulta o actualiza un objetivo de trabajo. create permite omitir workId; las demás acciones requieren ID explícito.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "pulso_work",
         "inputSchema": {
           "type": "object",
           "properties": {
+            "expectedBindingId": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "section": {
+              "type": "string",
+              "enum": [
+                "overview",
+                "tasks",
+                "criteria",
+                "evidence",
+                "documents",
+                "decisions",
+                "acceptanceChanges",
+                "all"
+              ]
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            },
             "action": {
               "type": "string",
               "enum": [
@@ -251,7 +286,9 @@
               "maxItems": 30,
               "items": {
                 "type": "string",
-                "maxLength": 1000
+                "maxLength": 1000,
+                "minLength": 1,
+                "pattern": "\\S"
               }
             },
             "reason": {
@@ -268,12 +305,16 @@
       {
         "name": "pulso_history",
         "displayName": "Pulso · Historial",
-        "modelDescription": "Consulta cierres recientes de Pulso con resultado resumido.",
+        "modelDescription": "Consulta cierres con fechas, ciclos, resumen completo, limitaciones y referencias. data.items está paginado por offset/limit; sigue nextOffset mientras hasMore.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "pulso_history",
         "inputSchema": {
           "type": "object",
           "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
             "workId": {
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$",
@@ -299,12 +340,16 @@
       {
         "name": "pulso_context",
         "displayName": "Pulso · Contexto",
-        "modelDescription": "Consulta o registra contexto relevante, preferencias y aprendizajes. summary devuelve contexto, preferencias key/value/source y aprendizajes note/source del ámbito solicitado; sin scope incluye proyecto y usuario. Salida limitada a 8000 caracteres con aviso de truncación. Las preferencias de usuario se conservan entre workspaces y sesiones.",
+        "modelDescription": "Toda escritura requiere expectedBindingId confirmado para el proyecto previsto. Consulta o registra contexto relevante, preferencias y aprendizajes. summary devuelve contexto, preferencias key/value/source y aprendizajes note/source del ámbito solicitado; sin scope incluye proyecto y usuario. Salida limitada a 8000 caracteres con aviso de truncación. Las preferencias de usuario se conservan entre workspaces y sesiones.",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "pulso_context",
         "inputSchema": {
           "type": "object",
           "properties": {
+            "expectedBindingId": {
+              "type": "string",
+              "maxLength": 80
+            },
             "action": {
               "type": "string",
               "enum": [

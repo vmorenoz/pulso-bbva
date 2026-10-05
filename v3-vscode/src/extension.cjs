@@ -4,7 +4,7 @@ const {pathToFileURL} = require('node:url');
 
 // Injection is for isolated tests; activation uses the public VS Code API only.
 async function activateWith(vscode, context, {homeDir = os.homedir()} = {}) {
-  const [{toolDefinitions, createPulsoTools, validateInput}, {createWorkspaceResolver}] = await Promise.all([
+  const [{toolDefinitions, createPulsoTools, validateInput, isMutating}, {createWorkspaceResolver}] = await Promise.all([
     import(pathToFileURL(path.join(__dirname, 'tools.mjs')).href),
     import(pathToFileURL(path.join(__dirname, 'workspace.mjs')).href),
   ]);
@@ -21,12 +21,16 @@ async function activateWith(vscode, context, {homeDir = os.homedir()} = {}) {
         // Single-folder windows need no selection; multi-root windows retain
         // one explicit binding until the user switches or folders change.
         const root = await project.resolve({token, toolName: definition.name, action: options.input.action});
-        const assertContext = () => project.assertRoot(root, token);
+        const bindingId = project.bindingId(root, token);
+        const assertContext = () => {
+          project.assertRoot(root, token);
+          if (isMutating(definition.name, options.input)) project.assertBinding(root, options.input.expectedBindingId, token);
+        };
         const tools = await createPulsoTools({coreDir, homeDir, assertContext});
         const receipt = await tools[definition.name].execute(options.input, root);
         return new vscode.LanguageModelToolResult([
           new vscode.LanguageModelTextPart(JSON.stringify({
-            title: receipt.title, ok: receipt.ok, workspace: root, output: receipt.output,
+            ...receipt, workspace: root, bindingId,
           })),
         ]);
       },
@@ -49,3 +53,4 @@ async function activateWith(vscode, context, {homeDir = os.homedir()} = {}) {
 exports.activateWith = activateWith;
 exports.activate = context => activateWith(require('vscode'), context);
 exports.deactivate = () => {};
+

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {randomUUID} from 'node:crypto';
 
 function assertHost(vscode, token) {
   if (token?.isCancellationRequested) throw new Error('Workspace selection cancelled.');
@@ -73,7 +74,7 @@ export function createWorkspaceResolver(vscode) {
     const selection = {signature};
     selection.promise = selectWorkspaceRoot(vscode, options).then(root => {
       if (snapshot() !== signature) throw new Error('Workspace folders changed during project selection; retry.');
-      binding = {root, signature};
+      binding = {root, signature, id: randomUUID()};
       return root;
     }).finally(() => {if (pending === selection) pending = undefined;});
     pending = selection;
@@ -92,7 +93,7 @@ export function createWorkspaceResolver(vscode) {
     const roots = [...new Set((vscode.workspace.workspaceFolders ?? []).map(folder => canonicalDirectory(folder.uri)).filter(Boolean))];
     if (!roots.length) throw new Error('No open local workspace directories are available.');
     if (roots.length === 1) {
-      binding = {root: roots[0], signature};
+      binding = {root: roots[0], signature, id: randomUUID()};
       assertRoot(binding.root, options.token);
       return binding.root;
     }
@@ -106,5 +107,11 @@ export function createWorkspaceResolver(vscode) {
     if (pending) await pending.promise;
     return startSelection(options, current());
   }
-  return {resolve, select, assertRoot};
+  function bindingId(root, token) { assertRoot(root, token); return binding.id; }
+  function assertBinding(root, expectedBindingId, token) {
+    assertRoot(root, token);
+    if (!expectedBindingId || binding.id !== expectedBindingId) throw new Error('Pulso binding changed or missing. Read status, confirm the intended workspace, then retry with its bindingId. No mutation applied.');
+  }
+  return {resolve, select, assertRoot, bindingId, assertBinding};
 }
+

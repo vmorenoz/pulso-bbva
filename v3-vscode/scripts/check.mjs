@@ -26,14 +26,15 @@ export async function check({root = extensionRoot, sourceRoot} = {}) {
     if (relative.endsWith('.json')) JSON.parse(actual);
     if (relative.endsWith('.md')) {
       const text = actual.toString();
+      assert.ok(!/validate-result|Usa fingerprint/.test(text), `Capacidad no expuesta: ${relative}`);
       if (relative.endsWith('.agent.md') || relative.endsWith('/SKILL.md')) parseFrontmatter(text);
-      assert.ok(!/~\/\.pulso\/(templates|schemas|skills)|\.opencode\//.test(text), `Ruta OpenCode/HOME: ${relative}`);
+      assert.ok(!/~\/\.pulso\/(templates|schemas|skills|docs)|\.opencode\//.test(text), `Ruta OpenCode/HOME: ${relative}`);
       for (const match of text.matchAll(/\]\(([^)]+)\)/g)) {
         const target = match[1].split('#')[0];
         if (!target || /^(?:[a-z]+:|\/|\{)/i.test(target)) continue;
         const resolved = path.resolve(resources, path.dirname(relative), target);
         // Project/document examples are not bundled references.
-        if (/^(?:\.\.\/)*(?:templates|schemas|skills|agents)\//.test(target)) {
+        if (/^(?:\.\.\/)*(?:templates|schemas|skills|agents|docs)\//.test(target)) {
           assert.ok(resolved.startsWith(`${resources}${path.sep}`), `Referencia fuera de resources: ${relative}`);
           assert.ok(fs.existsSync(resolved), `Referencia inexistente ${relative}: ${target}`);
         }
@@ -55,3 +56,4 @@ export async function check({root = extensionRoot, sourceRoot} = {}) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   check().catch(error => { console.error(`Check Pulso: ${error.message}`); process.exitCode = 1; });
 }
+

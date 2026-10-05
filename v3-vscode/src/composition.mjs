@@ -3,6 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 
+const extensionRoot = fileURLToPath(new URL('../', import.meta.url));
 export const sourceRoot = fileURLToPath(new URL('../../v3-opencode-v1/', import.meta.url));
 export const runtimeModules = ['fs', 'identity', 'memory', 'receipts', 'schema', 'work-mutations', 'workspace', 'artifacts', 'delegation-observer'];
 export const operationSkills = ['pulso-init', 'pulso-status', 'pulso-recap', 'pulso-resume'];
@@ -37,7 +38,8 @@ La delegación Local es stateless: incluye inputs y referencias suficientes; no 
 La selección del agente corresponde al usuario/host. Las skills slash operativas solo se ejecutan con el agente Pulso seleccionado; si hay otro agente seleccionado, pide seleccionar Pulso y detente sin herramientas ni escrituras. No finjas un cambio de agente.
 La raíz es el proyecto activo determinado por el host: una carpeta local única se usa automáticamente, sin picker; con varias carpetas se selecciona una vez y se conserva en memoria por ventana. El binding se comparte entre sesiones de esa ventana, no hay una API de raíz por sesión. Para trabajar en otro proyecto usa Pulso: Seleccionar proyecto (pulso.selectProject) o una ventana separada. Un worktree debe estar abierto como carpeta. Recargar la ventana requiere seleccionar de nuevo en multi-root; cualquier cambio del listado o de las raíces del workspace invalida el binding. No infieras la raíz desde HOME, cwd, un state.json o una ruta del mensaje. Una readBase externa solo concede el alcance de lectura delegado, no cambia la raíz activa. Las aprobaciones normales de VS Code son independientes de la selección de proyecto y siguen vigentes.
 Pulso conserva la ruta absoluta receipt.workspace del recibo del selector del host como raíz seleccionada del objetivo. No pases root, projectRoot, readBase ni workspace como argumentos de raíz a las tools Pulso: esa raíz la resuelve el host. En cambio, copia receipt.workspace como projectRoot y readBase explícitos en hostContext fuera del JSON canónico de cada encargo persistente; delegar rutas de lectura/escritura no autoriza delegar selección o cambios de la raíz de metadatos.
-Las llamadas Pulso reutilizan el proyecto activo y receipt.workspace conserva la misma raíz hasta un cambio explícito con Pulso: Seleccionar proyecto o una invalidación del workspace; cancelar el comando conserva la selección anterior si el workspace sigue vigente. Después de cada llamada compara receipt.workspace con la raíz conservada, antes de delegar o consolidar. Si el recibo cambia de raíz, detente antes de nuevas delegaciones, consolidaciones o escrituras y pide confirmar la selección original; no mezcles workId, workRevision, inputs ni resultados entre raíces. Una llamada mutante ya puede haber escrito en la otra raíz: comunica los efectos observados del recibo, sin prometer que la guarda impidió esa escritura ni intentar deshacerla o reparar JSON manualmente.
+Antes de cualquier mutación, consulta pulso_workspace status sin escribir. Conserva receipt.workspace y receipt.bindingId para el objetivo; envía ese bindingId opaco como expectedBindingId en todas las mutaciones (incluidas prepare y preferencias globales). No fabriques el token ni lo cambies automáticamente para reintentar. Si la raíz o binding cambia, detente y confirma con el usuario el proyecto previsto antes de volver a consultar y continuar. El host rechaza tokens ausentes u obsoletos antes de cualquier escritura. Una consulta no autoriza cambiar el proyecto de la conversación.
+Las consultas devuelven output humano y data estructurada. status enumera works paginados; sigue nextOffset mientras hasMore. get permite section overview/tasks/criteria/evidence/documents/decisions/acceptanceChanges y offset/limit; consulta las secciones necesarias hasta hasMore=false. history conserva fechas, ciclos, limitaciones y nextOffset. Nunca interpretes una página como el total. Ante persistence.partial, comunica workId/revision y sigue recovery; no repitas mutaciones a ciegas.
 ${delegationRootContract}
 Saludo o consulta no inicializa, migra, repara ni escribe archivos. Consultas de estado/historial solo leen lo existente. Un error de raíz, permisos o tools se comunica con su causa; no se corrige editando JSON manualmente. Solo las cuatro tools Pulso mutan metadatos canónicos; especialistas no las usan ni delegan. No edites state.json, history.jsonl, memory.json o work.json directamente.
 Skills se cargan mediante las capacidades nativas de Copilot o lectura de sus SKILL.md empaquetados; no existe una tool OpenCode skill/task/question. Usa agent para delegación y vscode/askQuestions o conversación para preguntas. Pulso no dispone de edit ni terminal; especialistas solo escriben dentro del output/writeScope asignado.
@@ -81,6 +83,9 @@ export function adaptPrompt(text, destination) {
     .replace('La raíz es el workspace activo implícito; no la pases como argumento ni permitas que el agente elija otra.', 'Incluye hostContext con projectRoot y readBase absolutos iguales al receipt.workspace confirmado, fuera del JSON canónico, conforme a delegation_path_contract del runtime_boundary. Vincula los inputs relativos a esa raíz sin modificar su representación canónica. No pases argumentos de raíz a las tools Pulso: esta prohibición no afecta al contexto de rutas obligatorio del prompt nativo delegado.')
     .replace('Por defecto resuelve rutas relativas desde el workspace de la sesión activa, nunca HOME ni una raíz inferida por el modelo.', 'Aplica delegation_path_contract del runtime_boundary: hostContext.projectRoot/readBase explícitos, fuera del JSON canónico, prevalecen sobre el workspace implícito. Resuelve las rutas relativas canónicas para herramientas nativas desde esa raíz y conserva su representación relativa en el JSON persistido y en el resultado.')
     .replace('En ese caso inspecciona lo necesario y redacta `.pulso/project.md` usando la plantilla global indicada;', 'En ese caso aplica delegation_path_contract del runtime_boundary con hostContext.projectRoot/readBase vinculados al receipt.workspace seleccionado, fuera del JSON canónico. Inspecciona los inputs relativos desde esa raíz. Redacta el output canónico `.pulso/project.md` relativo en su ruta efectiva absoluta resuelta desde hostContext.projectRoot, dentro del writeScope canónico resuelto para herramientas nativas, usando la plantilla global indicada;')
+    .replace('Puede validarse con validate-result guardando encargo/resultado en su work.', 'Revisa manualmente el resultado contra el schema empaquetado y el encargo original; no hay un validador de resultados expuesto por esta extensión.')
+    .replace('Usa fingerprint para obtener SHA256 reales.', 'Obtén SHA256 reales mediante las herramientas de ejecución disponibles del host (por ejemplo sha256sum o shasum -a 256); si no están disponibles, declara la evidencia pendiente.')
+    .replace('`docs/EXAMPLES.md` en la instalación global', '[ejemplos empaquetados](../docs/EXAMPLES.md)')
     .replace(/~\/\.pulso\/(templates|schemas|skills)\/([\w./-]+)/g, (_, folder, file) => `[${file}](${relative(`${folder}/${file}`)})`)
     .replace(/\.pulso\/catalog\.json/g, `[catálogo empaquetado](${relative('agents/catalog.json')})`)
     .replace(/`task`/g, '`agent`')
@@ -95,22 +100,25 @@ export function adaptPrompt(text, destination) {
 
 export function composeResources({root = sourceRoot, toolNames = pulsoToolNames} = {}) {
   const files = new Map(), provenance = [];
-  const read = relative => fs.readFileSync(path.join(root, relative));
+  const read = relative => fs.readFileSync(relative.startsWith('vscode:') ? path.join(extensionRoot, relative.slice(7)) : path.join(root, relative));
+  const local = (folder, file) => fs.existsSync(path.join(extensionRoot,folder,file)) ? `vscode:${folder}/${file}` : `${folder === 'core' ? 'lib' : folder}/${file}`;
   function add(destination, content, sources) {
     const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content);
     files.set(destination, bytes);
     provenance.push({path: destination, sha256: sha256(bytes), modified: sources.length !== 1 || !read(sources[0]).equals(bytes), sources: sources.map(source => {
       const original = read(source);
-      return {path: `v3-opencode-v1/${source}`, sha256: sha256(original), modified: !original.equals(bytes)};
+      return {path: source.startsWith('vscode:') ? `v3-vscode/${source.slice(7)}` : `v3-opencode-v1/${source}`, sha256: sha256(original), modified: !original.equals(bytes)};
     })});
   }
-  for (const module of runtimeModules) add(`lib/${module}.mjs`, read(`lib/${module}.mjs`), [`lib/${module}.mjs`]);
+  for (const module of runtimeModules) { const source = local('core',`${module}.mjs`); add(`lib/${module}.mjs`, read(source), [source]); }
   for (const folder of ['schemas', 'templates']) {
     for (const file of listFiles(path.join(root, folder))) {
-      const source = `${folder}/${file}`;
-      add(source, read(source), [source]);
+      const destination = `${folder}/${file}`, source = folder === 'schemas' ? local(folder,file) : destination;
+      const bytes = read(source);
+      add(destination, file.endsWith('.md') ? adaptPrompt(bytes.toString(), destination) : bytes, [source]);
     }
   }
+  add('docs/EXAMPLES.md', adaptPrompt(read('docs/EXAMPLES.md').toString(),'docs/EXAMPLES.md'), ['docs/EXAMPLES.md']);
   const catalog = JSON.parse(read('agents/catalog.json'));
   if (catalog.orchestrator.id !== 'pulso' || catalog.specialists.length !== 9 || new Set(catalog.specialists.map(agent => agent.id)).size !== 9) {
     throw new Error('Catálogo v3-opencode-v1 inválido: se esperan Pulso y nueve especialistas distintos');
@@ -152,3 +160,4 @@ export function composeResources({root = sourceRoot, toolNames = pulsoToolNames}
   files.set('provenance.json', Buffer.from(`${JSON.stringify({schemaVersion: 1, source: 'v3-opencode-v1', adaptations: ['VS Code native capabilities and relative resource links', 'Pulso agent selection guard for operational slash skills'], files: provenance}, null, 2)}\n`));
   return {files, chatAgents, chatSkills};
 }
+

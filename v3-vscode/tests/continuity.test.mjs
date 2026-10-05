@@ -26,7 +26,7 @@ async function fixture(t) {
   fs.copyFileSync(fileURLToPath(new URL('../src/tools.mjs',import.meta.url)),path.join(extensionRoot,'src/tools.mjs'));
   fs.writeFileSync(path.join(extensionRoot,'package.json'),JSON.stringify({name:'pulso-continuity-fixture'}));
   await build({root:extensionRoot,sourceRoot});
-  for (const name of ['work.schema.json','state.schema.json']) {
+  for (const name of ['state.schema.json']) {
     assert.deepEqual(fs.readFileSync(path.join(extensionRoot,'resources','schemas',name)),fs.readFileSync(path.join(sourceRoot,'schemas',name)),`${name} must be copied intact`);
   }
   const coreDir = path.join(extensionRoot,'resources','lib');
@@ -147,3 +147,4 @@ test('legacy critical created through the source Work API is preserved by packag
   assert.deepEqual(sourceMutations.readHistory(root,{workId}),history);
   await success('pulso_workspace',{action:'validate',fresh:true});
 });
+

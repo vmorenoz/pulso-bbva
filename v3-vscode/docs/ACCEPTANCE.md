@@ -1,3 +1,7 @@
+# Evidencia histórica y comprobación actual
+
+Los resultados anteriores de este archivo corresponden a versiones previas. No certifican Pulso 3.1.2 ni conversaciones actuales en Copilot/Local. Para esta versión, usa [LIVE-CHECK](LIVE-CHECK.md); la comprobación real permanece NOT_RUN.
+
 # Aceptación de Pulso
 
 Las verificaciones offline y del Extension Host real para **Pulso 3.1.1** se ejecutaron el **2026-10-05** con selección de proyecto por ventana y dos comandos. **No hay PASS implícitos de conversación.** El entorno instalado de referencia es VS Code 1.139.1, macOS arm64 y GitHub Copilot builtin 0.67.0. La aceptación de conversaciones completas en Copilot / Agent Host y Local permanece en **LIVE NOT_RUN**.
@@ -68,3 +72,4 @@ Ejecutar primero en **Copilot / Agent Host** y repetir en **Local**, manteniendo
 Para cada fila registrar: run ID, fecha, ejecutor, comando o paso, versiones, destino/harness, hash del VSIX, proyecto/worktree elegido, resultado esperado y observado, código de salida cuando aplique, logs/recibos/capturas y diff de archivos. Asociar delegación y trabajo mediante referencias observables; no inferir correlación ni vida de agentes.
 
 Guardar evidencias en el espacio aislado de aceptación. Documentar bloqueos y pasos no ejecutados. El cierre debe indicar por separado resultado offline, Copilot / Agent Host y Local; mantener **LIVE NOT_RUN** en todo destino que no haya completado el recorrido real. Restaurar las preferencias de prueba y conservar los artefactos necesarios para reproducir los resultados.
+

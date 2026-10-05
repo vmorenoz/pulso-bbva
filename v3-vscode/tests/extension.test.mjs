@@ -83,6 +83,10 @@ async function fixture(t) {
   assert.deepEqual(before(), initial, 'activation must not write project or HOME');
   t.after(() => {for (const subscription of context.subscriptions) subscription.dispose();});
   async function invoke(name, input, token = {isCancellationRequested: false}) {
+    if ((name === 'pulso_work' && input.action !== 'get') || (name === 'pulso_context' && input.action !== 'summary') || (name === 'pulso_workspace' && ['prepare','sync','recover'].includes(input.action))) {
+      const status = await host.tools.get('pulso_workspace').invoke({input:{action:'status'}}, token);
+      input = {...input,expectedBindingId:JSON.parse(status.content[0].value).bindingId};
+    }
     const count = host.picks.length;
     const result = await host.tools.get(name).invoke({input}, token);
     for (const pick of host.picks.slice(count)) assert.equal(pick.token, token);
@@ -90,7 +94,7 @@ async function fixture(t) {
     assert.equal(result.content.length, 1);
     assert.ok(result.content[0] instanceof host.vscode.LanguageModelTextPart);
     const receipt = JSON.parse(result.content[0].value);
-    assert.deepEqual(Object.keys(receipt).sort(), ['ok', 'output', 'title', 'workspace']);
+    assert.ok(['ok','output','title','workspace','bindingId'].every(key => Object.hasOwn(receipt,key)));
     assert.equal(typeof receipt.output, 'string');
     assert.match(receipt.title, /^Pulso · /);
     return receipt;
@@ -133,9 +137,10 @@ test('built manifest, four registrations and prepareInvocation integrate without
   assert.deepEqual(primary.tools.filter(tool => names.includes(tool)), names);
   const provenance = json(path.join(extensionPath, 'resources/provenance.json'));
   assert.equal(provenance.source, 'v3-opencode-v1');
-  assert.ok(provenance.files.every(file => file.sources.every(source => source.path.startsWith('v3-opencode-v1/'))));
+  assert.ok(provenance.files.every(file => file.sources.every(source => /^v3-(?:opencode-v1|vscode)\//.test(source.path))));
   for (const module of runtimeModules) {
-    assert.deepEqual(fs.readFileSync(path.join(extensionPath, `resources/lib/${module}.mjs`)), fs.readFileSync(path.join(sourceRoot, `lib/${module}.mjs`)));
+    const local = path.join(extensionSource, `core/${module}.mjs`);
+    assert.deepEqual(fs.readFileSync(path.join(extensionPath, `resources/lib/${module}.mjs`)), fs.readFileSync(fs.existsSync(local) ? local : path.join(sourceRoot, `lib/${module}.mjs`)));
   }
   for (const [name, tool] of host.tools) {
     const inputs = {pulso_history: {}, pulso_workspace: {action: 'prepare'}, pulso_work: {action: 'get', workId: 'WORK-EXT'}, pulso_context: {action: 'summary'}};
@@ -358,4 +363,34 @@ test('openChat fallback uses the same public mock; registrations are disposable 
   assert.equal(host.tools.size, 0);
   assert.equal(host.commands.size, 0);
   t.diagnostic('Fallback comprobado con el mismo mock de APIs públicas. No es una prueba live de VS Code/Copilot ni confirma disponibilidad de destinos o ejecución de agentes/skills en el host.');
+});
+
+
+
+test('VSC-01 stale or absent bindings reject every mutating action before writes', async t => {
+  const {host, roots:[first,second], before} = await fixture(t);
+  const raw = async (name,input) => JSON.parse((await host.tools.get(name).invoke({input},{isCancellationRequested:false})).content[0].value);
+  const a = await raw('pulso_workspace',{action:'status'});
+  host.vscode.workspace.workspaceFolders = [folder(first),folder(second)];
+  host.choose = items => items[1];
+  await host.commands.get('pulso.selectProject')();
+  const saved = before();
+  for (const [name, action] of [
+    ...['prepare','sync','recover'].map(action=>['pulso_workspace',action]),
+    ...['create','update','block','close','reopen','complete_map'].map(action=>['pulso_work',action]),
+    ...['set_context','set_preference','remove_preference','add_learning'].map(action=>['pulso_context',action])
+  ]) for (const expectedBindingId of [undefined,a.bindingId]) {
+    const receipt = await raw(name,{action,...(expectedBindingId ? {expectedBindingId} : {})});
+    assert.equal(receipt.ok,false);
+    assert.match(receipt.output,/binding changed or missing/);
+    assert.deepEqual(before(),saved);
+  }
+  const b = await raw('pulso_workspace',{action:'status'});
+  assert.notEqual(a.bindingId,b.bindingId);
+  assert.equal((await raw('pulso_workspace',{action:'prepare',expectedBindingId:b.bindingId})).ok,true);
+  host.choose = items => items[0];
+  await host.commands.get('pulso.selectProject')();
+  const back = await raw('pulso_workspace',{action:'status'});
+  assert.equal(back.workspace,a.workspace);
+  assert.notEqual(back.bindingId,a.bindingId,'A to B to A never revives old tokens');
 });

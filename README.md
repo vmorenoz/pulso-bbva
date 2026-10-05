@@ -1,5 +1,7 @@
 # Pulso
 
+<p align="center"><img src="v3-vscode/assets/pulso.svg" alt="Pulso: robot con antena y ondas de sonar" width="192" height="192"></p>
+
 **Pulso, Asistente IA para desarrollo** coordina especialistas de IA para entender, planificar, implementar y verificar cambios de software, manteniendo continuidad mediante artefactos locales por proyecto.
 
 ## Estado de la distribución

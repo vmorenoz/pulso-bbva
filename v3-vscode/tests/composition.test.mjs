@@ -155,7 +155,10 @@ test('core schema rejects host fields and absolute tool paths inside canonical d
   assert.deepEqual(canonical, JSON.parse(original('templates/delegation.json')), 'Resolution must not mutate the persisted contract');
 });
 
-test('receipt drift stops further delegation/consolidation and reports already observed effects', () => {
+test('expected binding precedes mutations and guards session continuity', () => {
+  assert.match(runtimeBoundary,/expectedBindingId/);
+  assert.match(runtimeBoundary,/antes de cualquier escritura/);
+  assert.match(runtimeBoundary,/No fabriques el token ni lo cambies automáticamente/);
   assert.match(runtimeBoundary, /No pases root, projectRoot, readBase ni workspace como argumentos de raíz a las tools Pulso/);
   assert.match(runtimeBoundary, /copia receipt\.workspace como projectRoot y readBase explícitos en hostContext fuera del JSON canónico/);
   assert.match(runtimeBoundary, /una carpeta local única se usa automáticamente, sin picker/);
@@ -165,18 +168,11 @@ test('receipt drift stops further delegation/consolidation and reports already o
   assert.match(runtimeBoundary, /Un worktree debe estar abierto como carpeta/);
   assert.match(runtimeBoundary, /Recargar la ventana requiere seleccionar de nuevo en multi-root/);
   assert.match(runtimeBoundary, /cualquier cambio del listado o de las raíces del workspace invalida el binding/);
-  assert.match(runtimeBoundary, /receipt\.workspace conserva la misma raíz hasta un cambio explícito/);
-  assert.match(runtimeBoundary, /cancelar el comando conserva la selección anterior/);
   assert.match(runtimeBoundary, /aprobaciones normales de VS Code son independientes/);
   for (const relative of [...composed.chatAgents.map(agent => agent.path.slice('resources/'.length)), ...operationSkills.map(name => `skills/${name}/SKILL.md`)]) {
     assert.ok(!text(relative).includes('Antes de cada llamada Pulso, confirma con el usuario/host'));
     assert.ok(!text(relative).includes('cada picker puede elegir otro proyecto'));
   }
-  assert.match(runtimeBoundary, /Después de cada llamada compara receipt\.workspace con la raíz conservada, antes de delegar o consolidar/);
-  assert.match(runtimeBoundary, /Si el recibo cambia de raíz, detente antes de nuevas delegaciones, consolidaciones o escrituras y pide confirmar la selección original/);
-  assert.match(runtimeBoundary, /no mezcles workId, workRevision, inputs ni resultados entre raíces/);
-  assert.match(runtimeBoundary, /Una llamada mutante ya puede haber escrito en la otra raíz: comunica los efectos observados/);
-  assert.match(runtimeBoundary, /sin prometer que la guarda impidió esa escritura/);
   assert.match(runtimeBoundary, /La delegación Local es stateless/);
   assert.match(runtimeBoundary, /delegación nativa de Copilot sigue el comportamiento y las capacidades reales del host, sin afirmar que también sea stateless/);
   assert.ok(!runtimeBoundary.includes('Cada delegación es stateless'));
@@ -184,17 +180,18 @@ test('receipt drift stops further delegation/consolidation and reports already o
 
 test('runtime allowlist and source parity exclude installation dependencies and preserve priority aliases', () => {
   assert.deepEqual([...composed.files.keys()].filter(file => file.startsWith('lib/')).sort(), runtimeModules.map(name => `lib/${name}.mjs`).sort());
-  for (const module of runtimeModules) assert.ok(composed.files.get(`lib/${module}.mjs`).equals(original(`lib/${module}.mjs`)));
+  for (const module of runtimeModules.filter(name => !['artifacts','work-mutations','memory'].includes(name))) assert.ok(composed.files.get(`lib/${module}.mjs`).equals(original(`lib/${module}.mjs`)));
   for (const file of ['work.schema.json', 'state.schema.json']) {
     const source = JSON.parse(original(`schemas/${file}`));
-    assert.deepEqual(JSON.parse(text(`schemas/${file}`)), source);
-    assert.ok(composed.files.get(`schemas/${file}`).equals(original(`schemas/${file}`)));
+    const built = JSON.parse(text(`schemas/${file}`));
+    if (file === 'work.schema.json') { assert.ok(built.properties.acceptanceChanges); delete built.properties.acceptanceChanges; }
+    assert.deepEqual(built, source);
     assert.ok(text(`schemas/${file}`).includes('"urgent"'));
     assert.ok(text(`schemas/${file}`).includes('"critical"'));
   }
   assert.ok(text('schemas/result.schema.json').includes('"critical"'));
   for (const [file, bytes] of composed.files) {
-    if (file.startsWith('templates/') || (file.startsWith('schemas/') && !['schemas/work.schema.json', 'schemas/state.schema.json'].includes(file))) assert.ok(bytes.equals(original(file)), file);
+    if ((file.startsWith('templates/') && !file.endsWith('.md')) || (file.startsWith('schemas/') && !['schemas/work.schema.json', 'schemas/state.schema.json'].includes(file))) assert.ok(bytes.equals(original(file)), file);
     assert.ok(!/(?:^|\/)(?:node_modules|\.pulso|install[^/]*)(?:\/|\.|$)/.test(file), file);
   }
 });
@@ -203,13 +200,14 @@ test('provenance records original hashes, output hashes and modification flags a
   const provenance = JSON.parse(text('provenance.json'));
   assert.equal(provenance.source, 'v3-opencode-v1');
   assert.equal(provenance.files.length, composed.files.size - 1);
+  const sourceBytes = source => fs.readFileSync(new URL(`../../${source}`,import.meta.url));
   for (const record of provenance.files) {
     const generated = composed.files.get(record.path);
     assert.equal(record.sha256, hash(generated));
-    assert.equal(record.modified, record.sources.length !== 1 || !original(record.sources[0].path.slice('v3-opencode-v1/'.length)).equals(generated));
+    assert.equal(record.modified, record.sources.length !== 1 || !sourceBytes(record.sources[0].path).equals(generated));
     for (const source of record.sources) {
-      assert.ok(source.path.startsWith('v3-opencode-v1/'));
-      const bytes = original(source.path.slice('v3-opencode-v1/'.length));
+      assert.ok(/^v3-(?:opencode-v1|vscode)\//.test(source.path));
+      const bytes = sourceBytes(source.path);
       assert.equal(source.sha256, hash(bytes));
       assert.equal(source.modified, !bytes.equals(generated));
     }
@@ -274,3 +272,4 @@ test('build preserves other manifest fields, replaces stale resources and check 
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({...generated, displayName: 'Wrong'}));
   await assert.rejects(check({root}), /displayName público debe ser Pulso/);
 });
+

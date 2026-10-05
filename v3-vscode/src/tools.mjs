@@ -8,19 +8,20 @@ const enumeration = values => ({type:'string', enum:values});
 const id = {type:'string', pattern:'^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$', minLength:1, maxLength:80};
 const integer = (minimum, maximum) => ({type:'integer', minimum, ...(maximum === undefined ? {} : {maximum})});
 const schema = (properties, required = []) => ({type:'object', properties, required, additionalProperties:false});
+export const isMutating = (name, input) => name === 'pulso_work' ? input.action !== 'get' : name === 'pulso_context' ? input.action !== 'summary' : name === 'pulso_workspace' && ['prepare','sync','recover'].includes(input.action);
 const definition = (name, displayName, modelDescription, inputSchema) => ({name, displayName, modelDescription, canBeReferencedInPrompt:true, toolReferenceName:name, inputSchema});
 
 export const toolDefinitions = [
-  definition('pulso_workspace', 'Pulso · Workspace', 'Prepara, consulta, valida, sincroniza o recupera Pulso explícitamente. attempts/reconcile_attempts consultan telemetría sin declarar agentes vivos ni modificar Work.', schema({
-    action:enumeration(['prepare','status','validate','sync','recover','attempts','reconcile_attempts']), fresh:{type:'boolean'}, workId:id, expectedRevision:integer(1), sessionID:string(160), limit:integer(1,100)
+  definition('pulso_workspace', 'Pulso · Workspace', 'Antes de mutar consulta status, conserva workspace/bindingId y pasa expectedBindingId. status incluye data.works por páginas offset/limit. Prepara, consulta, valida, sincroniza o recupera Pulso explícitamente. attempts/reconcile_attempts consultan telemetría sin declarar agentes vivos ni modificar Work.', schema({
+    expectedBindingId:string(80), offset:integer(0), action:enumeration(['prepare','status','validate','sync','recover','attempts','reconcile_attempts']), fresh:{type:'boolean'}, workId:id, expectedRevision:integer(1), sessionID:string(160), limit:integer(1,100)
   }, ['action'])),
-  definition('pulso_work', 'Pulso · Trabajo', 'Consulta o actualiza un objetivo de trabajo. create permite omitir workId; las demás acciones requieren ID explícito.', schema({
-    action:enumeration(['get','create','update','block','close','reopen','complete_map']), workId:id, title:string(240), objective:string(4000), criterion:string(2000), verification:string(2000), priority:enumeration(['low','normal','high','urgent']), expectedRevision:integer(1),
-    actions:{type:'array', minItems:1, maxItems:20, items:{type:'object', additionalProperties:true}}, outcome:enumeration(['done','cancelled']), summary:string(4000), limitations:{type:'array', maxItems:30, items:string(1000)}, reason:string(2000)
+  definition('pulso_work', 'Pulso · Trabajo', 'Mutaciones requieren expectedBindingId de una consulta del proyecto previsto. get devuelve data completo por section y páginas offset/limit: sigue nextOffset mientras hasMore. Consulta o actualiza un objetivo de trabajo. create permite omitir workId; las demás acciones requieren ID explícito.', schema({
+    expectedBindingId:string(80), section:enumeration(['overview','tasks','criteria','evidence','documents','decisions','acceptanceChanges','all']), offset:integer(0), limit:integer(1,20), action:enumeration(['get','create','update','block','close','reopen','complete_map']), workId:id, title:string(240), objective:string(4000), criterion:string(2000), verification:string(2000), priority:enumeration(['low','normal','high','urgent']), expectedRevision:integer(1),
+    actions:{type:'array', minItems:1, maxItems:20, items:{type:'object', additionalProperties:true}}, outcome:enumeration(['done','cancelled']), summary:string(4000), limitations:{type:'array', maxItems:30, items:{...string(1000),minLength:1,pattern:'\\S'}}, reason:string(2000)
   }, ['action'])),
-  definition('pulso_history', 'Pulso · Historial', 'Consulta cierres recientes de Pulso con resultado resumido.', schema({workId:id, since:string(), until:string(), limit:integer(1,20)})),
-  definition('pulso_context', 'Pulso · Contexto', 'Consulta o registra contexto relevante, preferencias y aprendizajes. summary devuelve contexto, preferencias key/value/source y aprendizajes note/source del ámbito solicitado; sin scope incluye proyecto y usuario. Salida limitada a 8000 caracteres con aviso de truncación. Las preferencias de usuario se conservan entre workspaces y sesiones.', schema({
-    action:enumeration(['summary','set_context','set_preference','remove_preference','add_learning']), context:string(4000), key:string(120), value:string(1000), scope:enumeration(['project','user']), note:string(2000), source:enumeration(['user','observed','delegated'])
+  definition('pulso_history', 'Pulso · Historial', 'Consulta cierres con fechas, ciclos, resumen completo, limitaciones y referencias. data.items está paginado por offset/limit; sigue nextOffset mientras hasMore.', schema({offset:integer(0), workId:id, since:string(), until:string(), limit:integer(1,20)})),
+  definition('pulso_context', 'Pulso · Contexto', 'Toda escritura requiere expectedBindingId confirmado para el proyecto previsto. Consulta o registra contexto relevante, preferencias y aprendizajes. summary devuelve contexto, preferencias key/value/source y aprendizajes note/source del ámbito solicitado; sin scope incluye proyecto y usuario. Salida limitada a 8000 caracteres con aviso de truncación. Las preferencias de usuario se conservan entre workspaces y sesiones.', schema({
+    expectedBindingId:string(80), action:enumeration(['summary','set_context','set_preference','remove_preference','add_learning']), context:string(4000), key:string(120), value:string(1000), scope:enumeration(['project','user']), note:string(2000), source:enumeration(['user','observed','delegated'])
   }, ['action']))
 ];
 
@@ -49,8 +50,9 @@ export function validateInput(schema, value, location = 'input') {
   return value;
 }
 
-const ok = (title,output) => ({title:`Pulso · ${title}`, output, ok:true});
-const fail = (title,error) => ({title:`Pulso · ${title}`, output:`No se completó: ${String(error?.message || 'operación inválida').slice(0,240)}`, ok:false});
+const ok = (title,output,data) => ({title:`Pulso · ${title}`, output, ok:true, ...(data === undefined ? {} : {data})});
+const fail = (title,error) => ({title:`Pulso · ${title}`, output:`${error?.persistence?.applied ? 'Aplicado parcialmente; no repitas a ciegas' : 'No se completó'}: ${String(error?.message || 'operación inválida').slice(0,500)}`, ok:false, ...(error?.persistence ? {persistence:error.persistence} : {})});
+const page = (values, {offset=0,limit=20}={}) => ({items:values.slice(offset,offset+limit),offset,hasMore:offset+limit<values.length,nextOffset:offset+limit<values.length ? offset+limit : null,total:values.length});
 
 function memorySummary(project,user) {
   const primary = project || user;
@@ -116,7 +118,7 @@ export async function createPulsoTools({coreDir,homeDir = os.homedir(),assertCon
           throw error;
         }
         const focus = value.works.find(work => work.id === value.focusWorkId);
-        return ok('estado',focus ? `${focus.id} · ${focus.status} · ${focus.progress.done}/${focus.progress.total} · siguiente: ${focus.nextAction || 'sin acción'}` : `${value.works.length} trabajos abiertos · sin foco`);
+        return ok('estado',focus ? `${focus.id} · ${focus.status} · ${focus.progress.done}/${focus.progress.total} · siguiente: ${focus.nextAction || 'sin acción'}` : `${value.works.length} trabajos abiertos · sin foco`, {...value,works:page(value.works,{offset:args.offset,limit:Math.min(args.limit || 20,20)})});
       }
       const {validateWorkspace} = await core('work-mutations.mjs');
       const value = validateWorkspace(root,{fresh:args.fresh || false});
@@ -128,7 +130,11 @@ export async function createPulsoTools({coreDir,homeDir = os.homedir(),assertCon
       if (args.action === 'get') {
         const {readWork} = await core('artifacts.mjs');
         const value = readWork(root,args.workId,{files:false});
-        return ok('trabajo',`${value.id} · rev. ${value.revision} · ${value.status} · tareas ${value.tasks.filter(task => task.status === 'done').length}/${value.tasks.length} · siguiente: ${value.nextAction || 'sin acción'}`);
+        const sections = ['tasks','evidence','documents','decisions','acceptanceChanges'];
+        const data = {...value,objective:{...value.objective}};
+        for (const key of sections) data[key] = args.section === 'all' || args.section === key ? page(value[key] || [],args) : {total:(value[key] || []).length,readWith:{section:key}};
+        data.objective.criteria = args.section === 'all' || args.section === 'criteria' ? page(value.objective.criteria,args) : {total:value.objective.criteria.length,readWith:{section:'criteria'}};
+        return ok('trabajo',`${value.id} · rev. ${value.revision} · ${value.status} · tareas ${value.tasks.filter(task => task.status === 'done').length}/${value.tasks.length} · siguiente: ${value.nextAction || 'sin acción'}`,data);
       }
       if (args.action === 'create') {
         const input = Object.fromEntries(['workId','title','objective','criterion','verification','priority'].filter(key => args[key] !== undefined).map(key => [key,args[key]]));
@@ -147,8 +153,10 @@ export async function createPulsoTools({coreDir,homeDir = os.homedir(),assertCon
       const {exists} = await core('fs.mjs');
       if (!exists(root,'.pulso/history.jsonl')) return ok('historial','Sin cierres para esta consulta.');
       const {readHistory} = await core('work-mutations.mjs');
-      const values = readHistory(root,args);
-      return ok('historial',values.length ? values.map(value => `${value.workId} · ${value.outcome} · ${value.summary.slice(0,160)}`).join('\n') : 'Sin cierres para esta consulta.');
+      const limit = args.limit || 20, offset = args.offset || 0;
+      const values = readHistory(root,{...args,limit:limit+1});
+      const items = values.slice(0,limit);
+      return ok('historial',items.length ? items.map(value => `${value.workId} · ${value.outcome} · ${value.summary}`).join('\n') : 'Sin cierres para esta consulta.', {items,offset,hasMore:values.length>limit,nextOffset:values.length>limit ? offset+limit : null});
     },
     async pulso_context(args,root) {
       const memory = await core('memory.mjs');
@@ -167,3 +175,4 @@ export async function createPulsoTools({coreDir,homeDir = os.homedir(),assertCon
     } catch (error) {return fail(def.displayName.replace('Pulso · ',''),error);}
   }}]));
 }
+
