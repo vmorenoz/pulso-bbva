@@ -12,11 +12,12 @@
     "build:vscode": "node scripts/build.mjs vscode",
     "check": "node scripts/check.mjs",
     "test": "node --test tests/*/*.test.mjs",
-    "verify": "npm run build && npm run check && npm test",
+    "verify": "npm run build && npm run check && npm test && npm run verify:installer-staged",
     "package:opencode": "node scripts/package.mjs opencode",
     "package:vscode": "node scripts/package.mjs vscode",
     "verify:packages": "node --test tests/distribution/*.test.mjs",
-    "install:pulso": "node installer/cli.mjs"
+    "install:pulso": "node installer/cli.mjs",
+    "verify:installer-staged": "node tests/installer/stage-smoke.mjs"
   },
   "dependencies": {
     "jsonc-parser": "3.3.1"

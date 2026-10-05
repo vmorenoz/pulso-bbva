@@ -73,12 +73,13 @@ Source migration began at immutable main `16cc3aa86fc47de02afeac6336bc5545012a39
 
 ### Executed verification · 2026-10-05
 
-- Aggregate source verification: 297 tests passed, 0 failed, 0 skipped.
+- Aggregate source verification: 298 tests passed, 0 failed, 0 skipped.
 - Independent builds without the sibling adapter: PASS; repeated staged outputs match byte-for-byte.
 - Actual archive extraction, complete inventories and resource/import checks: PASS.
 - OpenCode extracted plugin activation with bundled dependencies and no injected SDK: PASS; status does not initialize a project.
 - Five BBVA source/output files match the baseline SHA-256 values exactly.
 - Historical tracked runtime files: 146 unchanged; historical directories were not edited.
+- Full staged package installed into a temporary home: all 151 runtime files, 31 relocated resource links, default SDK activation and all four tools verified; status is byte-for-byte read-only and explicit prepare succeeds.
 - All real-host/native-conversation acceptance entries above remain NOT_RUN.
 
 Frozen reviewed artifacts (generated locally, not committed to source):
