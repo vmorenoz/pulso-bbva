@@ -447,6 +447,7 @@
                     "maxLength": 1000
                   },
                   "command": {
+                    "description": "Comando de la comprobación, no del cálculo de huellas. Para una revisión estática sin comando usa null.",
                     "anyOf": [
                       {
                         "type": "string",
@@ -466,6 +467,7 @@
                     "maxLength": 1000
                   },
                   "exitCode": {
+                    "description": "Solo executed admite un exit code numérico. static, manual y not_run requieren null; executed con status pass requiere 0.",
                     "anyOf": [
                       {
                         "type": "integer"

@@ -5,14 +5,16 @@ import path from 'node:path';
 import test from 'node:test';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
+import {createHash} from 'node:crypto';
 import {adapterConfig} from '../../adapters/vscode/build.mjs';
 import {toolDefinitions, toolContracts} from '../../core/lib/tool-contracts.mjs';
+import {validateSchema} from '../../core/lib/schema.mjs';
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const names = toolDefinitions.map(value => value.name);
 const folder = fsPath => ({name: path.basename(fsPath), uri: {scheme: 'file', fsPath}});
 export async function fixture(t) {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'pulso-v4-vscode-'));
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pulso-v4-vscode-')));
   t.after(() => fs.rmSync(base, {recursive: true, force: true}));
   const extensionPath = path.join(base, 'extension'), homeDir = path.join(base, 'home');
   const projects = ['a','b'].map(name => path.join(base, name));
@@ -161,6 +163,40 @@ test('native lifecycle returns close/reopen receipts and revision-bound project/
   }
   const saved=await invoke('pulso_context',{action:'read',scope:'all'});
   assert.equal(saved.data.entries.length,2);
+});
+
+test('native init records static evidence and closes; hash command exit codes are rejected without writes', async t => {
+  const {invoke,status,projects,host}=await fixture(t),{bindingId}=await status();
+  const run=input=>invoke('pulso_work',{...input,expectedBindingId:bindingId});
+  assert.equal((await invoke('pulso_workspace',{action:'prepare',expectedBindingId:bindingId})).ok,true);
+  assert.equal((await run({action:'create',workId:'INIT',title:'Mapear proyecto',objective:'Documentar contexto',criterion:'Mapa verificado',verification:'Revisión estática contra fuentes'})).ok,true);
+  assert.equal((await run({action:'update',workId:'INIT',expectedRevision:1,actions:[{type:'task.add',task:{id:'map-project',title:'Mapear contexto',criterionIds:['AC-1'],agent:'pulso-explorer',status:'in_progress',dependsOn:[],writeScope:['.pulso/project.md'],resources:[],acceptance:['Mapa verificado contra fuentes'],evidenceIds:[],summary:''}}]})).ok,true);
+  const observed=await invoke('pulso_work',{action:'get',workId:'INIT',section:'all'});
+  assert.equal(observed.data.objective.criteria.items.length,1);
+  assert.equal(observed.data.objective.criteria.items[0].id,'AC-1');
+  const document=Buffer.from('<!-- template: project@1.0 -->\n# Proyecto\nContexto revisado contra fuentes.\n');
+  fs.writeFileSync(path.join(projects[0],'.pulso/project.md'),document);
+  const evidence={id:'project-context-reviewed',kind:'static',status:'pass',checkedAt:new Date().toISOString(),criterionIds:['AC-1'],taskIds:['map-project'],report:'.pulso/project.md',command:null,cwd:'.',exitCode:null,basis:'Revisión estática del mapa contra fuentes; no se ejecutaron pruebas.',files:[{path:'.pulso/project.md',sha256:createHash('sha256').update(document).digest('hex')}],summary:'Contexto revisado.',acceptanceBasis:observed.data.acceptanceBasis};
+  const request={action:'update',workId:'INIT',expectedRevision:observed.data.revision,expectedBindingId:bindingId,actions:[{type:'evidence.add',evidence},{type:'task.set_status',taskId:'map-project',status:'done'}]};
+  const manifest=await adapterConfig.packageManifest({coreRoot:path.join(root,'core'),chatAgents:[],chatSkills:[]});
+  const definition=manifest.contributes.languageModelTools.find(tool=>tool.name==='pulso_work');
+  const invalid=structuredClone(request);
+  Object.assign(invalid.actions[0].evidence,{command:'shasum -a 256 .pulso/project.md',exitCode:0});
+  const workPath=path.join(projects[0],'.pulso/work/INIT/work.json'),before=fs.readFileSync(workPath);
+  assert.ok(validateSchema(definition.inputSchema,invalid).length);
+  assert.throws(()=>host.tools.get('pulso_work').prepareInvocation({input:invalid}));
+  await assert.rejects(invoke('pulso_work',invalid));
+  assert.deepEqual(fs.readFileSync(workPath),before);
+  assert.deepEqual(validateSchema(definition.inputSchema,request),[]);
+  const saved=await invoke('pulso_work',request);
+  assert.equal(saved.ok,true,saved.output);
+  const current=await invoke('pulso_work',{action:'get',workId:'INIT',section:'all'});
+  assert.equal(current.data.evidence.items[0].exitCode,null);
+  assert.equal(current.data.tasks.items[0].status,'done');
+  const closed=await run({action:'close',workId:'INIT',expectedRevision:current.data.revision,summary:'Mapa aceptado con revisión estática',limitations:['No se ejecutaron tests ni build del producto.']});
+  assert.equal(closed.ok,true,closed.output);
+  const history=await invoke('pulso_history',{workId:'INIT'});
+  assert.equal(history.data.items[0].outcome,'done');
 });
 
 test('a host change after a committed native operation retains its receipt and marks context drift', async t => {

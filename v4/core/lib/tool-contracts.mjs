@@ -14,9 +14,27 @@ const memoryRef = {scope:enumeration(['project','user']),expectedRevision:intege
 const source = enumeration(['user','observed','delegated']);
 const atLeastOne = (shape,fields) => ({anyOf:fields.map(field=>({...clone(shape),required:[...new Set([...(shape.required||[]),field])]}))});
 
-// Reuse the persisted contracts, adding the three native semantic non-empty checks.
+// Advertise the same execution rules enforced by the core without tightening
+// historical persisted schemas. Each anyOf branch must be a complete shape:
+// the bundled validator deliberately treats alternatives independently.
+function observedEvidenceSchema(shape){
+  const variant=(kind,status,exitCode,command)=>{
+    const value=clone(shape);
+    Object.assign(value.properties,{kind,status,exitCode,command});
+    return value;
+  };
+  return {description:'Evidencia observada completa. static/manual/not_run requieren exitCode:null. Una revisión estática usa command:null; calcular SHA-256 no convierte la revisión en executed. executed con status:pass requiere comando no vacío y exitCode:0. files incluye el SHA-256 real del informe y acceptanceBasis procede de get antes de observar.',anyOf:[
+    variant(enumeration(['static','manual']),clone(shape.properties.status),{type:'null'},clone(shape.properties.command)),
+    variant({const:'not_run'},enumeration(['not_run','blocked']),{type:'null'},clone(shape.properties.command)),
+    variant({const:'executed'},{const:'pass'},{type:'integer',const:0},clone(shape.properties.command.anyOf.find(item=>item.type==='string'))),
+    variant({const:'executed'},enumeration(['fail','blocked','not_run']),clone(shape.properties.exitCode),clone(shape.properties.command))
+  ]};
+}
+
+// Reuse persisted contracts, adding native non-empty and execution checks.
 const mutationInput = clone(persistedSchema('work-update'));
 mutationInput.properties.actions.items.anyOf = mutationInput.properties.actions.items.anyOf.map(shape=>{
+  if(shape.properties.type.const==='evidence.add')shape.properties.evidence=observedEvidenceSchema(shape.properties.evidence);
   if(shape.properties.type.const==='work.set_overview')return atLeastOne(shape,Object.keys(shape.properties).filter(key=>key!=='type'));
   if(shape.properties.type.const==='task.update')shape.properties.patch=atLeastOne(shape.properties.patch,Object.keys(shape.properties.patch.properties));
   if(shape.properties.type.const==='criterion.update')return atLeastOne(shape,['description','verification']);
@@ -66,7 +84,7 @@ function descriptor(name,displayName,modelDescription,actions,mutatingActions=[]
 }
 export const toolContracts={
   pulso_workspace:descriptor('pulso_workspace','Workspace','Prepara, consulta, valida, sincroniza o recupera metadatos Pulso. status devuelve data.works con items completos y nextCursor; sigue hasMore. Los cursores caducan al cambiar el índice o los filtros.',workspaceActions,['prepare','sync','recover']),
-  pulso_work:descriptor('pulso_work','Trabajo','Consulta o actualiza un objetivo. get devuelve data completo por section, con páginas limit/cursor y acceptanceBasis; sigue data.hasMore y data.nextCursor. Los cursores caducan al cambiar Work o section. validate_result valida sin escribir. create permite omitir workId; las demás mutaciones requieren ID y revisión.',workActions,['create','update','block','close','reopen']),
+  pulso_work:descriptor('pulso_work','Trabajo','Consulta o actualiza un objetivo. get devuelve data completo por section, con páginas limit/cursor y acceptanceBasis; sigue data.hasMore y data.nextCursor. Los cursores caducan al cambiar Work o section. validate_result valida sin escribir. create permite omitir workId y crea el criterio AC-1; las demás mutaciones requieren ID y revisión. evidence.add exige evidencia completa: static/manual/not_run usan exitCode:null; la revisión estática usa command:null, files con SHA-256 reales y acceptanceBasis obtenida antes de observar. Calcular una huella no es una prueba executed.',workActions,['create','update','block','close','reopen']),
   pulso_history:descriptor('pulso_history','Historial','Consulta cierres con fechas, ciclos, resumen completo, limitaciones y referencias. data.items se pagina con limit/cursor; sigue hasMore y nextCursor. Cambiar historial o filtros invalida el cursor.',null,[],historySchema),
   pulso_context:descriptor('pulso_context','Contexto','Consulta o registra contexto, preferencias y aprendizajes. read devuelve entradas completas, revisions y nextCursor. Las escrituras exigen scope y expectedRevision; preferencias y aprendizajes requieren source explícito. summary es una vista limitada a 8000 caracteres.',contextActions,['set_context','set_preference','remove_preference','add_learning'])
 };

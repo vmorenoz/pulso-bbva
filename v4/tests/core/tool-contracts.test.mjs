@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {toolDefinitions,toolContracts,validateToolInput,isMutating,mutationSchema} from '../../core/lib/tool-contracts.mjs';
 import {validateSchema} from '../../core/lib/schema.mjs';
 
@@ -42,6 +43,32 @@ test('semantic no-op mutations are rejected in descriptors before invocation',()
     assert.ok(validateSchema(mutationSchema,input).length);
     assert.throws(()=>validateToolInput('pulso_work',{...fixtures.pulso_work.update,actions:[input]}));
   }
+});
+test('advertised evidence rules reject static exit codes and invalid execution PASS inputs',()=>{
+  const evidence=JSON.parse(fs.readFileSync(new URL('../../core/templates/evidence.json',import.meta.url),'utf8'));
+  const request=patch=>({...fixtures.pulso_work.update,actions:[{type:'evidence.add',evidence:{...evidence,...patch}}]});
+  const advertised=toolContracts.pulso_work.inputSchema;
+  for(const kind of ['static','manual','not_run']){
+    const valid=request({kind,status:kind==='not_run'?'not_run':'pass',command:null,exitCode:null});
+    assert.deepEqual(validateSchema(advertised,valid),[]);
+    assert.doesNotThrow(()=>validateToolInput('pulso_work',valid));
+    for(const exitCode of [0,1]){
+      const invalid=request({kind,command:'shasum -a 256 .pulso/project.md',exitCode});
+      assert.ok(validateSchema(advertised,invalid).length);
+      assert.throws(()=>validateToolInput('pulso_work',invalid));
+    }
+  }
+  for(const status of ['pass','fail']){
+    const invalid=request({kind:'not_run',status,command:null,exitCode:null});
+    assert.ok(validateSchema(advertised,invalid).length);
+    assert.throws(()=>validateToolInput('pulso_work',invalid));
+  }
+  assert.doesNotThrow(()=>validateToolInput('pulso_work',request({kind:'executed',status:'pass',command:'node --test',exitCode:0})));
+  for(const patch of [{command:null,exitCode:0},{command:'   ',exitCode:0},{command:'node --test',exitCode:null},{command:'node --test',exitCode:1}]){
+    assert.throws(()=>validateToolInput('pulso_work',request({kind:'executed',status:'pass',...patch})));
+  }
+  assert.throws(()=>validateToolInput('pulso_work',request({kind:'executed',status:'pass',command:'x'.repeat(4001),exitCode:0})));
+  for(const status of ['fail','blocked','not_run'])assert.doesNotThrow(()=>validateToolInput('pulso_work',request({kind:'executed',status,command:null,exitCode:null})));
 });
 test('invalid semantic inputs and model-selected roots fail closed',()=>{
   for(const action of ['complete_map','attempts','reconcile_attempts','arbitrary'])assert.throws(()=>validateToolInput('pulso_workspace',{action}));
