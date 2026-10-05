@@ -1,5 +1,9 @@
 # Cambios
 
+## 3.1.3
+
+- Retirada la imagen del README de la extensión; se conserva el icono de Pulso.
+
 ## 3.1.2
 
 - Selección esperada obligatoria antes de las mutaciones para evitar escrituras entre proyectos de una misma ventana.
