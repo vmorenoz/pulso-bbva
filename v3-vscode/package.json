@@ -1,0 +1,446 @@
+{
+  "name": "pulso",
+  "displayName": "Pulso",
+  "icon": "assets/pulso-256.png",
+  "version": "3.1.4",
+  "publisher": "pulso-local",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vmorenoz/pulso-bbva.git",
+    "directory": "v3-vscode"
+  },
+  "private": true,
+  "description": "Orquestación de especialistas y tools nativas de Pulso para VS Code y GitHub Copilot.",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.139.1",
+    "node": ">=22"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "pulso",
+    "copilot",
+    "agents",
+    "orchestration"
+  ],
+  "main": "./src/extension.cjs",
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Pulso requiere un workspace confiable para ejecutar sus tools locales."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "El core local requiere directorios de filesystem."
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "pulso.openChat",
+        "title": "Abrir chat",
+        "category": "Pulso"
+      },
+      {
+        "command": "pulso.selectProject",
+        "title": "Seleccionar proyecto",
+        "category": "Pulso"
+      }
+    ],
+    "chatAgents": [
+      {
+        "path": "resources/agents/pulso.agent.md"
+      },
+      {
+        "path": "resources/agents/pulso-researcher.agent.md"
+      },
+      {
+        "path": "resources/agents/pulso-explorer.agent.md"
+      },
+      {
+        "path": "resources/agents/pulso-planner.agent.md"
+      },
+      {
+        "path": "resources/agents/pulso-plan-auditor.agent.md"
+      },
+      {
+        "path": "resources/agents/pulso-executor.agent.md"
+      },
+      {
+        "path": "resources/agents/pulso-qa-auditor.agent.md"
+      },
+      {
+        "path": "resources/agents/pulso-security-auditor.agent.md"
+      },
+      {
+        "path": "resources/agents/pulso-code-reviewer.agent.md"
+      },
+      {
+        "path": "resources/agents/pulso-ui-auditor.agent.md"
+      }
+    ],
+    "chatSkills": [
+      {
+        "path": "resources/skills/bbva-apx/SKILL.md"
+      },
+      {
+        "path": "resources/skills/bbva-apx-testing/SKILL.md"
+      },
+      {
+        "path": "resources/skills/bbva-cells/SKILL.md"
+      },
+      {
+        "path": "resources/skills/bbva-cells-testing/SKILL.md"
+      },
+      {
+        "path": "resources/skills/bbva-engineering/SKILL.md"
+      },
+      {
+        "path": "resources/skills/pulso-init/SKILL.md"
+      },
+      {
+        "path": "resources/skills/pulso-integration-verification/SKILL.md"
+      },
+      {
+        "path": "resources/skills/pulso-recap/SKILL.md"
+      },
+      {
+        "path": "resources/skills/pulso-resume/SKILL.md"
+      },
+      {
+        "path": "resources/skills/pulso-status/SKILL.md"
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "pulso_workspace",
+        "displayName": "Pulso · Workspace",
+        "modelDescription": "Antes de mutar consulta status, conserva workspace/bindingId y pasa expectedBindingId. status incluye data.works por páginas offset/limit. Prepara, consulta, valida, sincroniza o recupera Pulso explícitamente. attempts/reconcile_attempts consultan telemetría sin declarar agentes vivos ni modificar Work.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "pulso_workspace",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "expectedBindingId": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "prepare",
+                "status",
+                "validate",
+                "sync",
+                "recover",
+                "attempts",
+                "reconcile_attempts"
+              ]
+            },
+            "fresh": {
+              "type": "boolean"
+            },
+            "workId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sessionID": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "pulso_work",
+        "displayName": "Pulso · Trabajo",
+        "modelDescription": "Mutaciones requieren expectedBindingId de una consulta del proyecto previsto. get devuelve data completo por section y páginas offset/limit: sigue nextOffset mientras hasMore. Consulta o actualiza un objetivo de trabajo. get devuelve acceptanceBasis para observar evidencia. validate_result recibe delegation y result y no escribe. create permite omitir workId; las mutaciones restantes requieren ID explícito.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "pulso_work",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "delegation": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "result": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "expectedBindingId": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "section": {
+              "type": "string",
+              "enum": [
+                "overview",
+                "tasks",
+                "criteria",
+                "evidence",
+                "documents",
+                "decisions",
+                "acceptanceChanges",
+                "all"
+              ]
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "get",
+                "validate_result",
+                "create",
+                "update",
+                "block",
+                "close",
+                "reopen"
+              ]
+            },
+            "workId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 240
+            },
+            "objective": {
+              "type": "string",
+              "maxLength": 4000
+            },
+            "criterion": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "verification": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "priority": {
+              "type": "string",
+              "enum": [
+                "low",
+                "normal",
+                "high",
+                "critical"
+              ]
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "actions": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "done",
+                "cancelled"
+              ]
+            },
+            "summary": {
+              "type": "string",
+              "maxLength": 4000
+            },
+            "limitations": {
+              "type": "array",
+              "maxItems": 30,
+              "items": {
+                "type": "string",
+                "maxLength": 1000,
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "pulso_history",
+        "displayName": "Pulso · Historial",
+        "modelDescription": "Consulta cierres con fechas, ciclos, resumen completo, limitaciones y referencias. data.items está paginado por offset/limit; sigue nextOffset mientras hasMore.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "pulso_history",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "workId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "since": {
+              "type": "string"
+            },
+            "until": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "pulso_context",
+        "displayName": "Pulso · Contexto",
+        "modelDescription": "Toda escritura requiere expectedBindingId confirmado para el proyecto previsto. Consulta o registra contexto relevante, preferencias y aprendizajes. read devuelve entries, revisions y nextCursor: sigue hasMore. Antes de mutar lee la revisión y envía scope, expectedRevision y source explícito para preferencias/aprendizajes. summary es solo resumen limitado a 8000 caracteres. Las preferencias de usuario se conservan entre workspaces y sesiones.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "pulso_context",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "expectedBindingId": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "section": {
+              "type": "string",
+              "enum": [
+                "context",
+                "preferences",
+                "learning",
+                "all"
+              ]
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "cursor": {
+              "type": "string",
+              "maxLength": 4000
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "read",
+                "summary",
+                "set_context",
+                "set_preference",
+                "remove_preference",
+                "add_learning"
+              ]
+            },
+            "context": {
+              "type": "string",
+              "maxLength": 4000
+            },
+            "key": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "value": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "project",
+                "user",
+                "all"
+              ]
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "user",
+                "observed",
+                "delegated"
+              ]
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:host": "node scripts/test-host.mjs",
+    "verify": "npm run build && npm run check && npm test",
+    "package": "npm run verify && node scripts/package.mjs"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "4.0.0"
+  }
+}
