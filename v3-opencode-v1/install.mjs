@@ -8,8 +8,8 @@ const HELP=`Pulso · instalación global para OpenCode v1
   node install.mjs [--dry-run]
   node install.mjs uninstall [--dry-run]
 
-Requiere Node.js 22+ y OpenCode v1 detectable en PATH. No instala VS Code ni OpenCode v2.
-El instalador solo administra recursos de Pulso; no modifica configuración del host.`;
+Requiere Node.js 22+. Diseñado para OpenCode v1; no valida el binario en PATH. No instala VS Code ni OpenCode v2.
+Registra el plugin y default_agent en la configuración del host; preserva entradas ajenas y respalda cambios.`;
 
 export function main(args=process.argv.slice(2)){
   if(Number(process.versions.node.split('.')[0])<22)throw new Error('Pulso requiere Node.js 22 o superior.');
@@ -19,6 +19,8 @@ export function main(args=process.argv.slice(2)){
   const result=remove?uninstall({dryRun}):install({dryRun});
   if(dryRun){console.log('[OK] Vista previa. No se modificó ningún archivo.');console.log(JSON.stringify(result,null,2));return result;}
   console.log(remove?'[OK] Integración OpenCode v1 de Pulso retirada. Los datos del proyecto se conservaron.':'[OK] Pulso instalado para OpenCode v1. Reinicia OpenCode y selecciona pulso como agente principal.');
+  if(result.backup)console.log(`Respaldo: ${JSON.stringify(result.backup)}`);
+  console.log(remove?'Configuración: integración retirada; default_agent previo restaurado cuando procede.':'Configuración: plugin registrado y default_agent=pulso.');
   return result;
 }
 export function reportError(error){console.error(`[ERROR] ${error.message}`);process.exitCode=1;}

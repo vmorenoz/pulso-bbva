@@ -48,6 +48,47 @@ test('prepare nunca interpreta corrupción actual como legacy aunque haya tasks'
 test('docs desconocidos sin state se conservan al preparar workspace nuevo',t=>{
   const root=temp(t),homeDir=temp(t);atomicWrite(root,'.pulso/custom.md','Conservar');prepareWorkspace(root,{homeDir});assert.equal(fs.readFileSync(path.join(root,'.pulso/custom.md'),'utf8'),'Conservar');
 });
+test('prepare resumes its own bootstrap after every initial file publication',t=>{
+  for(const file of ['preparation.json','state.json','history.jsonl','project.md','decisions.md','memory.json','project.json']){
+    const root=temp(t),homeDir=temp(t),rename=fs.renameSync;let interrupted=false;
+    atomicWrite(root,'.pulso/custom.md','Conservar');
+    fs.renameSync=(source,dest)=>{const result=rename(source,dest);if(dest===path.join(root,'.pulso',file)&&!interrupted){interrupted=true;throw new Error('bootstrap interrupted');}return result;};
+    try{assert.throws(()=>prepareWorkspace(root,{homeDir}),/bootstrap interrupted/);}finally{fs.renameSync=rename;}
+    const result=prepareWorkspace(root,{homeDir});assert.equal(interrupted,true,file);assert.equal(result.bootstrapRecovered,true,file);
+    assert.equal(validateProject(root).valid,true);assert.equal(fs.existsSync(path.join(root,'.pulso/preparation.json')),false);
+    for(const name of ['project.md','decisions.md','memory.json','project.json'])assert.equal(fs.statSync(path.join(root,'.pulso',name)).isFile(),true);
+    assert.equal(fs.readFileSync(path.join(root,'.pulso/custom.md'),'utf8'),'Conservar');
+    assert.equal(prepareWorkspace(root,{homeDir}).projectId,result.projectId);
+  }
+});
+test('bootstrap resumes across directory and identity registration failures while preserving prior context',t=>{
+  const root=temp(t),homeDir=temp(t),mkdir=fs.mkdirSync;
+  atomicWrite(root,'.pulso/project.md','Contexto confirmado');atomicWrite(root,'.pulso/decisions.md','Decisión previa');
+  fs.mkdirSync=(target,...options)=>{if(target===path.join(root,'.pulso/work'))throw new Error('work directory interrupted');return mkdir(target,...options);};
+  try{assert.throws(()=>prepareWorkspace(root,{homeDir}),/work directory interrupted/);}finally{fs.mkdirSync=mkdir;}
+  const rename=fs.renameSync;fs.renameSync=(source,dest)=>{if(dest.startsWith(homeDir+path.sep))throw new Error('registry interrupted');return rename(source,dest);};
+  try{assert.throws(()=>prepareWorkspace(root,{homeDir}),/registry interrupted/);}finally{fs.renameSync=rename;}
+  const identity=JSON.parse(fs.readFileSync(path.join(root,'.pulso/project.json')));
+  assert.equal(prepareWorkspace(root,{homeDir}).projectId,identity.projectId);
+  assert.equal(fs.readFileSync(path.join(root,'.pulso/project.md'),'utf8'),'Contexto confirmado');
+  assert.equal(fs.readFileSync(path.join(root,'.pulso/decisions.md'),'utf8'),'Decisión previa');
+});
+test('bootstrap marker never authorizes overwriting changed seed data or mixed legacy/work content',t=>{
+  for(const [file,bytes] of [['state.json','{broken'],['project.md','User changes'],['tasks/PULSO-001.json',JSON.stringify(legacy)],['work/KEEP/work.json','keep']]){
+    const root=temp(t),homeDir=temp(t),rename=fs.renameSync;
+    fs.renameSync=(source,dest)=>{if(dest===path.join(root,'.pulso/history.jsonl'))throw new Error('bootstrap interrupted');return rename(source,dest);};
+    try{assert.throws(()=>prepareWorkspace(root,{homeDir}),/bootstrap interrupted/);}finally{fs.renameSync=rename;}
+    atomicWrite(root,`.pulso/${file}`,bytes);
+    assert.throws(()=>prepareWorkspace(root,{homeDir}),/datos conservados/);
+    assert.equal(fs.readFileSync(path.join(root,'.pulso',file),'utf8'),bytes);assert.equal(fs.existsSync(path.join(root,'.pulso/history.jsonl')),false);
+  }
+});
+test('unmarked partial workspaces are not claimed as bootstrap and missing context is reported',t=>{
+  const root=repo(t),homeDir=temp(t),before=fs.readFileSync(path.join(root,'.pulso/state.json'),'utf8');
+  assert.throws(()=>prepareWorkspace(root,{homeDir}),/sin marcador propio/);
+  assert.equal(fs.readFileSync(path.join(root,'.pulso/state.json'),'utf8'),before);assert.equal(fs.existsSync(path.join(root,'.pulso/preparation.json')),false);assert.deepEqual(fs.readdirSync(homeDir),[]);
+  fs.unlinkSync(path.join(root,'.pulso/history.jsonl'));assert.throws(()=>prepareWorkspace(root,{homeDir}));assert.equal(fs.existsSync(path.join(root,'.pulso/history.jsonl')),false);
+});
 test('recognized legacy state migrates with tasks and keeps original state in backup',t=>{
   const root=legacyRepo(t),homeDir=temp(t),original=JSON.stringify({schema_version:1,custom:'retain legacy state'});
   atomicWrite(root,'.pulso/state.json',original);

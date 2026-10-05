@@ -1,4 +1,5 @@
 import test from 'node:test';
+import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -26,18 +27,16 @@ test('external read-only review survives primary/specialist composition without 
   for(const id of ['pulso-explorer','pulso-code-reviewer'])assert.match(files.get(`.opencode/agents/${id}.md`),/<entry>\nPara mode: read_only_review/);
 });
 
-test('external review inherits host directory rules and preserves existing edit/task/tool permissions',()=>{
+test('native role matrix denies LT writes, noncatalog delegation and specialist metadata',()=>{
+  const catalog=JSON.parse(fs.readFileSync(path.join(root,'agents/catalog.json')));
   for(const [name,body] of agents){
-    const primary=name.endsWith('/pulso.md');
-    const permission=body.match(/^---\n[\s\S]*?\npermission:\n([\s\S]*?)\n---/)[1];
-    const expected=['  skill:',`    "*": ${primary?'allow':'deny'}`,'  edit:'];
-    if(primary)expected.push('    "**/.pulso/**": deny');
-    else expected.push('    "**/.pulso/work/**": allow',`    "**/.pulso/project.md": ${name.endsWith('/pulso-explorer.md')?'allow':'deny'}`);
-    for(const tool of pulsoToolNames)expected.push(`  ${tool}: ${primary?'allow':'deny'}`);
-    expected.push('  task:',`    "*": ${primary?'allow':'deny'}`);
-    assert.equal(permission,expected.join('\n'),name);
-    assert.doesNotMatch(permission,/external_directory|  read:|  bash:/,name);
+    const primary=name.endsWith('/pulso.md'),permission=body.match(/^---\n[\s\S]*?\npermission:\n([\s\S]*?)\n---/)[1];
+    assert.doesNotMatch(permission,/external_directory|  read:/);
+    assert.match(permission,/  task:\n    "\*": deny/);
+    if(primary){assert.match(permission,/  edit:\n    "\*": deny/);assert.match(permission,/  bash:\n    "\*": deny/);for(const a of catalog.specialists)assert.match(permission,new RegExp(`"${a.id}": allow`));for(const tool of pulsoToolNames)assert.doesNotMatch(permission,new RegExp(`${tool}: allow`));}
+    else {for(const tool of pulsoToolNames)assert.match(permission,new RegExp(`${tool}: deny`));assert.match(permission,/"bbva-engineering": allow/);for(const prefix of ['.pulso/','**/.pulso/'])for(const file of ['state.json','history.jsonl','memory.json','project.json','work/**/work.json'])assert.ok(permission.includes(`"${prefix}${file}": deny`));assert.ok(permission.includes(`".pulso/project.md": ${name.endsWith('/pulso-explorer.md')?'allow':'deny'}`));}
   }
+  for(const name of ['pulso-executor','pulso-qa-auditor']){const body=files.get(`.opencode/agents/${name}.md`);assert.match(body,/"bbva-apx-testing": allow/);assert.match(body,/"bbva-cells-testing": allow/);assert.match(body,/  bash:\n    "\*": ask/);}
 });
 
 test('distributed init and BBVA guidance exclude external review from preparation and write scope',()=>{

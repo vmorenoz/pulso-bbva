@@ -53,7 +53,7 @@ La tool devuelve un recibo breve con ID, revisión, estado, cambios y siguiente 
 
 Cada evidencia requiere un informe existente, enlaces a IDs existentes y archivos fingerprintados. `done` exige criterios y tareas terminadas cubiertas por evidencia positiva y vigente; la estructura por sí sola no prueba la calidad semántica ni que una afirmación de ejecución sea cierta. Las tareas y los criterios con dependencias no se pueden quitar; los cierres archivados son inmutables.
 
-`pulso_history` devuelve cierres filtrables y limitados. `pulso_work` action `complete_map` es solo para el Work exclusivo de mapeo inicial y también compara revisión.
+`pulso_history` devuelve cierres filtrables y limitados. El mapeo usa las acciones ordinarias tipadas de `pulso_work`: create/update, validate_result y close solo tras aceptación; no existe un cierre automático de mapas.
 
 ## Preparación
 

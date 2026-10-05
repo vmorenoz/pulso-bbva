@@ -47,5 +47,6 @@
     }
   ],
   "evidence": [],
-  "closure": null
+  "closure": null,
+  "acceptanceChanges": []
 }

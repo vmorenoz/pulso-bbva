@@ -104,6 +104,25 @@ test('failed uninstall rolls back removals, current manifest, user config and mo
   const result=uninstall(options(home));assert.equal(backupFiles(home,result).get(`${oc}/agents/pulso.md`),'my edits');assert.equal(config(home).default_agent,undefined);assert.equal(fs.existsSync(path.join(home,manifest)),false);
 });
 
+test('failed install, update and uninstall retain verified backups when resource restoration also fails',t=>{
+  for(const operation of ['install','update','uninstall']){
+    const home=temp(t),agent=`${oc}/agents/pulso.md`,configuration=`${oc}/opencode.jsonc`;
+    if(operation!=='install')install(options(home));
+    put(home,agent,'only customized copy');
+    if(operation!=='uninstall')put(home,configuration,{...(operation==='update'?config(home):{}),default_agent:'build'});
+    const rename=fs.renameSync;let injected=false,error;
+    fs.renameSync=(from,to)=>{
+      if(to===path.join(fs.realpathSync(home),configuration)&&!injected){injected=true;throw new Error('initial publication failure');}
+      if(injected&&to===path.join(fs.realpathSync(home),agent))throw new Error('persistent restore failure');
+      return rename(from,to);
+    };
+    try{assert.throws(()=>operation==='uninstall'?uninstall(options(home)):install(options(home)),failure=>{error=failure;return /rollback incompleto.*persistent restore failure/.test(failure.message);});}
+    finally{fs.renameSync=rename;}
+    assert.equal(injected,true,operation);assert.match(error.message,/Respaldo conservado: .*index\.json/);
+    assert.equal(backupFiles(home,error).get(agent),'only customized copy',operation);
+  }
+});
+
 test('invalid JSONC, duplicate keys, invalid manifests and symlinks fail before writes',t=>{
   for(const text of ['{"plugin":["one" "two"]}','{"plugin":[],"plugin":["x"]}','{"mcp":[]}','{"default_agent":{"custom":true}}']){
     const home=temp(t);put(home,`${oc}/opencode.jsonc`,text);const before=snapshot(home);assert.throws(()=>install(options(home)),/inválid|duplicadas/);assert.deepEqual(snapshot(home),before);
@@ -180,4 +199,37 @@ test('install appends to JSONC without dropping array comments or mistaking nest
   }`);
   install(options(home));assert.match(read(home,`${oc}/opencode.jsonc`),/preserve inside array/);assert.equal(config(home).agent.custom.default_agent,'nested');
   uninstall(options(home));assert.match(read(home,`${oc}/opencode.jsonc`),/preserve inside array/);assert.equal(config(home).default_agent,previous);assert.deepEqual(config(home).plugin,['first','last']);
+});
+
+test('plugin tuples preserve foreign options and comments through install and uninstall',t=>{
+  const home=temp(t),tuple='["foreign", {"items": [1, 2], /* nested options */ "enabled": true}]';
+  put(home,`${oc}/opencode.jsonc`,`{"plugin":[${tuple},"other",],}`);
+  install(options(home));assert.ok(read(home,`${oc}/opencode.jsonc`).includes(tuple));
+  uninstall(options(home));assert.ok(read(home,`${oc}/opencode.jsonc`).includes(tuple));
+  assert.deepEqual(config(home).plugin,[['foreign',{items:[1,2],enabled:true}],'other']);
+});
+
+test('tuple cleanup uses outer commas for first, middle, last and sole plugin entries',t=>{
+  const owned='["./plugins/pulso-codegraph.mjs", {"nested": {"a": 1, "b": [2, 3]}}]';
+  const foreign='["foreign", {"values": [1, 2], "nested": {"keep": true}}]';
+  for(const array of [`${owned}, /* first */ ${foreign}, "other"`,`${foreign}, /* middle */ ${owned}, "other",`,`${foreign}, "other", /* last */ ${owned}`,`/* sole */ ${owned},`]){
+    const home=temp(t);put(home,`${oc}/opencode.jsonc`,`{"plugin":[${array}],}`);
+    uninstall(options(home));assert.deepEqual(config(home).plugin,array.includes('foreign')?[['foreign',{values:[1,2],nested:{keep:true}}],'other']:[]);
+    assert.match(read(home,`${oc}/opencode.jsonc`),/\/\* (first|middle|last|sole) \*\//);
+  }
+});
+
+test('a preexisting Pulso tuple remains borrowed without duplicate insertion or option changes',t=>{
+  const home=temp(t),plugin=['./plugins/pulso/index.mjs',{custom:{values:[1,2]}}];
+  put(home,`${oc}/opencode.jsonc`,{plugin:[plugin]});
+  install(options(home));install(options(home));
+  assert.deepEqual(config(home).plugin,[plugin]);assert.equal(JSON.parse(read(home,manifest)).pluginConfig.entry,plugin[0]);
+  uninstall(options(home));assert.deepEqual(config(home).plugin,[plugin]);
+});
+
+test('malformed plugin tuples still fail before changing any files',t=>{
+  for(const plugin of [[['foreign']], [['foreign',null]], [['foreign',[]]], [[1,{}]], [['foreign',{},'extra']]]){
+    const home=temp(t);put(home,`${oc}/opencode.jsonc`,{plugin});const before=snapshot(home);
+    assert.throws(()=>install(options(home)),/plugin inválido/);assert.deepEqual(snapshot(home),before);
+  }
 });

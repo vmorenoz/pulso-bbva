@@ -26,7 +26,7 @@
         "type": "string",
         "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
       },
-      "minItems": 0
+      "minItems": 1
     },
     "agent": {
       "enum": [
@@ -53,11 +53,6 @@
         "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?![A-Za-z]:)[^\\u0000]+$"
       },
       "minItems": 0
-    },
-    "template": {
-      "type": "string",
-      "minLength": 1,
-      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?![A-Za-z]:)[^\\u0000]+$"
     },
     "output": {
       "type": "string",
@@ -104,6 +99,21 @@
         "minLength": 1
       },
       "minItems": 0
+    },
+    "templateId": {
+      "enum": [
+        "project",
+        "research",
+        "exploration",
+        "plan",
+        "review",
+        "implementation",
+        "evidence",
+        "ui-review",
+        "spec",
+        "delivery",
+        "decision"
+      ]
     }
   },
   "required": [
@@ -115,7 +125,7 @@
     "agent",
     "objective",
     "inputs",
-    "template",
+    "templateId",
     "output",
     "writeScope",
     "resources",

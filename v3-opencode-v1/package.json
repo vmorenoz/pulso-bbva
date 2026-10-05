@@ -1,6 +1,6 @@
 {
   "name": "pulso",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "private": true,
   "description": "Tools semánticas y orquestación nativa para OpenCode v1; core local, sin runtime propio.",
   "type": "module",
