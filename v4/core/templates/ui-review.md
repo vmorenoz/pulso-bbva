@@ -1,6 +1,6 @@
 # UI y accesibilidad · {{work-id}}
 <!-- template: ui-review@1.0 -->
-Guía para resultado inline; omitir secciones irrelevantes, sin tabla/documento obligatorio.
+Guía para documento solicitado; omitir secciones irrelevantes, sin tabla obligatoria. El retorno en conversación usa las tres secciones de result.md.
 ## Alcance y entorno
 {{Pantallas, flujo, versión, viewport, datos sintéticos y herramientas realmente disponibles.}}
 ## Evidencia visual y funcional

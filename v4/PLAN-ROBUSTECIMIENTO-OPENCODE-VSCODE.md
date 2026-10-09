@@ -83,3 +83,21 @@ Implementadas las fases. La revisión independiente motivó tres precisiones obl
 Verificaciones satisfactorias: builds de ambos adaptadores, `npm run check`, `npm run smoke:happy`, empaquetado de ambos y `npm run verify:packages`; happy path también sobre cores extraídos. Sin suites de conversaciones simuladas. Aceptación conversacional, activación visual y comportamiento continuo quedan para las pruebas reales del usuario.
 
 Tras autorización explícita adicional del usuario se instaló 4.1.0 en su OpenCode global y extensión local VS Code del perfil predeterminado. Recibo installer: complete, opencode configured 4.1.0 y vscode installed 4.1.0. Confirmado package instalado OpenCode, hash de plugin igual al stage y CLI VS Code `pulso-local.pulso@4.1.0`. Reiniciar OpenCode y recargar ventana VS Code para cargar el código nuevo en sesiones activas.
+
+## Simplificación de comunicación 4.1.1
+
+El usuario solicita inputs/outputs naturales en Markdown tras observar un encargo excesivo para aumentar un patch. Sustituye la transmisión del envelope por `specialistPrompt` con Objetivo, Alcance, Condiciones y Entrega. El especialista responde Resultado, Cambios o hallazgos y Comprobación y pendientes; no recibe ni devuelve JSON, bases, revisiones o hashes administrativos. Pulso conserva internamente el encargo y la base originales, y `accept_result` admite reporte compacto con Markdown literal; core deriva identidad. El formato JSON canónico anterior permanece compatible.
+
+Recursos descriptivos como «CodeGraph MCP» ya no generan rutas de lectura inexistentes. Documentos explícitamente encargados conservan una guía confiable enlazada en las instrucciones instaladas, sin exigir su lectura para cada respuesta. Aplicación común a los dos adaptadores, sin parser semántico que convierta prosa en PASS ni permisos. Builds y happy path verifican generación, incorporación literal e identidad sobre core real; la conversación del host requiere prueba real.
+
+## Continuidad por objetivo en 4.1.1
+
+La sesión `ses_edece9cefffefMgQbuOrHqfS9y` muestra que reducir el formato no basta: el LT añadió prohibiciones internas y terminó pidiendo permiso para corregir/publicar el mismo cambio autorizado. Se fijó continuidad por objetivo, reparación de fallos CI dentro del alcance vigente, conservación acotada de autorización de publicación y espera del consumidor solo tras éxito/publicación real. No esperar CI de una corrección que permanece local si subirla está autorizado. Los especialistas respetan su alcance y Pulso coordina la siguiente parte. Saludos/status aislados no reanudan por mera existencia de foco.
+
+task.add permite omitir evidenceIds y summary, materializados por core sin debilitar el estado persistido. Reintentos deben recuperar el encargo original, no reescribir hashes/texto de aceptación. Detalle: `AUDITORIA-CONTINUIDAD-2026-10-09.md`.
+
+### Instalación real 4.1.1
+
+Instalada tras petición explícita del usuario en OpenCode global y VS Code local/perfil predeterminado. Instalador: complete; OpenCode configured 4.1.1; VS Code installed 4.1.1. Verificados package.json del runtime, coincidencia SHA-256 de acceptance.mjs con el stage y presencia de instrucciones Markdown/continuidad en el agente instalado. La CLI VS Code confirma pulso-local.pulso@4.1.1.
+
+Backups: `~/.pulso/backups/opencode-7316119b-d639-4635-bb13-79b80a48475c` y `~/.pulso/backups/vscode-a1631750-6503-4ac7-82f0-f3104054042e`. Reiniciar OpenCode y recargar la ventana VS Code para cargar la actualización; instalación no acredita prueba conversacional real.

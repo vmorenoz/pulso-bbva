@@ -1,5 +1,6 @@
 /** Incorporation only: native hosts still own invocation, permissions and sessions. */
 import {randomUUID} from 'node:crypto';
+import path from 'node:path';
 import {acceptanceBasis,closeWork,completionReadiness,readWork,saveWork,validateDelegation,validateResult,validateResultIdentity} from './artifacts.mjs';
 import {exists,fingerprint,now,safePath,sha256,writeJSON} from './fs.mjs';
 import {workReceipt} from './receipts.mjs';
@@ -9,6 +10,33 @@ const distinct=(values,label)=>{if(new Set(values).size!==values.length)throw ne
 const union=(tasks,key)=>[...new Set(tasks.flatMap(task=>task[key]))];
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 const digest=value=>sha256(JSON.stringify(canonical(value)));
+/** Specialist wire text only; canonical metadata stays with the orchestrator. */
+function specialistPrompt(root,delegation,resourcePaths){
+  const seen=new Set([delegation.objective]);
+  const conditions=[...delegation.constraints,...delegation.acceptance].filter(value=>{if(seen.has(value))return false;seen.add(value);return true;});
+  const paths=(label,values)=>values.length?`${label}:\n${[...new Set(values)].map(value=>`- ${value}`).join('\n')}`:null;
+  return [
+    '## Objetivo',
+    `Encargo: ${delegation.id} · workId: ${delegation.workId} · ${delegation.taskIds.length===1?'taskId':'taskIds'}: ${delegation.taskIds.join(', ')}`,
+    delegation.objective,
+    '## Alcance',
+    `Workspace: ${path.resolve(root)}`,
+    paths('Inputs (relativos al workspace)',delegation.inputs),
+    paths('Recursos de lectura (relativos al workspace)',resourcePaths.filter(p=>!delegation.inputs.includes(p)&&!delegation.writeScope.includes(p))),
+    paths('Alcance de escritura (relativo al workspace)',delegation.writeScope)||'Alcance de escritura: ninguno.',
+    '## Condiciones',
+    conditions.length?conditions.map(value=>`- ${value}`).join('\n'):'Sin condiciones adicionales.',
+    '## Entrega',
+    delegation.output==='conversation'?null:`Archivo de salida (relativo al workspace): ${delegation.output}`,
+    'Responde en Markdown con las secciones «## Resultado», «## Cambios o hallazgos» y «## Comprobación y pendientes». Describe el estado en lenguaje natural, los cambios o hallazgos, las comprobaciones realizadas y sus resultados, y las limitaciones o preguntas pendientes.'
+  ].filter(value=>value!==null).join('\n\n');
+}
+/** Never derive identity, checks or permissions from report prose. */
+function normalizeResult(delegation,result){
+  if(!Object.hasOwn(result,'markdown'))return result;
+  const {markdown,...fields}=result;
+  return {schemaVersion:delegation.schemaVersion,delegationId:delegation.id,workId:delegation.workId,workRevision:delegation.workRevision,agent:delegation.agent,artifacts:[],changedFiles:[],checks:[],findings:[],questions:[],limitations:[],suggestedNextStep:null,...fields};
+}
 function currentWork(root,args){
   const work=readWork(root,args.workId,{files:false});
   if(work.revision!==args.expectedRevision){const error=new Error(`Revisión obsoleta; actual=${work.revision}. Releer y reconciliar.`);error.code='REVISION_STALE';error.revision=work.revision;throw error;}
@@ -41,20 +69,22 @@ export function prepareDelegation(root,args,{resourceRoot}={}){
   if(tasks.some(task=>task.agent!==tasks[0].agent))throw new Error('El encargo requiere un único agente asignado');
   if(tasks.some(task=>task.status==='cancelled'))throw new Error('No preparar tareas canceladas');
   const delegation={schemaVersion:1,id:args.delegationId,workId:work.id,workRevision:work.revision,taskIds:[...args.taskIds],agent:tasks[0].agent,objective:args.objective,inputs:[...args.inputs],output:args.output,writeScope:union(tasks,'writeScope'),resources:union(tasks,'resources'),constraints:[...args.constraints],acceptance:union(tasks,'acceptance'),questions:[],templateId:args.templateId};
-  const {readScope}=validateDelegation(root,delegation,{work,globalRoot:resourceRoot,catalogPath:'agents/catalog.json',canonical:true});
+  const {readScope,resourcePaths}=validateDelegation(root,delegation,{work,globalRoot:resourceRoot,catalogPath:'agents/catalog.json',canonical:true});
   const basis=acceptanceBasis(work,{criterionIds:union(tasks,'criterionIds'),taskIds:args.taskIds});
-  return {delegation,acceptanceBasis:basis,hostContext:{projectRoot:root,resourceRoot,readBase:root,cwd:root,paths:{inputs:delegation.inputs.map(p=>safePath(root,p)),output:delegation.output==='conversation'?null:safePath(root,delegation.output),writeScope:delegation.writeScope.map(p=>safePath(root,p)),readScope:readScope.map(p=>safePath(root,p))}},note:'Lectura sin reserva ni ejecución. Inputs son rutas accesibles autorizadas; incluir texto conversacional real en objective/constraints o en un input autorizado. output=conversation es retorno inline, sin archivo ni permiso de escritura del especialista; core conserva su propio documento al incorporar.'};
+  return {delegation,acceptanceBasis:basis,specialistPrompt:specialistPrompt(root,delegation,resourcePaths),hostContext:{projectRoot:root,resourceRoot,readBase:root,cwd:root,paths:{inputs:delegation.inputs.map(p=>safePath(root,p)),output:delegation.output==='conversation'?null:safePath(root,delegation.output),writeScope:delegation.writeScope.map(p=>safePath(root,p)),readScope:readScope.map(p=>safePath(root,p))}},note:'Enviar specialistPrompt al especialista; conservar delegation, acceptanceBasis y hostContext en el orquestador. Lectura sin reserva ni ejecución. Inputs son rutas accesibles autorizadas; incluir texto conversacional real en objective/constraints o en un input autorizado. output=conversation es retorno inline, sin archivo ni permiso de escritura del especialista; core conserva su propio documento al incorporar.'};
 }
 
 export function acceptResult(root,args,{resourceRoot}={}){
   validateToolInput('pulso_work',{...args,action:'accept_result'});
+  const reported=args.result;
+  args={...args,result:normalizeResult(args.delegation,reported),acceptedTaskIds:args.acceptedTaskIds??[]};
   const work=currentWork(root,args);
   validateResultIdentity(args.delegation,args.result);
   if(args.delegation.workId!==work.id)throw new Error('El encargo no corresponde a workId');
   distinct(args.acceptedTaskIds,'Tareas aceptadas');
   if(args.acceptedTaskIds.some(id=>!args.delegation.taskIds.includes(id)))throw new Error('acceptedTaskIds fuera del encargo');
   if(args.acceptedTaskIds.length&&args.result.status!=='completed')throw new Error('Sólo un resultado completed puede acreditar tareas realizadas; otros retornos requieren acceptedTaskIds vacío');
-  const payload={delegation:args.delegation,acceptanceBasis:args.acceptanceBasis,result:args.result,acceptedTaskIds:args.acceptedTaskIds,summary:args.summary};
+  const payload={delegation:args.delegation,acceptanceBasis:args.acceptanceBasis,result:args.result,acceptedTaskIds:args.acceptedTaskIds,summary:args.summary,...(Object.hasOwn(reported,'markdown')?{markdown:reported.markdown}:{})};
   const requestHash=digest(payload),previous=(work.results||[]).find(r=>r.cycle===work.cycle&&r.delegationId===args.delegation.id);
   if(previous){
     if(previous.requestHash!==requestHash)throw new Error('Encargo ya aceptado con otro contenido; el resultado histórico es inmutable');

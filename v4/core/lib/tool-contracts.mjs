@@ -32,6 +32,8 @@ function observedEvidenceSchema(shape){
 }
 
 // Reuse persisted contracts, adding native non-empty and execution checks.
+// task.add inherits optional evidenceIds/summary from work-update; core fills
+// their defaults before validating Work against the complete persisted task shape.
 const mutationInput = clone(persistedSchema('work-update'));
 mutationInput.properties.actions.items.anyOf = mutationInput.properties.actions.items.anyOf.map(shape=>{
   if(shape.properties.type.const==='evidence.add')shape.properties.evidence=observedEvidenceSchema(shape.properties.evidence);
@@ -42,6 +44,11 @@ mutationInput.properties.actions.items.anyOf = mutationInput.properties.actions.
 });
 export const mutationSchema = mutationInput.properties.actions.items;
 const createInput = persistedSchema('work-create');
+const resultInput = clone(persistedSchema('result'));
+const compactResultInput = object({
+  ...Object.fromEntries(['status','summary','artifacts','changedFiles','checks','findings','questions','limitations','suggestedNextStep'].map(key=>[key,clone(resultInput.properties[key])])),
+  markdown:{type:'string',minLength:1,pattern:'\\S'}
+},['status','summary','markdown']);
 const workspaceActions = {
   prepare:action('prepare'),
   status:action('status',{...readPage,status:enumeration(['pending','in_progress','blocked','paused'])}),
@@ -58,8 +65,8 @@ const workActions = {
   },['workId','taskIds','delegationId','objective','inputs','output','constraints','templateId']),
   accept_result:action('accept_result',{
     ...workRef,delegation:clone(persistedSchema('delegation')),acceptanceBasis:clone(persistedSchema('evidence').properties.acceptanceBasis),
-    result:clone(persistedSchema('result')),acceptedTaskIds:{type:'array',items:id,minItems:0,maxItems:50},summary:text(2000)
-  },['workId','expectedRevision','delegation','acceptanceBasis','result','acceptedTaskIds','summary']),
+    result:{anyOf:[resultInput,compactResultInput]},acceptedTaskIds:{type:'array',items:id,minItems:0,maxItems:50,description:'Selección explícita obligatoria para completed; para otros estados se omite o es [].'},summary:text(2000)
+  },['workId','expectedRevision','delegation','acceptanceBasis','result','summary']),
   accept_delivery:action('accept_delivery',{
     ...workRef,summary:text(2000),criterionIds:{type:'array',items:id,minItems:1,maxItems:50},
     source:object({text:text(8000),messageRef:text(2000)},['text']),limitations:{type:'array',items:text(1000),maxItems:30}
@@ -97,7 +104,7 @@ function descriptor(name,displayName,modelDescription,actions,mutatingActions=[]
 }
 export const toolContracts={
   pulso_workspace:descriptor('pulso_workspace','Workspace','Prepara, consulta, valida, sincroniza o recupera metadatos Pulso. status devuelve data.works con items completos y nextCursor; sigue hasMore. Los cursores caducan al cambiar el índice o los filtros.',workspaceActions,['prepare','sync','recover']),
-  pulso_work:descriptor('pulso_work','Trabajo','Consulta o actualiza un objetivo. get devuelve readiness completo, páginas por section y acceptanceBasis; sigue nextCursor. prepare_delegation es lectura y deriva encargo, base previa y hostContext. accept_result incorpora resultado revisado y acceptedTaskIds con base previa vigente; no satisface criterios. accept_delivery conserva aceptación manual declarada e intenta cierre devolviendo todos los impedimentos; no completa tareas. Las mutaciones requieren revisión actual. validate_result valida sin escribir. evidence.add requiere observación y hashes reales; calcular hashes no prueba ejecución.',workActions,['create','update','block','close','reopen','accept_result','accept_delivery']),
+  pulso_work:descriptor('pulso_work','Trabajo','Consulta o actualiza un objetivo. get devuelve readiness completo, páginas por section y acceptanceBasis; sigue nextCursor. prepare_delegation devuelve specialistPrompt Markdown para task y delegation, acceptanceBasis y hostContext internos para el orquestador. El especialista responde en Markdown; Pulso extrae los campos técnicos mínimos para accept_result: status, summary, markdown literal y detalles opcionales, o resultado canónico legacy. completed requiere acceptedTaskIds explícitos; otros estados admiten omitirlos. Incorpora el resultado revisado con base previa vigente; no satisface criterios ni interpreta prosa como evidencia o permisos. accept_delivery conserva aceptación manual declarada e intenta cierre devolviendo todos los impedimentos; no completa tareas. Las mutaciones requieren revisión actual. validate_result valida sin escribir. evidence.add requiere observación y hashes reales; calcular hashes no prueba ejecución.',workActions,['create','update','block','close','reopen','accept_result','accept_delivery']),
   pulso_history:descriptor('pulso_history','Historial','Consulta cierres con fechas, ciclos, resumen completo, limitaciones y referencias. data.items se pagina con limit/cursor; sigue hasMore y nextCursor. Cambiar historial o filtros invalida el cursor.',null,[],historySchema),
   pulso_context:descriptor('pulso_context','Contexto','Consulta o registra contexto, preferencias y aprendizajes. read devuelve entradas completas, revisions y nextCursor. Las escrituras exigen scope y expectedRevision; preferencias y aprendizajes requieren source explícito. summary es una vista limitada a 8000 caracteres.',contextActions,['set_context','set_preference','remove_preference','add_learning'])
 };
@@ -135,6 +142,10 @@ export function validateToolInput(definitionOrName,input){
     if(!shape)throw new Error(`Acción no admitida: ${String(input.action)}`);
     validateInput(shape,input);
   }else validateInput(descriptor.inputSchema,input);
+  if(name==='pulso_work'&&input.action==='accept_result'){
+    if(input.result.status==='completed'&&!Object.hasOwn(input,'acceptedTaskIds'))throw new Error('completed requiere acceptedTaskIds explícitos');
+    if(input.result.status!=='completed'&&input.acceptedTaskIds?.length)throw new Error('Sólo completed admite acceptedTaskIds no vacío');
+  }
   if(name==='pulso_history'&&input.since&&input.until&&Date.parse(input.since)>Date.parse(input.until))throw new Error('since debe ser anterior o igual a until');
   return input;
 }

@@ -1,10 +1,12 @@
 # Evidencia · {{work-id}}
-<!-- template: evidence@1.0; guía de observación, omitir apartados irrelevantes -->
+<!-- template: evidence@1.1; informe formal solo cuando lo exige el criterio;
+observador con herramientas y permisos efectivos, no plantilla del retorno habitual -->
 ## Afirmación y base comprobada
 {{Criterios/tareas vinculados y comportamiento que permite concluir la comprobación.
 Scope, versión/commit/rama y cambios locales pertinentes; checkedAt real de observación.
-Conservar acceptanceBasis recibida antes de observar (get para evidence.add): core deriva
-huellas de criterios/tareas; no calcularlas ni obtener otras después para acreditar el pasado.}}
+Pulso conserva acceptanceBasis de get antes de observar para evidence.add; no la transmite
+al especialista. Core deriva huellas de criterios/tareas; no calcularlas ni obtener otras
+después para acreditar el pasado.}}
 
 ## Método y resultado observado
 {{executed/manual/static/not_run; pass/fail/blocked/not_run. Comando exacto, cwd inequívoco,

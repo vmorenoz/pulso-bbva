@@ -38,7 +38,26 @@ Canonical `.pulso/work/ID/work.json` is authoritative; state and history are pro
 - `prepare_delegation` supports `output:"conversation"` for inline results: `hostContext.paths.output` is null and `writeScope:[]` is allowed. `readBase` and `cwd` are the trusted project root. File artifacts still require authorized existing paths.
 - `completedTaskIds` retains completion within the current cycle even after a task returns to pending or evidence is invalidated. Such tasks cannot be cancelled or deleted to bypass closure. Reopen starts a new cycle and preserves historical results.
 
-The prompt contract and runtime release are 4.1.0; persisted `schemaVersion:1` is unchanged. Older runtimes are not guaranteed to understand the new optional fields.
+### 4.1.1 specialist Markdown contract
+
+The prompt contract and runtime release are **4.1.1**; persisted `schemaVersion:1` is unchanged. Older runtimes are not guaranteed to understand the new optional fields.
+
+`prepare_delegation` returns a ready-to-send `specialistPrompt` with four headings: `## Objetivo`, `## Alcance`, `## Condiciones`, `## Entrega`. Only specialist communication uses Markdown. The coordinator retains the original `delegation`, `acceptanceBasis` and trusted `hostContext`; tools and persistence continue using validated JSON, revisions, scopes and integrity hashes. The prompt includes the workspace and authorized relative paths, without internal bases, hashes or JSON schema paths. Inputs must exist; descriptive task resource labels grant no read access and are excluded from the prompt and `readScope`.
+
+Short input/output example from the real smoke: the input is the existing authorized `request.md` asking for a private ESM fixture at version 1.0.0 with `sum(2,3)=5`; output is `conversation`, with writes scoped to `fixture`. The script produces a report in this shape, populated from its actual child process:
+
+```markdown
+## Resultado
+Completado: fixture generado y comprobado con Node.
+## Cambios o hallazgos
+- fixture/package.json, fixture/index.mjs, fixture/check.mjs
+- fixture/observation.json
+## Comprobación y pendientes
+Node check.mjs: exit 0; Verified private ESM package 1.0.0 and sum(2,3)=5.
+Native agent/conversation NOT_RUN.
+```
+
+The parent extracts technical `status` and `summary`, attaches the literal report as `result.markdown`, and may include observed artifacts/checks. `accept_result` requires explicit `acceptedTaskIds` for `status:"completed"` (including `[]` when accepting no tasks). Core does not parse prose to infer completion, checks or accepted tasks. It normalizes compact results using identity from the **original delegation**, preserves Markdown literally in its JSON report and validates the original acceptance basis. Accepting a task still does not satisfy criterion evidence or user acceptance.
 
 ## Native integration and compatibility evidence
 
@@ -86,13 +105,36 @@ npm run verify:packages         # existing archives; never installs or downloads
 # A single archive can be selected: npm run verify:packages -- opencode
 ```
 
-The happy path calls the real `prepareWorkspace` and `executeTool` APIs with a disposable workspace and an explicit temporary home. It creates a Work/task in default evidence mode, obtains `prepare_delegation` with `output:"conversation"` and a criterion `acceptanceBasis` before observation, generates a private ESM fixture package and runs a real Node process checking its manifest and exported function. Its JSON output includes the actual executable/argv/cwd, stdout/stderr, exit code, observation timestamp and SHA-256 values. It incorporates the reported result through `accept_result` with `acceptedTaskIds`, confirms the task is done and retained in `completedTaskIds` but the criterion is still pending, adds executed criterion evidence through `evidence.add`, checks readiness, closes and reads history. Final workspace validation checks evidence freshness. Temporary workspace and home are removed in `finally`; only the JSON output remains. Set `PULSO_SMOKE_TMP` to an existing temporary parent to choose its location.
+The happy path calls the real `prepareWorkspace` and `executeTool` APIs with a disposable workspace and an explicit temporary home. It creates a Work/task in default evidence mode, obtains `prepare_delegation` with `output:"conversation"` and a criterion `acceptanceBasis` before observation, generates a private ESM fixture package and runs a real Node process checking its manifest and exported function. Its JSON output includes the actual executable/argv/cwd, stdout/stderr, exit code, observation timestamp, SHA-256 values, specialist prompt and literal Markdown report. It checks the four prompt headings, authorized input/write/read scopes and exclusion of descriptive resource labels and internal metadata. It incorporates the compact Markdown result through `accept_result` with explicit `acceptedTaskIds`, reads the persisted report to verify literal Markdown, normalized original identity (after an overview revision change), original basis and report hash, confirms the task is done and retained in `completedTaskIds` but the criterion is still pending, adds executed criterion evidence through `evidence.add`, checks readiness, closes and reads history. Final workspace validation checks evidence freshness. Temporary workspace and home are removed in `finally`; only the JSON output remains. Set `PULSO_SMOKE_TMP` to an existing temporary parent to choose its location.
 
 The result's role is the contract's assigned role; the work is performed by the local script, **not a native agent invocation**. No host, conversation, user acceptance or command is mocked. `accept_delivery` and manual/conversational acceptance are **NOT_RUN**. The smoke does not establish continuity, reassignment, native parallelism or natural-language acceptance in either host.
 
 `verify:packages` checks archive SHA-256 sidecars, extracts into a disposable directory, checks inventories/hashes/resources/imports/BBVA bytes against the current build, loads the extracted contracts and runs the happy path against each extracted core. OpenCode also loads the real bundled SDK and constructs native schemas without activating a host. VS Code checks native binding descriptors and extension syntax; activation requires a real VS Code host. Missing/stale/invalid archives fail explicitly. Packaging uses the locally installed VSCE (or `PULSO_VSCE_PATH`), never an automatic download. macOS uses BSD tar without GNU-specific metadata flags; archive byte reproducibility across platforms is not promised.
 
-### E6 integration observation · 2026-10-09
+### 4.1.1 patch verification · 2026-10-09
+
+Executed on macOS with Node v24.18.0. Source, installer and both runtime manifests are **4.1.1**; persisted schemaVersion remains **1**. Package manifest and npm lock release fields were updated without changing dependencies; adapter builders also implement the Markdown communication changes. The pnpm files were not edited.
+
+| Command | Exit | Observed result |
+| --- | --- | --- |
+| `npm run build:opencode` | 0 | 155 generated files |
+| `npm run build:vscode` | 0 | 80 generated files |
+| `npm run check` | 0 | Both inventories/hashes and five BBVA resources per adapter pass |
+| `npm run smoke:happy` | 0 | Real Node fixture exits 0; compact Markdown, original identity/basis, scope, done, readiness and history assertions pass |
+| `npm run package:opencode` | 0 | 4.1.1 tar archive and SHA-256 sidecar generated |
+| `npm run package:vscode` | 0 | 4.1.1 VSIX and SHA-256 sidecar generated with local VSCE |
+| `npm run verify:packages` | 0 | Both archive hashes/inventories and extracted-core happy paths pass; both runtimes report 4.1.1 |
+
+Package SHA-256 values:
+
+```text
+cd7b17c1582b734304f33a9a8004867759c28012402ba4a7c9a0427663731669  artifacts/pulso-opencode-4.1.1.tar.gz
+b679fbb5f2cae3de44971c1b6e53369749231ce861967859d09469dd5a9cb6e0  artifacts/pulso-4.1.1.vsix
+```
+
+The fixture's actual stdout is `Verified private ESM package 1.0.0 and sum(2,3)=5`, with empty stderr. No native conversation/model simulation or legacy suite was run for this patch. After package verification, the user authorized real installation: OpenCode's global runtime and the default local VS Code profile were updated to 4.1.1, with installed versions and OpenCode source hashes checked. See the installation record in [the master plan](PLAN-ROBUSTECIMIENTO-OPENCODE-VSCODE.md#instalación-real-411). The user subsequently reported substantially better behavior in a real session; this is qualitative user feedback, not an automated conversational acceptance result.
+
+### Historical 4.1.0 E6 integration observation · 2026-10-09
 
 Runtime package version: **4.1.0** (both adapters read provenance from the loaded package manifest); persisted schemaVersion remains **1**. Executed here on macOS with **Node v24.18.0 / npm 11.16.0**; declared minimum remains Node >=22, not additionally exercised in this run. The npm lock changes only the root release version; dependencies and the user-owned pnpm lock remain unchanged.
 
@@ -108,14 +150,14 @@ Runtime package version: **4.1.0** (both adapters read provenance from the loade
 | `node --check` (five integration scripts, two adapter builders and two generated VS Code entry/contract modules) | 0 | Syntax checks |
 | `git diff --check` | 0 | No whitespace errors |
 
-The E5 textual isolation defect is corrected in the VS Code README and generated boundary using neutral flat-input terminology; the guard is unchanged. Current artifacts:
+The E5 textual isolation defect is corrected in the VS Code README and generated boundary using neutral flat-input terminology; the guard is unchanged. Historical 4.1.0 artifacts:
 
 ```text
 9d94c9eae24d449e8f5403915ba7cb521793cd84586a1705be91d575771ae45b  artifacts/pulso-opencode-4.1.0.tar.gz
 96d9e8efac87877cb63fb4cad6a37a6568670a9e8df2e25b9031660d296d644f  artifacts/pulso-4.1.0.vsix
 ```
 
-The installer is version 4.1.0 and selects the matching VSIX by default. Following explicit user authorization, installation completed in the real global OpenCode environment and the default local VS Code profile; the installed package and VS Code CLI confirm 4.1.0. See [delivery details](ENTREGA-4.1.0.md) for verification and backup references. Older 4.0.0 archives are historical, not this delivery. Restart OpenCode and reload the VS Code window to load the update. Real conversation acceptance and `accept_delivery` remain NOT_RUN; the positive smoke uses evidence mode without fabricating a user.
+The installer for that delivery was version 4.1.0 and selected the matching VSIX by default. Following explicit user authorization, installation completed in the real global OpenCode environment and the default local VS Code profile; the installed package and VS Code CLI confirmed 4.1.0. See [delivery details](ENTREGA-4.1.0.md) for verification and backup references. This historical installation does not establish installation or host acceptance of 4.1.1. Real conversation acceptance and `accept_delivery` remain NOT_RUN; the positive smoke uses evidence mode without fabricating a user.
 
 Required manual host acceptance still includes agent/skill visibility, four callable tools, native approval denial/cancellation, intended-project delegation, observed evidence close/reopen and installation recovery. Record host version and harness separately; mock tests and package extraction cannot establish real conversation behavior or universal compatibility. Prompt restrictions are not a filesystem sandbox, and successful plugin configuration alone does not prove a native conversation was tested.
 

@@ -72,6 +72,8 @@ export function applyWorkMutation(root,input) {
         keys(action,['type','task']);
         assertID(action.task?.id);if(candidate.tasks.some(t=>t.id===action.task.id))throw new Error(`Tarea duplicada: ${action.task.id}`);
         const task=structuredClone(action.task);
+        if(task.evidenceIds===undefined)task.evidenceIds=[];
+        if(task.summary===undefined)task.summary='';
         task.title=text(task.title,'task.title',{max:300});
         candidate.tasks.push(task);candidate.completedTaskIds=completedTaskIds(candidate);changes.push(`${task.id} agregada`);break;
       }

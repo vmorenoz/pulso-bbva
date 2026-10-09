@@ -1,20 +1,11 @@
 {
-  "schemaVersion": 1,
-  "delegationId": "D-1",
-  "workId": "EXAMPLE-1",
-  "workRevision": 1,
-  "agent": "pulso-planner",
   "status": "blocked",
-  "summary": "Falta la decisión de alcance indicada en questions.",
-  "artifacts": [],
-  "changedFiles": [],
-  "checks": [],
-  "findings": [],
+  "summary": "Falta decidir el comportamiento esperado para el caso inválido.",
+  "markdown": "## Resultado\nBloqueado: falta decidir el comportamiento esperado para el caso inválido.\n\n## Cambios o hallazgos\nEl encargo no define cómo tratar ese caso; no se han realizado cambios.\n\n## Comprobación y pendientes\nNo se ejecutaron pruebas: falta la decisión de comportamiento. ¿Cuál es el comportamiento esperado para el caso inválido?",
   "questions": [
     "¿Cuál es el comportamiento esperado para el caso inválido?"
   ],
   "limitations": [
     "No se ejecutaron pruebas."
-  ],
-  "suggestedNextStep": "Pulso debe resolver la decisión con el usuario."
+  ]
 }

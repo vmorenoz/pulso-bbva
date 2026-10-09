@@ -12,17 +12,14 @@
     ".pulso/project.md",
     ".pulso/work/EXAMPLE-1/work.json"
   ],
-  "output": ".pulso/work/EXAMPLE-1/plan.md",
-  "writeScope": [
-    ".pulso/work/EXAMPLE-1/plan.md"
-  ],
+  "output": "conversation",
+  "writeScope": [],
   "resources": [
     ".pulso/project.md",
     ".pulso/work/EXAMPLE-1/work.json"
   ],
   "constraints": [
-    "No modificar work.json ni delegar.",
-    "Ejemplo: usar delegation y acceptanceBasis reales de prepare_delegation, con hostContext separado. Resultado inline permitido; no crear plan.md salvo requerimiento expreso."
+    "Proponer un plan breve en conversación, sin crear plan.md."
   ],
   "acceptance": [
     "Referencias reales, dependencias y comprobaciones justificadas."

@@ -30,11 +30,27 @@ export async function happyPath({resourceRoot=fileURLToPath(new URL('../core',im
     const workId=created.workId;
     const get=()=>call('pulso_work',{action:'get',workId,section:'all'});
     let work=await get();
-    await call('pulso_work',{action:'update',workId,expectedRevision:work.revision,actions:[{type:'task.add',task:{id:'T-1',title:'Generate and verify package fixture',criterionIds:['AC-1'],agent:'pulso-executor',status:'in_progress',dependsOn:[],writeScope:['fixture'],resources:[],acceptance:['Generate a private ESM package and execute its check'],evidenceIds:[],summary:'Local script execution; no native specialist invocation'}}]});
-    const prepared=await call('pulso_work',{action:'prepare_delegation',workId,taskIds:['T-1'],delegationId:'D-1',objective:'Generate and check the fixture with a real Node process',inputs:[],output:'conversation',constraints:['Script-driven core integration only; no host or conversation acceptance'],templateId:'implementation'});
+    fs.writeFileSync(path.join(projectRoot,'request.md'),'Generate a private ESM package at version 1.0.0 exporting sum; check sum(2,3)=5 with Node.\n');
+    const resources=['request.md','Local Node execution'];
+    await call('pulso_work',{action:'update',workId,expectedRevision:work.revision,actions:[{type:'task.add',task:{id:'T-1',title:'Generate and verify package fixture',criterionIds:['AC-1'],agent:'pulso-executor',status:'in_progress',dependsOn:[],writeScope:['fixture'],resources,acceptance:['Generate a private ESM package and execute its check']}}]});
+    work=await get();
+    assert.deepEqual(work.tasks.items[0].evidenceIds,[]);
+    assert.equal(work.tasks.items[0].summary,'');
+    const prepared=await call('pulso_work',{action:'prepare_delegation',workId,taskIds:['T-1'],delegationId:'D-1',objective:'Generate and check the fixture with a real Node process',inputs:['request.md'],output:'conversation',constraints:['Script-driven core integration only; no host or conversation acceptance'],templateId:'implementation'});
     assert.equal(prepared.hostContext.cwd,projectRoot);
     assert.equal(prepared.hostContext.readBase,projectRoot);
     assert.equal(prepared.hostContext.paths.output,null);
+    assert.deepEqual(prepared.hostContext.paths.inputs,[path.join(projectRoot,'request.md')]);
+    assert.deepEqual(prepared.hostContext.paths.writeScope,[path.join(projectRoot,'fixture')]);
+    assert.deepEqual(prepared.hostContext.paths.readScope,['fixture','request.md'].map(p=>path.join(projectRoot,p)));
+    assert.deepEqual(prepared.delegation.resources,resources);
+    assert.deepEqual(prepared.specialistPrompt.match(/^## .+$/gm),['## Objetivo','## Alcance','## Condiciones','## Entrega']);
+    assert.ok(prepared.specialistPrompt.includes(`Workspace: ${projectRoot}`));
+    assert.ok(prepared.specialistPrompt.includes('- request.md'));
+    assert.doesNotMatch(prepared.specialistPrompt,/acceptanceBasis|sha256|schemaVersion|workRevision|resourceRoot|\.schema\.json|Local Node execution|```json|"(?:delegation|hostContext)"/);
+    for(const basis of [...prepared.acceptanceBasis.criteria,...prepared.acceptanceBasis.tasks])assert.ok(!prepared.specialistPrompt.includes(basis.sha256));
+    // Advance only overview metadata: incorporation must retain the original identity/basis.
+    await call('pulso_work',{action:'update',workId,expectedRevision:prepared.delegation.workRevision,actions:[{type:'work.set_overview',summary:'Prepared fixture check; awaiting real command observation'}]});
     // Capture criterion basis through the public read API BEFORE the observation.
     work=await get();
     assert.equal(work.hasMore,false);
@@ -65,13 +81,27 @@ console.log('Verified private ESM package 1.0.0 and sum(2,3)=5');
     assert.equal(observed.status,0,JSON.stringify(observation));
     const files=['package.json','index.mjs','check.mjs','observation.json'].map(name=>({path:`fixture/${name}`,sha256:hash(fs.readFileSync(path.join(projectRoot,'fixture',name)))}));
     const {delegation,acceptanceBasis}=prepared;
-    const result={schemaVersion:1,delegationId:delegation.id,workId,workRevision:delegation.workRevision,agent:delegation.agent,status:'completed',summary:'Script generated fixture and real Node check exited 0; no native agent was invoked',artifacts:files.map(file=>file.path),changedFiles:files.map(file=>file.path),checks:[{description:command,status:'pass',evidenceRef:'fixture/observation.json'}],findings:[],questions:[],limitations:['Native agent/conversation NOT_RUN'],suggestedNextStep:null};
+    const markdown=`## Resultado\n\nCompletado: fixture generado y comprobado con Node.\n\n## Cambios o hallazgos\n\n${files.map(file=>`- ${file.path}`).join('\n')}\n\n## Comprobación y pendientes\n\nComando: ${command}\nCwd: ${observation.cwd}\nFecha: ${checkedAt}\nExit code: ${observed.status}\n\nStdout:\n\`\`\`text\n${observed.stdout}\`\`\`\n\nStderr: ${observed.stderr||'(empty)'}\n\nNative agent/conversation NOT_RUN.\n`;
+    // The script is the parent: technical fields come from its real observation,
+    // not a model simulation or a core parser of the Markdown report.
+    const result={status:'completed',summary:'Script generated fixture and real Node check exited 0; no native agent was invoked',markdown,artifacts:files.map(file=>file.path),changedFiles:files.map(file=>file.path),checks:[{description:command,status:'pass',evidenceRef:'fixture/observation.json'}],limitations:['Native agent/conversation NOT_RUN']};
+    assert.ok(work.revision>delegation.workRevision);
     const accepted=await call('pulso_work',{action:'accept_result',workId,expectedRevision:work.revision,delegation,acceptanceBasis,result,acceptedTaskIds:['T-1'],summary:result.summary});
     assert.deepEqual(accepted.acceptedTaskIds,['T-1']);
+    const reportBytes=fs.readFileSync(path.join(projectRoot,accepted.report));
+    const report=JSON.parse(reportBytes);
+    assert.equal(report.markdown,markdown);
+    assert.deepEqual(report.delegation,delegation);
+    assert.deepEqual(report.acceptanceBasis,acceptanceBasis);
+    assert.deepEqual(report.acceptedTaskIds,['T-1']);
+    const {markdown:literal,...fields}=result;
+    assert.equal(literal,report.markdown);
+    assert.deepEqual(report.result,{schemaVersion:delegation.schemaVersion,delegationId:delegation.id,workId:delegation.workId,workRevision:delegation.workRevision,agent:delegation.agent,...fields,findings:[],questions:[],suggestedNextStep:null});
     work=await get();
     assert.equal(work.tasks.items[0].status,'done');
     assert.ok(work.completedTaskIds.includes('T-1'));
     assert.equal(work.results.items.length,1);
+    assert.equal(work.results.items[0].sha256,hash(reportBytes));
     assert.equal(work.readiness.ready,false,'Accepted task must not automatically satisfy the criterion');
     await call('pulso_work',{action:'update',workId,expectedRevision:work.revision,actions:[{type:'evidence.add',evidence:{id:'EV-1',kind:'executed',status:'pass',checkedAt,criterionIds:['AC-1'],taskIds:[],report:'fixture/observation.json',command,cwd:'fixture',exitCode:observed.status,basis:'Real child process against the generated package; stdout/exit code retained before hashing',files,summary:observed.stdout.trim(),acceptanceBasis:evidenceBasis}}]});
     work=await get();
@@ -83,7 +113,7 @@ console.log('Verified private ESM package 1.0.0 and sum(2,3)=5');
     assert.equal(history.items[0].outcome,'done');
     assert.ok(history.items[0].evidenceIds.includes('EV-1'));
     await call('pulso_workspace',{action:'validate',fresh:true});
-    return {status:'PASS',node:process.version,resourceRoot,workId,observation,files,calls,history:history.items[0],manualConversation:'NOT_RUN',acceptDelivery:'NOT_RUN',sandbox,cleanup:'removed on return'};
+    return {status:'PASS',node:process.version,resourceRoot,workId,specialistPrompt:prepared.specialistPrompt,markdown,observation,files,calls,history:history.items[0],manualConversation:'NOT_RUN',acceptDelivery:'NOT_RUN',sandbox,cleanup:'removed on return'};
   } finally {
     fs.rmSync(sandbox,{recursive:true,force:true});
   }

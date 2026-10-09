@@ -1,7 +1,7 @@
 # Plan · {{work-id}} · {{nombre}}
 <!-- template: plan@1.0 -->
-Guía para plan inline o documento asignado; tablas/subplanes solo cuando aporten.
-Tipo: {{maestro/subplan}} · padre: {{ruta o ninguno}} · base: {{revisión de work y repositorio}}
+Guía para documento asignado; tablas/subplanes solo cuando aporten. El plan en conversación usa las tres secciones de result.md.
+Tipo: {{maestro/subplan}} · padre: {{ruta solo si aplica}} · base: {{base técnica observada del repositorio; revisión de Work conservada internamente por Pulso}}
 ## Objetivo y alcance
 {{Criterios que cubre y exclusiones.}}
 ## Realidad comprobada

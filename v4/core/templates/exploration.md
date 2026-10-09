@@ -1,6 +1,6 @@
 # Exploración · {{work-id}} · {{alcance}}
 <!-- template: exploration@1.0 -->
-Guía para respuesta breve inline; documento solo si se solicita, sin tabla obligatoria.
+Guía para documento solicitado, sin tabla obligatoria. El retorno en conversación usa las tres secciones de result.md.
 ## Preguntas resueltas
 {{Pregunta concreta y respuesta con evidencia.}}
 ## Mapa del repositorio

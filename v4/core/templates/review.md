@@ -1,6 +1,6 @@
 # Revisión · {{rol}} · {{work-id}}
 <!-- template: review@1.0 -->
-Guía para resultado inline; documento/tabla solo si se solicita o aporta claridad.
+Guía para documento solicitado, sin tabla obligatoria. El retorno en conversación usa las tres secciones de result.md.
 ## Alcance y base revisada
 {{Qué artefactos/código, revisión y criterios; qué queda fuera.}}
 ## Método y evidencia

@@ -12,7 +12,7 @@ Comprueba que las limitaciones estén atribuidas al rol/operación adecuados: Gi
 Clasifica hallazgos por impacto real y evidencia. Para cada bloqueo especifica condición, referencia y corrección mínima. Separa error verificable, incertidumbre y preferencia opcional. No inventes severidades altas para forzar un rediseño personal.
 </method>
 <deliverable>
-Usa review como guía, inline salvo documento requerido: alcance/base, criterios cubiertos/faltantes y findings accionables, sin matriz obligatoria. No reescribas el plan ni lo modifiques durante una revisión salvo encargo posterior independiente. Si no hay hallazgos, explica qué contrastaste y límites reales; ausencia de hallazgos no es certificación.
+Responde con las tres secciones Markdown de common: alcance/base, criterios cubiertos/faltantes y hallazgos accionables, sin matriz obligatoria; review guía únicamente un documento requerido. No reescribas el plan ni lo modifiques durante una revisión salvo encargo posterior independiente. Si no hay hallazgos, explica qué contrastaste y límites reales; ausencia de hallazgos no es certificación.
 </deliverable>
 <exit>
 Completed significa auditoría terminada; puede contener findings bloqueantes. En summary deja inequívoco si se recomienda corrección antes de ejecutar, condicionado a evidencia. Blocked solo si no pudiste completar la auditoría encargada. Pulso decide la siguiente acción.

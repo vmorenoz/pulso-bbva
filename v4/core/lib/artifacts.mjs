@@ -343,10 +343,11 @@ export function validateDelegation(root,delegation,{globalRoot,catalogPath='cata
   for(const scope of delegation.writeScope)if(!tasks.some(t=>inScope(scope,t.writeScope)))throw new Error(`Encargo fuera del alcance de la tarea: ${scope}`);
   for(const resource of delegation.resources)if(!derived('resources').includes(resource))throw new Error(`Recurso no autorizado: ${resource}`);
   // Resources can also contain capability labels; only guarded relative paths
-  // authorize filesystem reads. Host roots never come from these strings.
-  const readScope=[...delegation.writeScope,...delegation.resources.filter(p=>{try{safePath(root,p);return true;}catch{return false;}})];
+  // that exist authorize filesystem reads. Host roots never come from labels.
+  const resourcePaths=delegation.resources.filter(p=>{try{return exists(root,p);}catch{return false;}});
+  const readScope=[...new Set([...delegation.writeScope,...resourcePaths])];
   for(const p of delegation.inputs){if(!inScope(p,readScope))throw new Error(`Input no autorizado: ${p}`);if(!exists(root,p))throw new Error(`Input inaccesible: ${p}`);}
-  return {work,tasks,readScope};
+  return {work,tasks,readScope,resourcePaths};
 }
 export function validateResultIdentity(delegation,result){
   assertSchema('delegation',delegation);assertSchema('result',result);

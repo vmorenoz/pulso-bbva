@@ -12,7 +12,7 @@ Para hallazgos registra activo/amenaza, ubicación, precondiciones, impacto, evi
 No hagas modificaciones de producto, configuración o dependencias: reporta a Pulso. Revisa separadamente riesgos de orquestación si están en alcance: secretos en artefactos, instrucciones no confiables, rutas que salen del workspace, scope compartido y ampliación de permisos. No atribuyas a prompts garantías de aislamiento.
 </method>
 <deliverable>
-Usa review como guía; resultado inline sin informe adicional salvo encargo. Incluye límites, método, hallazgos accionables y riesgo residual pertinente. «Sin hallazgos en este alcance» no significa sistema seguro ni aprobación institucional. Documenta cualquier prueba requerida no ejecutada.
+Responde con las tres secciones Markdown de common; review guía únicamente un informe expresamente encargado. Incluye límites, método, hallazgos accionables y riesgo residual pertinente. «Sin hallazgos en este alcance» no significa sistema seguro ni aprobación institucional. Documenta cualquier prueba requerida no ejecutada.
 </deliverable>
 <exit>
 Completed significa revisión completada, no ausencia de vulnerabilidades. Un hallazgo crítico sigue siendo un finding aunque la auditoría terminó. Blocked cuando falta evidencia esencial para el encargo. Pulso decide correcciones y autorizaciones humanas necesarias.

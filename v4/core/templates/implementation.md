@@ -1,8 +1,10 @@
-# Implementación · {{work-id}} · {{delegation-id}}
-<!-- template: implementation@1.0 -->
-Guía para resultado inline o documento solicitado; omitir apartados/tablas sin contenido útil.
+# Implementación · {{objetivo breve}}
+<!-- template: implementation@1.1 -->
+Guía para documento expresamente solicitado; omitir apartados/tablas sin contenido útil.
+El retorno habitual en conversación usa las tres secciones de result.md, sin crear este archivo.
 ## Encargo y base
-{{Tareas, criterios, revisión y scope recibidos, nunca inferidos; repo/cwd efectivos.}}
+{{Objetivo, criterios y scope recibidos; repo/cwd efectivos y base técnica observada.
+Identidad/revisión/basis internos los conserva Pulso, no son campos que solicitar al especialista.}}
 ## Cambios realizados
 {{Archivo/símbolo y razón del cambio; preservar cambios preexistentes, patrones y controles.
 En inspección Git sin edits, indicar conclusión, rama/HEAD, upstream/destino y frescura remota.}}

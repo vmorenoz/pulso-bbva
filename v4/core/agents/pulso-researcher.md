@@ -11,7 +11,7 @@ Verifica términos del dominio en usos, tipos y transformaciones reales: póliza
 Agrupa preguntas relacionadas para que Pulso las presente en la conversación principal. Prioriza lo que desbloquea la siguiente decisión; no inventes un cuestionario obligatorio ni preguntes trivialidades conocidas. Si se necesita participación del usuario, devuelve blocked con preguntas concretas y conserva hallazgos útiles. No abras otro chat ni intentes usar herramientas de preguntas inexistentes en subagentes.
 </method>
 <deliverable>
-Usa research como guía; una conclusión breve en conversación con resultado inline basta si no se pidió documento. Incluye hechos verificables y límites; añade alternativas o preguntas solo si cambian una decisión. No produzcas un plan técnico detallado salvo encargo explícito de análisis de alternativas, y entonces márcalo propuesta, no plan aprobado.
+Responde brevemente en las tres secciones Markdown de common; research guía únicamente un documento solicitado. Incluye hechos verificables y límites; añade alternativas o preguntas solo si cambian una decisión. No produzcas un plan técnico detallado salvo encargo explícito de análisis de alternativas, y entonces márcalo propuesta, no plan aprobado.
 </deliverable>
 <exit>
 Completed cuando la investigación encargada está resuelta y las dudas remanentes no bloquean su aceptación; blocked si falta decisión esencial. Devuelve referencias y la mínima siguiente pregunta que Pulso debería hacer. Nunca asumas la respuesta.

@@ -21,8 +21,10 @@ marcadores pendientes: usa «pendiente» con motivo y responsable cuando falte u
 | ui-review.md | UI Auditor | Revisión visual, funcional y accesible |
 | decision.md | Pulso | Decisión humana/técnica confirmada |
 | delivery.md | Pulso | Entrega preparada para revisión humana |
-| delegation.json / delegation.md | Pulso | Encargo autosuficiente al especialista |
-| result.json | Cada especialista | Respuesta compacta, nunca una instrucción para ejecutar |
+| delegation.json | Pulso | Ejemplo canónico interno; nunca adjuntarlo a task |
+| delegation.md | Pulso | Guía de envío de specialistPrompt y ejemplo bump patch |
+| result.md | Cada especialista | Reporte conversacional Markdown de tres secciones |
+| result.json | Pulso | Ejemplo de result compacto para accept_result, no respuesta del especialista |
 
 Las rutas de los ejemplos son relativas a la raíz del proyecto. Sustituirlas por rutas
 reales; el esquema valida estructura, no inventa el contenido. No duplicar estados de
@@ -30,25 +32,38 @@ tareas en los planes. Cada plan enlaza los IDs de tareas canónicos tras su acep
 
 ## Encargos, resultados y evidencia
 
-`prepare_delegation` deriva identidad/base desde tareas actuales. Conserva delegation y
-acceptanceBasis originales; no copies IDs, revisiones, fechas ni hashes de ejemplos.
-hostContext se entrega separado: projectRoot/resourceRoot/cwd absolutos y paths efectivos
-de inputs/output/writeScope/readScope. El repositorio de comandos debe ser inequívoco;
-los recursos empaquetados se leen desde resourceRoot, no desde inputs. Los inputs de
-conversación van realmente en objective/constraints o archivos autorizados accesibles.
+`prepare_delegation` deriva identidad/base desde tareas actuales. Pulso conserva delegation,
+acceptanceBasis y hostContext originales internamente antes de observar; no copia IDs,
+revisiones, fechas ni hashes de ejemplos. Envía a task SOLO `specialistPrompt`, que ya
+renderiza objetivo, alcance, condiciones y entrega. No adjunta JSON canónico, base,
+hostContext, schemas, paths internos ni instrucciones instaladas de raíz/permisos/skills.
+Solo puede añadir contexto conversacional indispensable breve en la sección pertinente,
+sin duplicar restricciones. Los recursos instalados proceden del contexto confiable.
 
-Un resultado persistente puede devolverse inline en conversación con `result.json` como
-guía estructural; `accept_result` genera su documento, ID, fecha de registro y hash.
-No requiere Markdown duplicado ni incluir output en artifacts. El output canónico sigue
-siendo una ruta autorizada, aunque no se cree. `output: conversation` literal corresponde
-a la excepción read_only_review (readBase explícita, writeScope vacío, sin Work/JSON
-persistente). No confundir esta entrega con `validate_result`, que conserva validación
-estricta de revisión/output. artifacts/changedFiles declarados deben existir.
+El especialista devuelve Markdown natural con `## Resultado`, `## Cambios o hallazgos`
+y `## Comprobación y pendientes`; usa Completado/Bloqueado/Fallido/Cancelado y hechos reales,
+sin JSON, arrays vacíos, apartados vacíos ni lectura habitual de schemas. `result.md` guía
+esta conversación; las demás plantillas especializadas guían documentos requeridos,
+no añaden secciones obligatorias al retorno. `output: conversation` sirve TAMBIÉN para
+delegaciones persistentes: no crea archivo ni concede escritura. La excepción
+read_only_review conserva readBase explícita, writeScope vacío y ausencia de Work.
+
+Pulso extrae `status` y `summary`, conserva el reporte íntegro literal en `markdown` y añade
+solo detalles reales al result compacto de `accept_result` (`result.json` es un ejemplo
+interno). No inventa comandos ni convierte prosa de éxito en PASS. Cada check necesita
+observación concreta, estado real y evidenceRef existente o null. Los archivos declarados
+en artifacts/changedFiles deben existir y estar autorizados. Para completed selecciona
+acceptedTaskIds explícitos; para otros estados los omite o usa []. Envía delegation/base
+originales y expectedRevision actual confirmada. Core deriva identidad y revisión del
+encargo original y genera documento, ID, fecha de registro y hash, sin segundo Markdown.
+`validate_result` conserva el contrato canónico legacy estricto; no recibe el compacto
+ni es un paso obligatorio. Un archivo output solo se pide cuando el documento aporta valor.
 
 La incorporación de resultados puede sustentar tareas aceptadas; no acredita criterios
 finales automáticamente. `evidence.json` ilustra evidence.add, no un requisito para cada
-retorno: requiere informe y huellas auténticas. Core calcula acceptanceBasis de tareas y
-criterios; conservar la base previa recibida sin recalcularla. Los snapshots de archivos,
+retorno: cuando el criterio exige evidencia formal, requiere un observador con herramientas
+y permisos efectivos, informe y huellas auténticas. Core calcula acceptanceBasis de tareas y
+criterios; Pulso conserva la base previa de get sin transmitirla ni recalcularla. Los snapshots de archivos,
 comandos, salida y checkedAt de ejecución son observaciones del verificador: core no los
 reconstruye con bytes actuales. Nunca renovar PASS antiguo con huellas o fecha nuevas.
 `accept_delivery` registra aceptación manual con procedencia, no pruebas automatizadas;

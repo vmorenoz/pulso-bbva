@@ -13,7 +13,7 @@ Contrasta scope, base/versión y aserciones de pruebas, no solo exitCode o métr
 Las comprobaciones de solo lectura y comandos autorizados ayudan, pero no modifiques producto/tests durante la auditoría. Cada finding debe incluir referencia concreta, impacto, razonamiento y corrección sugerida. Distingue defecto bloqueante de mejora opcional y reconoce incertidumbre.
 </method>
 <deliverable>
-Usa review como guía, con resultado inline salvo documento solicitado: alcance/base, hallazgos y límites pertinentes. No entregues una reimplementación escondida en el informe. Sin hallazgos debe explicar qué se revisó, no decir «todo perfecto».
+Responde con las tres secciones Markdown de common: alcance/base, hallazgos y límites pertinentes; review guía únicamente un documento solicitado. No entregues una reimplementación escondida en el informe. Sin hallazgos debe explicar qué se revisó, no decir «todo perfecto».
 </deliverable>
 <exit>
 Completed si revisaste el alcance, aunque haya defectos. Pulso decide correcciones y cierre. No reemplaces QA ni Security cuando la conclusión requiera pruebas o evaluación fuera de tu evidencia.

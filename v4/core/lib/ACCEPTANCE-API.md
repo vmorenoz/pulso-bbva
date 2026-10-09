@@ -6,6 +6,29 @@ La fuente pública ejecutable de contratos es `tool-contracts.mjs`:
 Todos los objetos siguientes son el input de `pulso_work`, no un wrapper
 `request`. Los adaptadores conservan su propio binding nativo.
 
+## `update` — alta de tareas
+
+La acción `task.add` admite este input dentro de `actions`:
+
+```text
+{type:"task.add", task:{id, title, criterionIds, agent, status, dependsOn,
+ writeScope, resources, acceptance, evidenceIds?, summary?}}
+```
+
+Sólo en este input se pueden omitir `task.evidenceIds` y `task.summary`.
+Core aplica respectivamente `[]` y `''` a la copia de la tarea en el candidato,
+antes de validar y persistir Work. Los valores explícitos conservan su validación
+y no se sustituyen. `task.schema.json` persistido sigue exigiendo ambos campos.
+La declaración de tools deriva de `work-update.schema.json`, con esos dos campos
+fuera de `required` para `task.add`.
+
+`task.add` no requiere ni admite `reason`: sólo acepta `type` y `task`.
+Las claves desconocidas, incluido `reason`, producen un error de schema que
+identifica el campo; no se ignoran. `reason` corresponde a cambios de aceptación
+mediante `task.update` o `criterion.update`, según sus reglas existentes.
+`expectedRevision` sigue siendo obligatorio y actual; `status` sigue siendo
+obligatorio y `done` conserva sus requisitos de sustento.
+
 ## `prepare_delegation` — lectura
 
 Campos obligatorios:
@@ -24,7 +47,22 @@ templateId: enum vigente de delegation.schema.json
 
 Deriva agente único asignado, revisión, writeScope, resources, acceptance y
 acceptanceBasis. Devuelve `data = {delegation, acceptanceBasis, hostContext,
-note}`. `delegation` mantiene el esquema existente y `questions: []`.
+specialistPrompt, note}`. `delegation` mantiene el esquema existente y `questions: []`.
+
+El orquestador conserva `delegation`, `acceptanceBasis` y `hostContext` internos
+y envía `specialistPrompt` directamente a la task nativa. Este texto Markdown
+tiene cuatro secciones: `## Objetivo`, `## Alcance`, `## Condiciones` y
+`## Entrega`. Incluye únicamente encargo ID, workId y taskIds como metadatos de
+correlación; una raíz absoluta de workspace y rutas relativas de inputs,
+recursos existentes y escritura. Sólo incluye output cuando es un archivo.
+No añade revisiones, hashes, rutas de esquemas ni resourceRoot al texto generado.
+No copia instrucciones base ni plantillas; conserva el texto completo de las
+condiciones y elimina duplicados exactos entre objetivo, restricciones y aceptación.
+
+La entrega solicita Markdown con `## Resultado`, `## Cambios o hallazgos` y
+`## Comprobación y pendientes`, con estado en lenguaje natural. El especialista
+no tiene que producir JSON ni leer esquemas o calcular hashes por defecto.
+Los encabezados orientan la comunicación: core no aplica un parser estricto.
 
 `hostContext = {projectRoot, resourceRoot, readBase, cwd, paths: {inputs, output,
 writeScope, readScope}}`: raíces exclusivamente del contexto confiable del
@@ -36,8 +74,10 @@ No descubre otro repositorio ni inventa una raíz de ejecución.
 Inputs deben existir y estar dentro de los recursos relativos autorizados o
 del alcance de escritura. Output de archivo y artefactos deben estar dentro del
 alcance de escritura de las tareas; `conversation` no exige archivo ni concede
-permisos adicionales. Recursos de capacidad que no sean rutas válidas
-no conceden acceso de lectura. Se aplican las guardas existentes contra rutas
+permisos adicionales. Sólo recursos que sean rutas relativas seguras y existentes
+conceden acceso de lectura. Etiquetas como `CodeGraph MCP` no se convierten en
+rutas inexistentes en readScope ni en specialistPrompt. `delegation.resources`
+conserva sus valores canónicos para compatibilidad. Se aplican las guardas existentes contra rutas
 no normalizadas, escapes y symlinks. Los inputs conversacionales se incluyen
 en objective/constraints o mediante archivos accesibles autorizados.
 El catálogo y la plantilla se leen desde resourceRoot, nunca desde el input.
@@ -55,10 +95,41 @@ workId: ID
 expectedRevision: entero positivo actual
 delegation: delegation original, esquema existente
 acceptanceBasis: {criteria: [{id, sha256}], tasks: [{id, sha256}]} previa
-result: resultado reportado, result.schema.json existente
-acceptedTaskIds: ID[0..50], subconjunto sin duplicados de delegation.taskIds
+result: resultado canónico legacy | resultado compacto descrito abajo
 summary: texto no vacío, máximo 2000
 ```
+
+`acceptedTaskIds?: ID[0..50]` es un subconjunto sin duplicados de delegation.taskIds.
+Es obligatorio explícitamente para `completed` (puede ser `[]`); para los demás
+estados puede omitirse, con valor por defecto `[]`, y no admite tareas.
+
+Contrato compacto, cerrado a propiedades adicionales:
+
+```text
+{
+  status: "completed" | "blocked" | "failed" | "cancelled",
+  summary: string no vacío,
+  markdown: string no blanco (reporte literal, sin límite adicional de longitud),
+  artifacts?: string[],
+  changedFiles?: string[],
+  checks?: {description, status: "pass" | "fail" | "blocked" | "not_run", evidenceRef: ruta | null}[],
+  findings?: {id, severity: "critical" | "high" | "medium" | "low" | "info", description, reference, recommendation}[],
+  questions?: string[],
+  limitations?: string[],
+  suggestedNextStep?: string | null
+}
+```
+
+Los campos compartidos reutilizan exactamente las reglas de `result.schema.json`
+en `tool-contracts.mjs`. Todos los arrays omitidos se normalizan a `[]` y
+suggestedNextStep a `null`. El compacto no admite campos de identidad.
+Core deriva schemaVersion, delegationId, workId, workRevision y agent del encargo
+**original**, nunca del Markdown ni de la revisión actual de Work.
+
+Pulso, como orquestador, extrae del reporte los campos técnicos mínimos status y
+summary y adjunta el Markdown literal; puede incorporar detalles estructurados
+observados. Core no interpreta prosa como PASS, permisos, evidencia o selección
+de tareas. Un resultado `completed` sin checks no inventa comprobaciones.
 
 Valida identidad, asignación, ámbitos, catálogo, referencias y base pertinente.
 La revisión global del encargo puede ser anterior si sus bases siguen vigentes;
@@ -67,22 +138,28 @@ base previa para acreditar un retorno pasado. Las bases no prueban identidad
 nativa ni ejecución; el orquestador decide la aceptación semántica.
 
 Sólo `result.status: completed` admite acceptedTaskIds no vacío. Otros retornos
-se pueden conservar con `[]`. Marca done exclusivamente las tareas enumeradas,
+se pueden conservar con `[]` o sin el campo. Marca done exclusivamente las tareas enumeradas,
 conserva el resultado inmutable y no vincula evidencia a criterios.
 
 Retorna recibo más `{resultId, report, acceptedTaskIds, duplicate, readiness}`.
 Una repetición con la misma delegationId en el mismo ciclo y el mismo contenido
 no escribe ni duplica; cambios de orden de claves JSON no alteran la identidad.
+El digest del compacto incluye el Markdown literal junto al resultado canónico
+normalizado: cambiar sólo ese texto también es otro contenido. El payload legacy
+no incorpora campos nuevos ni undefined y conserva su digest anterior.
 Para cambiar un resultado ya aceptado se necesita otro encargo identificable.
 Repetir con una revisión antigua sigue produciendo conflicto de revisión.
 
 El core escribe `.pulso/work/<workId>/results/<RES-UUID>.json` con el encargo,
-resultado reportado, base previa, selección de tareas, resumen y registeredAt;
+resultado canónico normalizado en `result`, base previa, selección de tareas,
+resumen y registeredAt; para el compacto añade `markdown` literal al mismo
+documento como procedencia, sin generar un segundo archivo;
 después obtiene el SHA-256 real del documento. Un resultado inline no requiere
 un segundo Markdown ni que output figure en artifacts. Output puede ser
 `conversation` o una ruta autorizada que core no escribe. Los artifacts/changedFiles que sí se
 declaren deben existir; sus bytes actuales no se usan para acreditar ejecución
-pasada. `validate_result` conserva su validación estricta de revisión y de output
+pasada. `validate_result` sigue recibiendo sólo el resultado canónico y conserva
+su validación estricta de revisión y de output
 de archivo; también admite `conversation` sin artifact de salida. accept_result
 usa la identidad factorizada y las reglas anteriores.
 

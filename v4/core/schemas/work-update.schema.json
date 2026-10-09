@@ -221,9 +221,7 @@
                   "dependsOn",
                   "writeScope",
                   "resources",
-                  "acceptance",
-                  "evidenceIds",
-                  "summary"
+                  "acceptance"
                 ]
               }
             },

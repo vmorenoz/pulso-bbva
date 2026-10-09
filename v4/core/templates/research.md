@@ -1,6 +1,6 @@
 # Investigación · {{work-id}} · {{pregunta}}
 <!-- template: research@1.0 -->
-Guía proporcional: conclusión inline permitida; omitir alternativas/tablas sin decisión real.
+Guía para documento solicitado; omitir alternativas/tablas sin decisión real. El retorno en conversación usa las tres secciones de result.md.
 ## Necesidad e incertidumbre
 {{Qué decisión permite tomar este encargo.}}
 ## Hallazgos y fuentes
