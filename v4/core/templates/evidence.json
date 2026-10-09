@@ -1,0 +1,42 @@
+{
+  "id": "E-1",
+  "kind": "not_run",
+  "status": "not_run",
+  "checkedAt": "2026-09-29T00:00:00.000Z",
+  "criterionIds": [
+    "AC-1"
+  ],
+  "taskIds": [
+    "T-1"
+  ],
+  "report": ".pulso/work/EXAMPLE-1/evidence/E-1.md",
+  "command": null,
+  "cwd": ".",
+  "exitCode": null,
+  "basis": "Ejemplo no utilizable como observación: describir scope/base/versión reales y conservar snapshots auténticos de la comprobación.",
+  "files": [
+    {
+      "path": "src/example.js",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "path": ".pulso/work/EXAMPLE-1/evidence/E-1.md",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "summary": "Ejemplo no ejecutado. Sustituir fechas y huellas de files por observaciones reales; copiar acceptanceBasis previa recibida de core, no calcular huellas de tareas ni renovar PASS antiguo. No constituye evidencia positiva.",
+  "acceptanceBasis": {
+    "criteria": [
+      {
+        "id": "AC-1",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "T-1",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  }
+}

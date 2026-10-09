@@ -1,0 +1,168 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import {createRequire} from 'node:module';
+import {fileURLToPath, pathToFileURL} from 'node:url';
+import {adapterConfig} from '../../adapters/opencode/build.mjs';
+import {toolContracts, validateToolInput} from '../../core/lib/tool-contracts.mjs';
+import {checkSchemaVocabulary, validateSchema} from '../../core/lib/schema.mjs';
+import {nativeToolSchemas, schemaToZod} from '../../adapters/opencode/plugin/schema-converter.mjs';
+const root = fileURLToPath(new URL('../../', import.meta.url));
+const require = createRequire(import.meta.url);
+const zodURL = pathToFileURL(path.join(root, 'adapters/opencode/vendor/zod/index.js')).href;
+const {z} = await import(zodURL);
+const validator = {checkSchemaVocabulary, validateSchema};
+async function fixture(t) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'pulso-v4-opencode-'));
+  t.after(() => fs.rmSync(base, {recursive: true, force: true}));
+  const runtime = path.join(base, 'runtime'), project = path.join(base, 'project'), second = path.join(base, 'second'), homeDir = path.join(base, 'home');
+  for (const target of [runtime, project, second, homeDir]) fs.mkdirSync(target, {recursive: true});
+  fs.cpSync(path.join(root, 'core'), path.join(runtime, 'resources'), {recursive: true});
+  for (const [source, target] of Object.entries(adapterConfig.runtimeFiles)) {
+    fs.mkdirSync(path.dirname(path.join(runtime, target)), {recursive: true});
+    fs.copyFileSync(path.join(root, 'adapters/opencode', source), path.join(runtime, target));
+  }
+  fs.cpSync(path.join(root, 'adapters/opencode/vendor'), path.join(runtime, 'plugin/vendor'), {recursive: true});
+  const {PulsoPlugin} = await import(pathToFileURL(path.join(runtime, 'plugin/index.mjs')).href);
+  const plugin = await PulsoPlugin({directory: project, homeDir});
+  const requests = [];
+  const context = {directory: project, abort: new AbortController().signal, async ask(request) {requests.push(request);}};
+  const invoke = async (name, input) => JSON.parse((await plugin.tool[name].execute(name === 'pulso_history' ? input : {request: input}, context)).output);
+  return {base, runtime, project, second, homeDir, plugin, context, requests, invoke};
+}
+
+test('all shared descriptors convert; nested action refinements match shared validation', () => {
+  const converted = nativeToolSchemas(toolContracts, z, validator);
+  const valid = {
+    pulso_workspace: [{action: 'status'}, {action: 'prepare'}],
+    pulso_work: [{action: 'get', workId: 'W'}, {action: 'create', title: 'T', objective: 'O', criterion: 'C', verification: 'V'}, {action: 'update', workId: 'W', expectedRevision: 1, actions: [{type: 'work.set_overview', summary: 'S'}]}],
+    pulso_history: [{}, {since: '2026-01-01T00:00:00Z'}],
+    pulso_context: [{action: 'read'}, {action: 'set_context', scope: 'user', expectedRevision: 1, context: ''}],
+  };
+  for (const [name, inputs] of Object.entries(valid)) for (const input of inputs) {
+    assert.deepEqual(converted[name].parse(input), input);
+    assert.deepEqual(validateToolInput(name, input), input);
+  }
+  for (const input of [
+    {action: 'update', workId: 'W', expectedRevision: 1, actions: [{type: 'work.set_overview'}]},
+    {action: 'update', workId: 'W', expectedRevision: 1, actions: [{type: 'task.update', taskId: 'T', patch: {}}]},
+    {action: 'get', workId: 'W', expectedBindingId: 'fake'},
+    {action: 'create', title: ' ', objective: 'O', criterion: 'C', verification: 'V'},
+  ]) {assert.equal(converted.pulso_work.safeParse(input).success, false);assert.throws(() => validateToolInput('pulso_work', input));}
+  for (const schema of [{type: 'string', unsupported: true}, {type: 'string', format: 'email'}, {$ref: 'x'}, {type: ['string','null']}]) assert.throws(() => schemaToZod(schema, z, validator));
+  const unicode = schemaToZod({type: 'string', maxLength: 1}, z, validator);
+  assert.equal(unicode.parse('🚀'), '🚀');
+  assert.equal(unicode.safeParse('🚀🚀').success, false);
+  assert.equal(z.toJSONSchema(unicode).maxLength, 1);
+  const numeric = schemaToZod({type:'integer',minimum:1,maximum:100},z,validator);
+  assert.equal(z.toJSONSchema(numeric).type,'integer');
+  assert.equal(z.toJSONSchema(numeric).maximum,100);
+  assert.equal(converted.pulso_history.safeParse({since: '2026-02-31T00:00:00Z'}).success, false);
+});
+
+test('real SDK registrations are read-only at creation and every read asks native permission', async t => {
+  const {plugin, invoke, requests, project, homeDir} = await fixture(t);
+  assert.deepEqual(Object.keys(plugin.tool), Object.keys(toolContracts));
+  assert.deepEqual(fs.readdirSync(project), []);
+  assert.deepEqual(fs.readdirSync(homeDir), []);
+  for (const [name, input] of [['pulso_workspace',{action:'status'}],['pulso_work',{action:'get',workId:'W'}],['pulso_history',{}],['pulso_context',{action:'summary'}]]) await invoke(name, input);
+  assert.equal(requests.length, 4);
+  assert.ok(requests.every(request => request.permission.startsWith('pulso_') && request.patterns.length === 1));
+  assert.deepEqual(fs.readdirSync(project), []);
+  assert.deepEqual(fs.readdirSync(homeDir), []);
+});
+
+test('native envelopes and model-selected roots fail before approval or writes', async t => {
+  const {plugin, context, requests, project} = await fixture(t);
+  for (const input of [{action:'prepare'}, {request:{action:'prepare'}, extra:true}, {request:{action:'prepare',root:project}}, {request:{action:'status',offset:0}}, {request:{action:'status',expectedBindingId:'fake'}}]) {
+    const result = JSON.parse((await plugin.tool.pulso_workspace.execute(input,context)).output);
+    assert.equal(result.ok, false);
+  }
+  assert.equal(requests.length, 0);
+  assert.deepEqual(fs.readdirSync(project), []);
+});
+
+test('denial, cancellation and root changes during native approval prevent writes', async t => {
+  const {invoke, context, project, second, homeDir} = await fixture(t);
+  context.ask = async () => {throw new Error('permission denied');};
+  await assert.rejects(invoke('pulso_workspace',{action:'prepare'}), /permission denied/);
+  context.ask = async () => {context.directory = second;};
+  await assert.rejects(invoke('pulso_workspace',{action:'prepare'}), /directory changed/);
+  context.directory = project;
+  const controller = new AbortController(); context.abort = controller.signal;
+  context.ask = async () => controller.abort();
+  await assert.rejects(invoke('pulso_workspace',{action:'prepare'}), /cancelled/);
+  for (const target of [project,second,homeDir]) assert.deepEqual(fs.readdirSync(target), []);
+});
+
+test('shared structured read and partial-persistence receipts survive native output wrapping', async t => {
+  const {invoke, project} = await fixture(t);
+  assert.equal((await invoke('pulso_workspace',{action:'prepare'})).ok,true);
+  const create = await invoke('pulso_work',{action:'create',workId:'W',title:'T',objective:'O',criterion:'C',verification:'V'});
+  assert.equal(create.ok,true,create.output);
+  const get = await invoke('pulso_work',{action:'get',workId:'W',section:'criteria',limit:1});
+  assert.equal(get.data.objective.criteria.items.length,1);
+  assert.equal(get.data.hasMore,false);
+  const state = path.join(project,'.pulso/state.json');const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (from, to) => {if (to === state) throw new Error('injected projection write failure'); return rename(from, to);});
+  const partial = await invoke('pulso_work',{action:'update',workId:'W',expectedRevision:1,actions:[{type:'work.set_overview',summary:'persisted'}]});
+  assert.equal(partial.ok,false);
+  assert.equal(partial.persistence.applied,true);
+  assert.equal(partial.persistence.workId,'W');
+  assert.equal(partial.persistence.revision,2);
+});
+
+test('attempt extensions are read-only, native-only and never declare acceptance', async t => {
+  const {invoke, project} = await fixture(t);
+  for (const action of ['attempts','reconcile_attempts']) {
+    assert.throws(() => validateToolInput('pulso_workspace',{action}));
+    const result=await invoke('pulso_workspace',{action});
+    assert.equal(result.ok,true);
+    assert.equal(result.data.liveness,'unknown');
+    assert.equal(result.data.acceptance,'not_assessed');
+  }
+  assert.deepEqual(fs.readdirSync(project),[]);
+});
+
+
+test('native lifecycle preserves close/reopen receipts and scoped memory provenance', async t => {
+  const {invoke}=await fixture(t);
+  assert.equal((await invoke('pulso_workspace',{action:'prepare'})).ok,true);
+  assert.equal((await invoke('pulso_work',{action:'create',workId:'ROUNDTRIP',title:'T',objective:'O',criterion:'C',verification:'V'})).ok,true);
+  assert.equal((await invoke('pulso_work',{action:'close',workId:'ROUNDTRIP',expectedRevision:1,outcome:'cancelled',summary:'User changed scope',limitations:['No acceptance claimed']})).ok,true);
+  const history=await invoke('pulso_history',{workId:'ROUNDTRIP',limit:1});
+  assert.equal(history.data.items[0].outcome,'cancelled');
+  assert.deepEqual(history.data.items[0].limitations,['No acceptance claimed']);
+  assert.equal((await invoke('pulso_work',{action:'reopen',workId:'ROUNDTRIP',expectedRevision:2,reason:'New scope'})).ok,true);
+  const work=await invoke('pulso_work',{action:'get',workId:'ROUNDTRIP'});
+  assert.equal(work.data.cycle,2);assert.equal(work.data.revision,3);
+  const memory=await invoke('pulso_context',{action:'read',scope:'all'});
+  for(const scope of ['project','user'])assert.equal((await invoke('pulso_context',{action:'set_preference',scope,expectedRevision:memory.data.revisions[scope],key:'language',value:'es',source:'user'})).ok,true);
+  const saved=await invoke('pulso_context',{action:'read',scope:'all'});
+  assert.equal(saved.data.entries.length,2);
+});
+
+test('only catalog role and canonical task correlation can start passive observation', async t => {
+  const {invoke,plugin,project}=await fixture(t);
+  const call={tool:'task',sessionID:'session_parent',callID:'call_one'};
+  const valid={subagent_type:'pulso-explorer',prompt:'workId: W\ntaskId: T\nPrivate assignment'};
+  await plugin['tool.execute.before'](call,{args:valid});
+  assert.deepEqual(fs.readdirSync(project),[]);
+  await invoke('pulso_workspace',{action:'prepare'});
+  await invoke('pulso_work',{action:'create',workId:'W',title:'T',objective:'O',criterion:'C',verification:'V'});
+  const added=await invoke('pulso_work',{action:'update',workId:'W',expectedRevision:1,actions:[{type:'task.add',task:{id:'T',title:'Explore',criterionIds:['AC-1'],agent:'pulso-explorer',status:'pending',dependsOn:[],writeScope:[],resources:[],acceptance:['Return findings'],evidenceIds:[],summary:''}}]});
+  assert.equal(added.ok,true,added.output);
+  const workFile=path.join(project,'.pulso/work/W/work.json'),before=fs.readFileSync(workFile,'utf8');
+  for(const bad of [{...valid,subagent_type:'unknown'},{...valid,subagent_type:'pulso-executor'},{...valid,prompt:'workId: W\ntaskId: T\ntaskId: X'}])await plugin['tool.execute.before'](call,{args:bad});
+  assert.equal(fs.existsSync(path.join(project,'.pulso/delegation-attempts')),false);
+  await plugin['tool.execute.before'](call,{args:valid});
+  await plugin['tool.execute.after']({...call,args:valid},{metadata:{sessionId:'session_child'},output:'Private result'});
+  const attempts=await invoke('pulso_workspace',{action:'attempts'});
+  assert.equal(attempts.data.items.length,1);
+  assert.equal(attempts.data.items[0].status,'tool_returned');
+  assert.equal(attempts.data.items[0].acceptance,'not_assessed');
+  assert.equal(fs.readFileSync(workFile,'utf8'),before);
+  assert.equal(JSON.stringify(attempts).includes('Private'),false);
+});

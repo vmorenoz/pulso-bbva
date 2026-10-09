@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "D-1",
+  "workId": "EXAMPLE-1",
+  "workRevision": 1,
+  "taskIds": [
+    "T-1"
+  ],
+  "agent": "pulso-planner",
+  "objective": "Proponer implementaci\u00f3n y verificaci\u00f3n para AC-1",
+  "inputs": [
+    ".pulso/project.md",
+    ".pulso/work/EXAMPLE-1/work.json"
+  ],
+  "output": "conversation",
+  "writeScope": [],
+  "resources": [
+    ".pulso/project.md",
+    ".pulso/work/EXAMPLE-1/work.json"
+  ],
+  "constraints": [
+    "Proponer un plan breve en conversación, sin crear plan.md."
+  ],
+  "acceptance": [
+    "Referencias reales, dependencias y comprobaciones justificadas."
+  ],
+  "questions": [],
+  "templateId": "plan"
+}

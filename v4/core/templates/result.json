@@ -1,0 +1,11 @@
+{
+  "status": "blocked",
+  "summary": "Falta decidir el comportamiento esperado para el caso inválido.",
+  "markdown": "## Resultado\nBloqueado: falta decidir el comportamiento esperado para el caso inválido.\n\n## Cambios o hallazgos\nEl encargo no define cómo tratar ese caso; no se han realizado cambios.\n\n## Comprobación y pendientes\nNo se ejecutaron pruebas: falta la decisión de comportamiento. ¿Cuál es el comportamiento esperado para el caso inválido?",
+  "questions": [
+    "¿Cuál es el comportamiento esperado para el caso inválido?"
+  ],
+  "limitations": [
+    "No se ejecutaron pruebas."
+  ]
+}

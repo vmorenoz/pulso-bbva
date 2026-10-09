@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:pulso:v3:work-receipt:1",
+  "title": "Pulso compact mutation receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "operation", "workId", "revision", "status", "progress", "changes", "nextAction"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "operation": {"enum": ["work.create", "work.apply", "work.close", "work.reopen", "work.accept_result", "work.accept_delivery"]},
+    "workId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["pending", "in_progress", "blocked", "paused", "done", "cancelled"]},
+    "progress": {"type": "object", "additionalProperties": false, "required": ["done", "total"], "properties": {"done": {"type": "integer", "minimum": 0}, "total": {"type": "integer", "minimum": 0}}},
+    "changes": {"type": "array", "maxItems": 12, "items": {"type": "string", "minLength": 1}},
+    "nextAction": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+    "resultId":{"type":"string","minLength":1},
+    "evidenceId":{"type":"string","minLength":1},
+    "report":{"type":"string","minLength":1},
+    "acceptedTaskIds":{"type":"array","items":{"type":"string","minLength":1}},
+    "duplicate":{"type":"boolean"},
+    "acceptanceRecorded":{"const":true},
+    "closed":{"type":"boolean"},
+    "resolvedWaits":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"field":{"enum":["blockers","decisionsPending","nextAction"]},"message":{"type":"string"}},"required":["field","message"]}},
+    "readiness":{
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "ready":{"type":"boolean"},"revision":{"type":"integer","minimum":1},
+        "issues":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"code":{"type":"string"},"entity":{"type":"string"},"message":{"type":"string"}},"required":["code","entity","message"]}},
+        "evidenceIds":{"type":"array","items":{"type":"string"}}
+      },
+      "required":["ready","revision","issues","evidenceIds"]
+    },
+    "closeError":{"type":"object","additionalProperties":false,"properties":{"code":{"type":"string"},"message":{"type":"string"}},"required":["code","message"]},
+    "persistence":{"type":"object"}
+  }
+}

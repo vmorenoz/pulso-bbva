@@ -1,0 +1,18 @@
+{
+  "$schema":"http://json-schema.org/draft-07/schema#",
+  "$id":"urn:pulso:v4:closure-readiness:1",
+  "title":"Complete closure diagnosis at a confirmed Work revision",
+  "type":"object",
+  "additionalProperties":false,
+  "properties":{
+    "ready":{"type":"boolean"},
+    "revision":{"type":"integer","minimum":1},
+    "issues":{"type":"array","items":{
+      "type":"object","additionalProperties":false,
+      "properties":{"code":{"type":"string","minLength":1},"entity":{"type":"string","minLength":1},"message":{"type":"string","minLength":1}},
+      "required":["code","entity","message"]
+    }},
+    "evidenceIds":{"type":"array","items":{"type":"string","minLength":1}}
+  },
+  "required":["ready","revision","issues","evidenceIds"]
+}
