@@ -682,6 +682,7 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "acceptanceMode": {"enum":["evidence","user","both"]},
                   "id": {
                     "type": "string",
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
@@ -718,6 +719,7 @@
               "type": {
                 "const": "criterion.update"
               },
+              "acceptanceMode": {"enum":["evidence","user","both"]},
               "criterionId": {
                 "type": "string",
                 "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"

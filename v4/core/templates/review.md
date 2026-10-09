@@ -1,9 +1,12 @@
 # Revisión · {{rol}} · {{work-id}}
 <!-- template: review@1.0 -->
+Guía para resultado inline; documento/tabla solo si se solicita o aporta claridad.
 ## Alcance y base revisada
 {{Qué artefactos/código, revisión y criterios; qué queda fuera.}}
 ## Método y evidencia
-{{Qué se inspeccionó o ejecutó y con qué limitaciones.}}
+{{Qué se inspeccionó o ejecutó, scope/base/versión y límites. Seguir helpers y configuración
+activa; reconciliar fuentes contradictorias. Distinguir pruebas textuales de funcionales,
+métricas con objeto/denominador y PASS de la base observada frente a otras ramas.}}
 ## Hallazgos
 | ID | Severidad | Hallazgo e impacto | Referencia reproducible | Corrección sugerida |
 |---|---|---|---|---|
@@ -14,4 +17,5 @@ Si no hay hallazgos, declararlo sin inventar una tabla ni certificar ausencia to
 ## Conclusión
 {{Sin bloqueos observados / requiere correcciones / no verificable, con razones.}}
 ## Límites y decisiones pendientes
-{{Recomendaciones no obligatorias por separado; no fingir aprobación institucional.}}
+{{Hechos e hipótesis separados, recomendaciones opcionales y bloqueos del rol/operación
+concretos. No fingir aprobación institucional ni declarar incapacidad global por un rol.}}

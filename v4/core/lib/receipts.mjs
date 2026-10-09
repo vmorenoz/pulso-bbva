@@ -15,7 +15,8 @@ export function workReceipt(work,{operation='work.apply',changes=[]}={}) {
 
 export function formatReceipt(receipt) {
   const changes=receipt.changes.length?receipt.changes.join('; '):'sin cambios adicionales';
-  const lines=[`✓ ${receipt.workId} ${receipt.operation==='work.create'?'creado':'actualizado'} · revisión ${receipt.revision}`,changes];
+  const lines=[`${receipt.workId} ${receipt.operation==='work.create'?'creado':'actualizado'} · revisión ${receipt.revision}`,changes];
+  if(receipt.readiness&&!receipt.readiness.ready)lines.push(`Cierre pendiente: ${receipt.readiness.issues.length} impedimentos; consultar data.readiness.issues.`);
   if(receipt.nextAction)lines.push(`Siguiente paso: ${receipt.nextAction}`);
   return lines.join('\n');
 }

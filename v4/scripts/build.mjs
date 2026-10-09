@@ -5,7 +5,8 @@ import {listFiles,writeFile,hash} from './files.mjs';
 import {readAgentBody,renderPrompt,renderSkill} from './prompts.mjs';
 
 export const sourceRoot=fileURLToPath(new URL('../',import.meta.url));
-export const runtimeModules=['artifacts','fs','identity','memory','receipts','schema','work-mutations','workspace','semantic-tools','tool-contracts','pagination'];
+export const releaseVersion=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url))).version;
+export const runtimeModules=['artifacts','acceptance','fs','identity','memory','receipts','schema','work-mutations','workspace','semantic-tools','tool-contracts','pagination'];
 export const operationSkills=['pulso-init','pulso-status','pulso-recap','pulso-resume'];
 const integrity=JSON.parse(fs.readFileSync(new URL('./bbva-integrity.json',import.meta.url)));
 
@@ -74,10 +75,10 @@ export async function build(target,{root=sourceRoot,outputRoot}={}) {
     }
   }
   const manifest=await config.packageManifest({coreRoot,chatAgents,chatSkills});
-  if(manifest.version!=='4.0.0') throw new Error('Wrong package version');
+  if(manifest.version!==releaseVersion) throw new Error('Wrong package version');
   add('package.json',JSON.stringify(manifest,null,2)+'\n','adapter/package-manifest');
   inventory.sort((a,b)=>a.path.localeCompare(b.path,'en'));
-  writeFile(output,'pulso-package.json',JSON.stringify({version:'4.0.0',files:inventory},null,2)+'\n');
+  writeFile(output,'pulso-package.json',JSON.stringify({version:releaseVersion,files:inventory},null,2)+'\n');
   return {target,output,files:inventory.length+1};
 }
 

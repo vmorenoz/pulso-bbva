@@ -4,7 +4,7 @@ export function nativeDefinitions(definitions) {
   return definitions.map(definition => ({...definition,
     inputSchema: {...definition.inputSchema, properties: {...definition.inputSchema.properties,
       ...(definition.name === 'pulso_history' ? {} : {expectedBindingId: bindingSchema})}},
-    modelDescription: `${definition.modelDescription} Mutations require expectedBindingId from a status read of the intended workspace; this opaque token does not replace native approval.`,
+    modelDescription: `${definition.modelDescription} Inputs are flat, without a request wrapper. Mutations require expectedBindingId from a status read of the intended workspace; this opaque token does not replace native approval. ok:true confirms the operation, not closure; for accept_delivery inspect data.closed, data.readiness and closeError/persistence.`,
   }));
 }
 export function unwrapInput(definition, input, validateToolInput) {

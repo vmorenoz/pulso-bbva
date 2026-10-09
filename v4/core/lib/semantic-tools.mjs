@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {toolDefinitions,validateToolInput} from './tool-contracts.mjs';
 import * as artifacts from './artifacts.mjs';
 import * as mutations from './work-mutations.mjs';
+import {prepareDelegation,acceptResult,acceptDelivery} from './acceptance.mjs';
 import * as memory from './memory.mjs';
 import {prepareWorkspace} from './workspace.mjs';
 import {exists,readJSON} from './fs.mjs';
@@ -13,7 +14,7 @@ import {pagination,pageItems} from './pagination.mjs';
 
 const defaultResourceRoot=fileURLToPath(new URL('../',import.meta.url));
 const ok=(title,output,data)=>({title:`Pulso · ${title}`,output,ok:true,...(data===undefined?{}:{data})});
-const fail=(title,error)=>({title:`Pulso · ${title}`,output:`${error?.persistence?.applied?'Aplicado parcialmente; no repitas a ciegas':'No se completó'}: ${String(error?.message||'operación inválida').slice(0,500)}`,ok:false,...(error?.persistence?{persistence:error.persistence}:{})});
+const fail=(title,error)=>({title:`Pulso · ${title}`,output:`${error?.persistence?.applied?'Aplicado parcialmente; no repitas a ciegas':'No se completó'}: ${String(error?.message||'operación inválida').slice(0,500)}`,ok:false,error:{code:error?.code||'OPERATION_FAILED',message:String(error?.message||'operación inválida').slice(0,500),...(error?.issues?{issues:error.issues}:{}),...(error?.issueCount?{issueCount:error.issueCount}:{}),...(error?.revision?{revision:error.revision}:{})},...(error?.readiness?{data:{readiness:error.readiness}}:{}),...(error?.persistence?{persistence:error.persistence}:{})});
 const receipt=(title,data)=>ok(title,formatReceipt(data),data);
 
 function memorySummary(project,user){
@@ -39,7 +40,7 @@ function memorySummary(project,user){
 
 function workRead(root,args){
   const value=artifacts.readWork(root,args.workId,{files:false}),section=args.section||'overview';
-  const arrays={tasks:value.tasks,criteria:value.objective.criteria,evidence:value.evidence,documents:value.documents,blockers:value.blockers,decisions:value.decisionsPending,acceptanceChanges:value.acceptanceChanges||[]};
+  const arrays={tasks:value.tasks,criteria:value.objective.criteria,evidence:value.evidence,results:value.results||[],documents:value.documents,blockers:value.blockers,decisions:value.decisionsPending,acceptanceChanges:value.acceptanceChanges||[]};
   const selected=section==='all'?Object.keys(arrays):section==='overview'?['blockers','decisions']:[section];
   const basisSections=section==='overview'?['criteria','tasks']:selected.filter(key=>['criteria','tasks'].includes(key));
   const page=pagination({kind:'work',binding:{projectRoot:root,workId:args.workId,section},snapshot:value,total:Math.max(0,...[...selected,...basisSections].map(key=>arrays[key].length)),limit:args.limit||20,cursor:args.cursor});
@@ -53,6 +54,7 @@ function workRead(root,args){
   const basisValues=key=>basisSections.includes(key)?arrays[key].slice(page.offset,page.offset+page.limit):[];
   data.acceptanceBasis=artifacts.acceptanceBasis(value,{criterionIds:basisValues('criteria').map(item=>item.id),taskIds:basisValues('tasks').map(item=>item.id)});
   data.acceptanceBasisPage=Object.fromEntries(['criteria','tasks'].map(key=>[key,basisSections.includes(key)?{total:arrays[key].length,hasMore:page.offset+page.limit<arrays[key].length,nextCursor:page.offset+page.limit<arrays[key].length?page.nextCursor:null}:{total:arrays[key].length,readWith:{section:key}}]));
+  data.readiness=artifacts.completionReadiness(root,value);
   return ok('trabajo',`${value.id} · rev. ${value.revision} · ${value.status} · tareas ${value.tasks.filter(task=>task.status==='done').length}/${value.tasks.length} · siguiente: ${value.nextAction||'sin acción'}`,data);
 }
 
@@ -96,6 +98,12 @@ const handlers={
   pulso_work(args,{projectRoot:root,resourceRoot}){
     switch(args.action){
       case 'get':return workRead(root,args);
+      case 'prepare_delegation':{
+        const data=prepareDelegation(root,args,{resourceRoot});
+        return ok('encargo',`${data.delegation.id} · rev. ${data.delegation.workRevision} · preparado sin persistir ni ejecutar`,data);
+      }
+      case 'accept_result':return receipt('resultado',acceptResult(root,args,{resourceRoot}));
+      case 'accept_delivery':return receipt('aceptación',acceptDelivery(root,args));
       case 'validate_result':{
         const data=artifacts.validateResult(root,args.delegation,args.result,{globalRoot:resourceRoot,catalogPath:'agents/catalog.json'});
         return ok('resultado',data.note,data);

@@ -17,10 +17,12 @@
     ".pulso/work/EXAMPLE-1/plan.md"
   ],
   "resources": [
-    "Ruta global real de templates/plan.md proporcionada por el adaptador"
+    ".pulso/project.md",
+    ".pulso/work/EXAMPLE-1/work.json"
   ],
   "constraints": [
-    "No modificar work.json ni delegar."
+    "No modificar work.json ni delegar.",
+    "Ejemplo: usar delegation y acceptanceBasis reales de prepare_delegation, con hostContext separado. Resultado inline permitido; no crear plan.md salvo requerimiento expreso."
   ],
   "acceptance": [
     "Referencias reales, dependencias y comprobaciones justificadas."

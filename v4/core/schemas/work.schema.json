@@ -54,6 +54,7 @@
                 "type": "string",
                 "minLength": 1
               },
+              "acceptanceMode": {"enum":["evidence","user","both"]},
               "evidenceIds": {
                 "type": "array",
                 "items": {
@@ -171,6 +172,10 @@
         ]
       },
       "minItems": 0
+    },
+    "completedTaskIds": {
+      "description":"Tasks completed at least once in the current cycle; optional for legacy Work. Reset only on reopen.",
+      "type":"array","items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"}
     },
     "tasks": {
       "type": "array",
@@ -295,6 +300,7 @@
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
           },
+          "origin": {"const":"user_acceptance"},
           "kind": {
             "enum": [
               "executed",
@@ -494,6 +500,33 @@
       },
       "minItems": 0
     },
+    "results": {
+      "description": "Immutable historical acceptance records; original delegation and reported result are in the core-owned report. Optional for older Work files.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
+          "cycle": {"type":"integer","minimum":1},
+          "registeredAt": {"type":"string","format":"date-time"},
+          "delegationId": {"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
+          "requestHash": {"type":"string","pattern":"^[a-f0-9]{64}$"},
+          "report": {"type":"string","minLength":1},
+          "sha256": {"type":"string","pattern":"^[a-f0-9]{64}$"},
+          "acceptedTaskIds": {"type":"array","items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},"minItems":0},
+          "acceptanceBasis": {
+            "type":"object","additionalProperties":false,
+            "properties": {
+              "criteria":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["id","sha256"]}},
+              "tasks":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["id","sha256"]}}
+            },
+            "required":["criteria","tasks"]
+          }
+        },
+        "required":["id","cycle","registeredAt","delegationId","requestHash","report","sha256","acceptedTaskIds","acceptanceBasis"]
+      }
+    },
     "closure": {
       "anyOf": [
         {
@@ -577,6 +610,7 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "acceptanceMode": {"enum":["evidence","user","both"]},
                   "description": {
                     "type": "string",
                     "minLength": 1
@@ -595,6 +629,7 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "acceptanceMode": {"enum":["evidence","user","both"]},
                   "description": {
                     "type": "string",
                     "minLength": 1
@@ -650,6 +685,8 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "title": {"type":"string","minLength":1},
+                  "agent": {"anyOf":[{"enum":["pulso-researcher","pulso-explorer","pulso-planner","pulso-plan-auditor","pulso-executor","pulso-qa-auditor","pulso-security-auditor","pulso-code-reviewer","pulso-ui-auditor"]},{"type":"null"}]},
                   "criterionIds": {
                     "type": "array",
                     "items": {
@@ -704,6 +741,8 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "title": {"type":"string","minLength":1},
+                  "agent": {"anyOf":[{"enum":["pulso-researcher","pulso-explorer","pulso-planner","pulso-plan-auditor","pulso-executor","pulso-qa-auditor","pulso-security-auditor","pulso-code-reviewer","pulso-ui-auditor"]},{"type":"null"}]},
                   "criterionIds": {
                     "type": "array",
                     "items": {

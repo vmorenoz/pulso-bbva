@@ -1,5 +1,6 @@
 # Decisión · {{D-ID}}
 <!-- template: decision@1.0 -->
+Documento opcional; registrar solo decisiones reales, sin alternativas o apartados de relleno.
 Fecha: {{fecha}} · trabajo: {{ID o global}} · estado: {{propuesta/confirmada/sustituida}}
 ## Contexto y fuentes
 {{Qué debía decidirse; hechos separados de supuestos.}}

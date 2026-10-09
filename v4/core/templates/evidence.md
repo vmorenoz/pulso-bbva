@@ -1,21 +1,31 @@
-# Evidencia · {{work-id}} · {{evidence-id}}
-<!-- template: evidence@1.0 -->
-## Afirmación verificada
-{{AC-ID y tareas asociadas; qué permite concluir esta evidencia.}}
-## Base comprobada
-{{Registrar checkedAt (fecha real de observación), commit si existe y cambios locales relevantes.
-Antes de comprobar, conservar los fingerprints {path, sha256} de fuentes relevantes, tests, configuración y lockfiles y acceptanceBasis por criterio/tarea obtenido al leer el Work. Para un archivo eliminado: {path, absent: true}.
-Después de comprobar, contrastar la misma base de archivos y aceptación. Si cambió, no declarar PASS; repetir la comprobación con un ID nuevo.
-Al terminar el informe, incluir también su fingerprint entre files. El core compara las huellas recibidas: no las sustituye por hashes de incorporación.}}
-## Método y entorno
-{{executed/manual/static/not_run; directorio, comando exacto, versiones observadas y prerrequisitos.}}
-## Resultado observado
-{{pass/fail/blocked/not_run; checkedAt real, comando, cwd y exitCode cuando es executed. Conservar aquí la salida/report saneada, aserciones y resultados, sin secretos.}}
-## Cobertura
-{{Positivo, vacío, error, integración y demás escenarios según proyecto.}}
-## Omitido o bloqueado
-{{Pruebas no ejecutadas, skips, servicios inaccesibles y consecuencias.}}
-## Vigencia
-{{La aceptación cambiada, el ciclo reabierto o los archivos distintos invalidan el PASS. Hashes prueban correspondencia, no ejecución ni cobertura completa. Una corrección solo puede cambiar summary/editedAt; checkedAt, archivos, base, vínculos, comando y resultado observados son inmutables. Una repetición requiere ID nuevo.}}
-## Referencias
-{{Informes o salidas saneadas, sin logs indiscriminados.}}
+# Evidencia · {{work-id}}
+<!-- template: evidence@1.0; guía de observación, omitir apartados irrelevantes -->
+## Afirmación y base comprobada
+{{Criterios/tareas vinculados y comportamiento que permite concluir la comprobación.
+Scope, versión/commit/rama y cambios locales pertinentes; checkedAt real de observación.
+Conservar acceptanceBasis recibida antes de observar (get para evidence.add): core deriva
+huellas de criterios/tareas; no calcularlas ni obtener otras después para acreditar el pasado.}}
+
+## Método y resultado observado
+{{executed/manual/static/not_run; pass/fail/blocked/not_run. Comando exacto, cwd inequívoco,
+versiones/entorno observados, exitCode y salida saneada con aserciones/resultados relevantes.
+static/manual/not_run: exitCode:null; revisión estática sin comando: command:null.
+Tests preparados no ejecutados, skips, timeout y fallos de entorno no son PASS.
+Pruebas textuales se llaman textuales; build no prueba funcionalidad ni mock conexión real.}}
+
+## Alcance y límites
+{{Escenarios realmente comprobados frente a criterios. Métricas/cobertura con objeto,
+denominador y exclusiones. Omitidos/bloqueados pertinentes y su consecuencia.
+Si aplica Maven: reactor, módulos/perfiles y selección antes de inferir dependencia externa.
+Si aplica Git: cwd del repo, rama/HEAD, upstream/destino y fuente/frescura remota observada.}}
+
+## Snapshots y referencias
+{{Conservar fingerprints auténticos de fuentes, tests y configuración relevantes antes y
+después de ejecutar, o {path,absent:true}. Si cambian, no atribuir PASS a la nueva base.
+Para evidence.add incluir files y huella del informe terminado: no escribir su propio hash
+dentro del informe. Referenciar salidas saneadas; calcular hashes no es prueba executed.
+accept_result genera el documento/hash de incorporación, no snapshots de ejecución ni
+evidencia final de criterios. No necesita este Markdown duplicado para un resultado inline.}}
+{{No trasladar PASS entre bases/ramas/versiones ni renovarlo con huellas actuales. Una nueva
+comprobación tiene observación e identidad nuevas; registeredAt no sustituye checkedAt.
+Conservar hechos de ejecución, incluso si ya no sustentan la entrega actual.}}

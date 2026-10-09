@@ -1,10 +1,14 @@
 const path = require('node:path');
 const os = require('node:os');
+const fs = require('node:fs');
 const {pathToFileURL} = require('node:url');
 
 // Test injection supplies the same public host API used during activation.
 async function activateWith(vscode, context, {homeDir = os.homedir()} = {}) {
   const resourceRoot = path.join(context.extensionPath, 'resources');
+  // Identify the loaded extension package, not the checkout or a build constant.
+  const loadedPackage = JSON.parse(fs.readFileSync(path.join(context.extensionPath, 'package.json'), 'utf8'));
+  const provenance = {runtime: {adapter: 'vscode', packageName: loadedPackage.name, version: loadedPackage.version}};
   const load = file => import(pathToFileURL(file).href);
   const [{toolDefinitions, validateToolInput, isMutating}, {executeTool}, {createWorkspaceResolver}, {unwrapInput}] = await Promise.all([
     load(path.join(resourceRoot, 'lib/tool-contracts.mjs')),
@@ -39,10 +43,10 @@ async function activateWith(vscode, context, {homeDir = os.homedir()} = {}) {
           // Preserve committed/partial data if context changes after an await.
           return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(JSON.stringify({
             ...receipt, ok: false, output: `${receipt.output}\nContext changed after invocation: ${error.message}`,
-            contextChanged: true, workspace: root, bindingId,
+            contextChanged: true, workspace: root, bindingId, provenance,
           }))]);
         }
-        return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(JSON.stringify({...receipt, workspace: root, bindingId}))]);
+        return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(JSON.stringify({...receipt, workspace: root, bindingId, provenance}))]);
       },
     }));
   }

@@ -1,5 +1,6 @@
 # {{ID}} · {{título}}
 <!-- template: work@1.0 -->
+Narrativa opcional y breve; omitir apartados que no aporten información propia.
 Fuente operativa: [work.json](work.json). No duplicar estados ni checklists editables.
 ## Problema y motivación
 {{Qué falla o se necesita y por qué importa.}}

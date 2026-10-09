@@ -1,5 +1,6 @@
 # Contexto del proyecto
 <!-- template: project@1.0 -->
+Documento solo con encargo de mapeo; omitir secciones irrelevantes, sin inventar contexto.
 Última revisión: {{fecha}} · responsable: {{persona o especialista responsable del mapeo}} · base: {{commit/archivos}}
 
 ## Negocio y límites
@@ -14,8 +15,8 @@
 | Propósito | Directorio | Comando observado | Ejecutado y resultado | Prerrequisitos |
 |---|---|---|---|---|
 | {{test/build/lint}} | {{ruta}} | {{comando}} | {{no ejecutado o evidencia}} | {{entorno}} |
-## Convenciones y skills
-{{Instrucciones existentes prioritarias, patrones confirmados y skills pertinentes.}}
+## Convenciones y fuentes de expertise
+{{Instrucciones aplicables, fuentes técnicas pertinentes, patrones y controles confirmados.}}
 ## Restricciones y datos
 {{Entornos autorizados, datos sintéticos, servicios no accesibles, acciones que exigen aprobación.}}
 ## Acuerdos y decisiones

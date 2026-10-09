@@ -7,6 +7,12 @@ const terminal = status => ['done','cancelled'].includes(status);
 const wp = id => `.pulso/work/${assertID(id)}/work.json`;
 const unique = (values,label) => {if(new Set(values).size!==values.length)throw new Error(`${label}: duplicados`);};
 const same = (a,b)=>JSON.stringify(a)===JSON.stringify(b);
+export const criterionMode=c=>c.acceptanceMode??'evidence';
+/** Footprint is cycle-local, independent of current status and acceptance freshness. */
+export const completedTaskIds=w=>[...new Set([...(w.completedTaskIds||[]),...w.tasks.filter(t=>t.status==='done').map(t=>t.id),...(w.results||[]).filter(r=>r.cycle===w.cycle).flatMap(r=>r.acceptedTaskIds)])];
+export function assertTaskCancellation(work,taskId){
+  if(completedTaskIds(work).includes(taskId)){const error=new Error(`Tarea realizada en este ciclo; no se puede cancelar: ${taskId}`);error.code='TASK_ALREADY_COMPLETED';throw error;}
+}
 // Work is canonical; history and state are repairable projections. Never hide a
 // committed revision behind a generic failure when a projection write fails.
 function projectWork(root,w,{focus=false}={}) {
@@ -38,6 +44,7 @@ export function validateWork(root,w,{files=true,fresh=false}={}) {
   if(w.closure && (w.closure.cycle!==w.cycle || w.closure.outcome!==w.status || w.closure.id!==`${w.id}:c${w.cycle}`)) throw new Error('Identidad de cierre incoherente');
   const criteria=new Set(w.objective.criteria.map(c=>c.id)),tasks=new Map(w.tasks.map(t=>[t.id,t])), ev=new Map(w.evidence.map(e=>[e.id,e]));
   function refs(values,set,label){unique(values,label);for(const x of values)if(!set.has(x))throw new Error(`${label}: referencia inexistente ${x}`);}
+  refs(w.completedTaskIds||[],tasks,'Huella de tareas completadas');
   for(const c of w.objective.criteria)refs(c.evidenceIds,ev,`Criterio ${c.id}`);
   for(const t of w.tasks) {
     refs(t.criterionIds,criteria,`Tarea ${t.id} criterios`);refs(t.dependsOn,tasks,`Tarea ${t.id} dependencias`);refs(t.evidenceIds,ev,`Tarea ${t.id} evidencias`);
@@ -63,12 +70,23 @@ export function validateWork(root,w,{files=true,fresh=false}={}) {
     if(e.kind==='not_run' && e.status!=='not_run' && e.status!=='blocked')throw new Error(`Evidencia ${e.id}: not_run no puede aprobar`);
     if(e.kind==='executed' && e.status==='pass' && (e.exitCode!==0 || !e.command?.trim()))throw new Error(`Evidencia ${e.id}: ejecución PASS requiere comando y exitCode=0`);
     if(e.kind!=='executed' && e.exitCode!==null)throw new Error(`Evidencia ${e.id}: exitCode solo para ejecución`);
-    if(e.status==='pass' && fresh && !terminal(w.status) && (w.objective.criteria.some(c=>c.evidenceIds.includes(e.id)) || w.tasks.some(t=>t.evidenceIds.includes(e.id))))checkFresh(root,e,w,{criterionIds:w.objective.criteria.filter(c=>c.evidenceIds.includes(e.id)).map(c=>c.id),taskIds:w.tasks.filter(t=>t.evidenceIds.includes(e.id)).map(t=>t.id)});
+    if(e.origin==='user_acceptance'&&(e.kind!=='manual'||e.status!=='pass'||e.command!==null||e.taskIds.length))throw new Error(`Aceptación de usuario ${e.id}: requiere manual/pass, command:null y taskIds vacío`);
   }
   for(const c of w.objective.criteria)for(const id of c.evidenceIds)if(!ev.get(id).criterionIds.includes(c.id))throw new Error(`Enlace de criterio ${c.id}/${id} no es recíproco`);
   for(const t of w.tasks)for(const id of t.evidenceIds)if(!ev.get(id).taskIds.includes(t.id))throw new Error(`Enlace de tarea ${t.id}/${id} no es recíproco`);
+  unique((w.results||[]).map(r=>r.id),'Resultados');
+  unique((w.results||[]).map(r=>`${r.cycle}:${r.delegationId}`),'Encargos aceptados');
+  for(const r of w.results||[]){
+    refs(r.acceptedTaskIds,tasks,`Resultado ${r.id} tareas`);safePath(root,r.report);
+    if(r.cycle>w.cycle||r.report!==`.pulso/work/${w.id}/results/${r.id}.json`)throw new Error(`Identidad de resultado inválida: ${r.id}`);
+    for(const section of ['criteria','tasks'])unique(r.acceptanceBasis[section].map(item=>item.id),`Resultado ${r.id} base ${section}`);
+  }
   if(w.closure){refs(w.closure.evidenceIds,ev,'Cierre evidencias');if(Date.parse(w.closure.at)<Date.parse(w.createdAt))throw new Error('Fecha de cierre anterior a creación');}
   if(w.status==='done')assertCompletion(root,w,{fresh:false});
+  if(fresh&&!terminal(w.status)){
+    const issues=completionReadiness(root,w).issues.filter(issue=>['EVIDENCE_STALE','USER_ACCEPTANCE_STALE','TASK_UNSUPPORTED','TASK_ACCEPTANCE_STALE'].includes(issue.code));
+    if(issues.length){const error=new Error('Evidencia o aceptación de tareas no vigente');error.code='ACCEPTANCE_STALE';error.issues=issues;throw error;}
+  }
   return w;
 }
 /** Stable acceptance fingerprints are observed by QA before and after checking.
@@ -79,7 +97,9 @@ export function acceptanceBasis(work,{criterionIds=work.objective.criteria.map(c
   const count=(entity,id)=>(work.acceptanceChanges||[]).filter(change=>change.entity===entity&&change.entityId===id).length;
   const criterionHash=id=>{
     const c=work.objective.criteria.find(c=>c.id===id);if(!c)throw new Error(`Criterio inexistente: ${id}`);
-    return {id,sha256:sha256(JSON.stringify({workId:work.id,cycle:work.cycle,id,description:c.description,verification:c.verification,changes:count('criterion',id)}))};
+    // Omit the default to preserve legacy hashes byte-for-byte. Non-default
+    // modes participate explicitly; every mode change also advances the counter.
+    return {id,sha256:sha256(JSON.stringify({workId:work.id,cycle:work.cycle,id,description:c.description,verification:c.verification,changes:count('criterion',id),...(criterionMode(c)==='evidence'?{}:{acceptanceMode:criterionMode(c)})}))};
   };
   const pending=new Set(),memo=new Map();
   const taskHash=id=>{
@@ -90,7 +110,7 @@ export function acceptanceBasis(work,{criterionIds=work.objective.criteria.map(c
   };
   return {criteria:criterionIds.map(criterionHash),tasks:taskIds.map(taskHash)};
 }
-function checkAcceptance(work,e,{criterionIds=e.criterionIds,taskIds=e.taskIds}={}){
+export function checkAcceptance(work,e,{criterionIds=e.criterionIds,taskIds=e.taskIds}={}){
   if(!e.acceptanceBasis)throw new Error(`Evidencia ${e.id} sin base observada de aceptación; requiere nueva observación`);
   const current=acceptanceBasis(work,{criterionIds,taskIds});
   for(const section of ['criteria','tasks'])for(const item of current[section]){
@@ -155,7 +175,10 @@ export function saveWork(root,candidate,expectedRevision){
   status(root);const priorHistory=history(root); // Preflight before persisting canonical data.
   const archivedIDs=new Set(priorHistory.filter(e=>e.workId===old.id).flatMap(e=>e.evidenceIds));
   for(const id of archivedIDs){const before=old.evidence.find(e=>e.id===id),after=candidate.evidence.find(e=>e.id===id);if(!same(before,after))throw new Error(`Evidencia archivada inmutable: ${id}`);}
-  const w=structuredClone(candidate);w.revision++;w.updatedAt=now();validateWork(root,w);
+  const w=structuredClone(candidate);
+  w.completedTaskIds=[...new Set([...completedTaskIds(old),...completedTaskIds(w)])];
+  for(const task of w.tasks)if(task.status==='cancelled')assertTaskCancellation(w,task.id);
+  w.revision++;w.updatedAt=now();validateWork(root,w);
   const oldChanges=old.acceptanceChanges||[],newChanges=w.acceptanceChanges||[];
   if(newChanges.length<oldChanges.length||!same(newChanges.slice(0,oldChanges.length),oldChanges))throw new Error('Historial de aceptación inmutable');
   for(const before of old.evidence){
@@ -163,22 +186,97 @@ export function saveWork(root,candidate,expectedRevision){
     const observed=e=>{const {summary,editedAt,...rest}=e;return rest;};
     if(!same(observed(before),observed(after)))throw new Error(`Observación de evidencia inmutable: ${before.id}; repetir con un ID nuevo`);
   }
+  const oldResults=old.results||[],newResults=w.results||[];
+  if(newResults.length<oldResults.length||!same(newResults.slice(0,oldResults.length),oldResults))throw new Error('Resultados aceptados inmutables');
+  for(const record of newResults.slice(oldResults.length)){
+    if(record.cycle!==w.cycle||fingerprint(root,record.report).sha256!==record.sha256)throw new Error(`Resultado sin informe incorporado íntegro: ${record.id}`);
+    checkAcceptance(w,record,{criterionIds:[],taskIds:record.acceptedTaskIds});
+  }
   for(const evidence of w.evidence.filter(e=>!old.evidence.some(previous=>previous.id===e.id)))assertObservedEvidence(root,w,evidence);
+  const newlyDone=new Set(w.tasks.filter(t=>t.status==='done'&&old.tasks.find(previous=>previous.id===t.id)?.status!=='done').map(t=>t.id));
+  if(newlyDone.size){
+    const issues=completionReadiness(root,w).issues.filter(issue=>newlyDone.has(issue.entity)&&['TASK_UNSUPPORTED','TASK_ACCEPTANCE_STALE'].includes(issue.code));
+    if(issues.length){const error=new Error('Completar tareas requiere resultado aceptado o evidencia pertinente');error.code='TASK_ACCEPTANCE_REQUIRED';error.issues=issues;throw error;}
+  }
   return commitWork(root,w);
 }
 function assertObservedReport(e){if(!e.files.some(file=>file.path===e.report&&typeof file.sha256==='string'))throw new Error(`Evidencia ${e.id} sin informe/salida observado fingerprintado`);}
-function assertCompletion(root,w,{fresh=true}={}){
-  if(w.blockers.length||w.decisionsPending.length)throw new Error('Trabajo con bloqueos o decisiones pendientes');
-  if(w.tasks.some(t=>!terminal(t.status)))throw new Error('Hay tareas abiertas');
-  const ev=new Map(w.evidence.map(e=>[e.id,e]));const used=new Set();
-  const covering=(ids,predicate,label,selection)=>{if(ids.some(id=>ev.get(id)?.status!=='pass'))throw new Error(`Aceptación contiene evidencia no positiva: ${label}`);const es=ids.map(id=>ev.get(id)).filter(e=>e&&e.status==='pass'&&e.kind!=='not_run'&&predicate(e));if(!es.length)throw new Error(`Falta evidencia positiva: ${label}`);for(const e of es){if(fresh){assertObservedReport(e);checkFresh(root,e,w,selection);}used.add(e.id);}};
-  for(const c of w.objective.criteria)covering(c.evidenceIds,e=>e.criterionIds.includes(c.id),c.id,{criterionIds:[c.id],taskIds:[]});
-  for(const t of w.tasks.filter(t=>t.status==='done'))covering(t.evidenceIds,e=>e.taskIds.includes(t.id),t.id,{criterionIds:[],taskIds:[t.id]});
-  return [...used];
+/** One exhaustive evaluator for reads and closure. Task history does not require
+ * the implementation files to retain their old bytes; final criteria do. */
+export function completionReadiness(root,w,{fresh=!terminal(w.status)}={}){
+  const issues=[],used=new Set(),ev=new Map(w.evidence.map(e=>[e.id,e]));
+  const issue=(code,entity,message)=>issues.push({code,entity,message});
+  if(fresh)for(const document of w.documents){
+    // Match the document existence rule of the prospective terminal Work.
+    // Evidence reports are checked through their active final acceptance below.
+    if(w.evidence.some(e=>e.report===document.path))continue;
+    try{if(!exists(root,document.path))issue('DOCUMENT_MISSING',document.path,`Documento no existe: ${document.path}`);}
+    catch(error){issue('DOCUMENT_INVALID',document.path,error.message);}
+  }
+  w.blockers.forEach((message,i)=>issue('BLOCKER',`blockers[${i}]`,message));
+  w.decisionsPending.forEach((message,i)=>issue('DECISION_PENDING',`decisionsPending[${i}]`,message));
+  for(const t of w.tasks)if(!terminal(t.status))issue('TASK_OPEN',t.id,`Tarea ${t.id}: ${t.status}`);
+  if(fresh)for(const t of w.tasks)if(t.status==='cancelled'&&completedTaskIds(w).includes(t.id))issue('TASK_ALREADY_COMPLETED',t.id,`Tarea realizada en este ciclo; cancelación no admisible: ${t.id}`);
+  for(const c of w.objective.criteria){
+    const mode=criterionMode(c),requiresEvidence=mode!=='user',requiresUser=mode!=='evidence';
+    let positive=false,userPositive=false;const userFailures=[];
+    for(const id of c.evidenceIds){
+      const e=ev.get(id);
+      if(e?.origin==='user_acceptance'){
+        if(!requiresUser)continue;
+        try{
+          if(e.kind!=='manual'||e.status!=='pass'||!e.criterionIds.includes(c.id))throw new Error(`Aceptación de usuario inválida: ${id}`);
+          if(fresh){assertObservedReport(e);checkFresh(root,e,w,{criterionIds:[c.id],taskIds:[]});}
+          userPositive=true;used.add(id);
+        }catch(error){userFailures.push(error.message);}
+        continue;
+      }
+      if(!requiresEvidence)continue;
+      if(!e||e.status!=='pass'||e.kind==='not_run'||!e.criterionIds.includes(c.id)){issue('EVIDENCE_NOT_POSITIVE',c.id,`Evidencia no positiva: ${id}`);continue;}
+      try{if(fresh){assertObservedReport(e);checkFresh(root,e,w,{criterionIds:[c.id],taskIds:[]});}positive=true;used.add(id);}
+      catch(error){issue('EVIDENCE_STALE',c.id,error.message);}
+    }
+    if(requiresEvidence&&!positive)issue('CRITERION_UNSUPPORTED',c.id,`Falta evidencia final vigente: ${c.id}`);
+    if(requiresUser&&!userPositive){
+      issue('USER_ACCEPTANCE_REQUIRED',c.id,`Falta aceptación explícita vigente del usuario: ${c.id}`);
+      for(const message of userFailures)issue('USER_ACCEPTANCE_STALE',c.id,message);
+    }
+  }
+  for(const t of w.tasks.filter(t=>t.status==='done')){
+    let supported=false;const failures=[];
+    for(const r of (w.results||[]).filter(r=>r.cycle===w.cycle&&r.acceptedTaskIds.includes(t.id))){
+      try{
+        if(fresh){checkAcceptance(w,r,{criterionIds:[],taskIds:[t.id]});if(fingerprint(root,r.report).sha256!==r.sha256)throw new Error(`Informe de resultado alterado: ${r.id}`);}
+        supported=true;
+      }catch(error){failures.push(error.message);}
+    }
+    for(const id of t.evidenceIds){
+      const e=ev.get(id);if(!e||e.origin==='user_acceptance'||e.status!=='pass'||e.kind==='not_run'||!e.taskIds.includes(t.id))continue;
+      try{
+        if(fresh){
+          assertObservedReport(e);checkAcceptance(w,e,{criterionIds:[],taskIds:[t.id]});
+          if(fingerprint(root,e.report).sha256!==e.files.find(file=>file.path===e.report).sha256)throw new Error(`Informe histórico alterado: ${e.id}`);
+        }
+        supported=true;used.add(id);
+      }
+      catch(error){failures.push(error.message);}
+    }
+    if(!supported){issue('TASK_UNSUPPORTED',t.id,`Falta resultado aceptado o evidencia pertinente: ${t.id}`);for(const message of failures)issue('TASK_ACCEPTANCE_STALE',t.id,message);}
+  }
+  return {ready:issues.length===0,issues,revision:w.revision,evidenceIds:[...used]};
+}
+function assertCompletion(root,w,options){
+  const readiness=completionReadiness(root,w,options);
+  if(!readiness.ready){const error=new Error(`Cierre pendiente: ${readiness.issues.length} impedimentos`);error.code='CLOSURE_NOT_READY';error.issues=readiness.issues;error.readiness=readiness;throw error;}
+  return readiness.evidenceIds;
 }
 function prepareClosure(root,w,{outcome,summary:result,limitations}){
   const evid=outcome==='done'?assertCompletion(root,w):w.evidence.map(e=>e.id);
-  if(outcome==='cancelled')for(const t of w.tasks)if(!terminal(t.status)){t.status='cancelled';t.summary=`Cancelada al cerrar trabajo: ${result}`;}
+  w.completedTaskIds=completedTaskIds(w);
+  if(outcome==='cancelled')for(const t of w.tasks)if(t.status!=='done'){
+    assertTaskCancellation(w,t.id);
+    if(!terminal(t.status)){t.status='cancelled';t.summary=`Cancelada al cerrar trabajo: ${result}`;}
+  }
   w.revision++;w.status=outcome;w.summary=result;w.nextAction=null;w.updatedAt=now();
   w.closure={id:`${w.id}:c${w.cycle}`,cycle:w.cycle,at:w.updatedAt,outcome,summary:result,evidenceIds:evid,limitations};
   validateWork(root,w);return w;
@@ -192,6 +290,7 @@ export function closeWork(root,id,{outcome='done',summary:result,limitations=[]}
 export function reopenWork(root,id,reason){
   if(!reason?.trim())throw new Error('Reapertura requiere motivo');const w=readWork(root,id,{files:false});if(!w.closure)throw new Error('Trabajo ya abierto');status(root);recordClosure(root,w);
   w.cycle++;w.revision++;w.status='pending';w.closure=null;w.updatedAt=now();w.summary=`Reabierto: ${reason}`;w.nextAction='Revisar alcance, tareas y evidencia antes de continuar';
+  w.completedTaskIds=[];
   // The original closure keeps its evidence references; active criteria/tasks need new acceptance.
   for(const c of w.objective.criteria)c.evidenceIds=[];
   for(const t of w.tasks){t.status='pending';t.evidenceIds=[];t.summary='Revisión requerida tras reapertura';}
@@ -227,26 +326,46 @@ export function validateProject(root,{fresh=false}={}){
   for(const entry of h)if(!seen.has(entry.workId))throw new Error(`Historial apunta a trabajo ausente: ${entry.workId}`);
   return {valid:true,works:count,active:s.works.length,closures:h.length,freshnessChecked:fresh};
 }
-export function validateResult(root,delegation,result,{globalRoot,catalogPath='catalog.json'}={}){
-  assertSchema('delegation',delegation);assertSchema('result',result);
-  for(const [left,right] of [['id','delegationId'],['workId','workId'],['workRevision','workRevision'],['agent','agent']])if(delegation[left]!==result[right])throw new Error(`Resultado no corresponde al encargo: ${right}`);
-  const work=readWork(root,delegation.workId,{files:false});
-  if(work.revision!==delegation.workRevision)throw new Error('Revisión del encargo obsoleta; releer y reconciliar');
+export const inScope=(p,scopes)=>scopes.some(scope=>p===scope||p.startsWith(scope+'/'));
+export function validateDelegation(root,delegation,{globalRoot,catalogPath='catalog.json',work=readWork(root,delegation.workId,{files:false}),canonical=false}={}){
+  assertSchema('delegation',delegation);
+  if(work.id!==delegation.workId||delegation.workRevision>work.revision)throw new Error('Identidad/revisión de encargo inválida');
   if(!globalRoot)throw new Error('Falta la raíz global confiable de plantillas');
   const catalog=readJSON(globalRoot,catalogPath),template=catalog.templates?.[delegation.templateId];
   if(!template||!catalog.specialists.some(a=>a.id===delegation.agent))throw new Error('Plantilla o agente fuera del catálogo global');
   readText(globalRoot,template); // Resolve and actually read the installed template through the same path guard.
   unique(delegation.taskIds,'Tareas del encargo');
   const tasks=delegation.taskIds.map(id=>{const task=work.tasks.find(t=>t.id===id);if(!task||task.agent!==delegation.agent)throw new Error(`Tarea no asignada al agente: ${id}`);return task;});
-  for(const p of [...delegation.inputs,delegation.output,...delegation.writeScope])safePath(root,p);
-  const inScope=(p,scopes)=>scopes.some(scope=>p===scope||p.startsWith(scope+'/'));
-  if(!inScope(delegation.output,delegation.writeScope))throw new Error('Output fuera del alcance de escritura');
+  for(const p of [...delegation.inputs,...(delegation.output==='conversation'?[]:[delegation.output]),...delegation.writeScope])safePath(root,p);
+  const derived=key=>[...new Set(tasks.flatMap(t=>t[key]))];
+  if(canonical)for(const key of ['writeScope','resources','acceptance'])if(!same(delegation[key],derived(key)))throw new Error(`Encargo no canónico: ${key}`);
+  if(delegation.output!=='conversation'&&!inScope(delegation.output,delegation.writeScope))throw new Error('Output fuera del alcance de escritura');
   for(const scope of delegation.writeScope)if(!tasks.some(t=>inScope(scope,t.writeScope)))throw new Error(`Encargo fuera del alcance de la tarea: ${scope}`);
+  for(const resource of delegation.resources)if(!derived('resources').includes(resource))throw new Error(`Recurso no autorizado: ${resource}`);
+  // Resources can also contain capability labels; only guarded relative paths
+  // authorize filesystem reads. Host roots never come from these strings.
+  const readScope=[...delegation.writeScope,...delegation.resources.filter(p=>{try{safePath(root,p);return true;}catch{return false;}})];
+  for(const p of delegation.inputs){if(!inScope(p,readScope))throw new Error(`Input no autorizado: ${p}`);if(!exists(root,p))throw new Error(`Input inaccesible: ${p}`);}
+  return {work,tasks,readScope};
+}
+export function validateResultIdentity(delegation,result){
+  assertSchema('delegation',delegation);assertSchema('result',result);
+  for(const [left,right] of [['id','delegationId'],['workId','workId'],['workRevision','workRevision'],['agent','agent']])if(delegation[left]!==result[right])throw new Error(`Resultado no corresponde al encargo: ${right}`);
+}
+export function validateResult(root,delegation,result,{globalRoot,catalogPath='catalog.json',acceptanceBasis:priorBasis,canonical=false,requireOutput=true}={}){
+  validateResultIdentity(delegation,result);
+  const {work,readScope}=validateDelegation(root,delegation,{globalRoot,catalogPath,canonical});
+  if(priorBasis){
+    const criterionIds=[...new Set(work.tasks.filter(t=>delegation.taskIds.includes(t.id)).flatMap(t=>t.criterionIds))];
+    const selection={criterionIds,taskIds:delegation.taskIds};
+    for(const [section,ids] of [['criteria',criterionIds],['tasks',delegation.taskIds]])if(!same(priorBasis[section].map(x=>x.id).sort(),[...ids].sort()))throw new Error(`Base del encargo no corresponde: ${section}`);
+    checkAcceptance(work,{id:delegation.id,acceptanceBasis:priorBasis},selection);
+  }else if(work.revision!==delegation.workRevision)throw new Error('Revisión del encargo obsoleta; releer y reconciliar');
   for(const p of [...result.artifacts,...result.changedFiles]){
     safePath(root,p);if(!inScope(p,delegation.writeScope))throw new Error(`Resultado fuera del alcance de escritura: ${p}`);
     if(!exists(root,p))throw new Error(`Archivo declarado inexistente: ${p}`);
   }
-  if(result.status==='completed'&&!result.artifacts.includes(delegation.output))throw new Error('Resultado completed no declara el output del encargo');
-  for(const check of result.checks)if(check.evidenceRef){safePath(root,check.evidenceRef);if(!exists(root,check.evidenceRef))throw new Error('Referencia de evidencia inexistente');}
+  if(requireOutput&&delegation.output!=='conversation'&&result.status==='completed'&&!result.artifacts.includes(delegation.output))throw new Error('Resultado completed no declara el output del encargo');
+  for(const check of result.checks)if(check.evidenceRef){safePath(root,check.evidenceRef);if(!inScope(check.evidenceRef,readScope))throw new Error('Referencia de evidencia no autorizada');if(!exists(root,check.evidenceRef))throw new Error('Referencia de evidencia inexistente');}
   return {valid:true,templateId:delegation.templateId,semanticAcceptance:'PENDING_REVIEW',note:'No prueba ejecución, identidad nativa ni ausencia de otros cambios. Revisar diff y evidencia.'};
 }

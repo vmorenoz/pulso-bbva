@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {listFiles,hash} from './files.mjs';
-import {sourceRoot,runtimeModules,verifyBBVA} from './build.mjs';
+import {sourceRoot,releaseVersion,runtimeModules,verifyBBVA} from './build.mjs';
 
 const coreFolders={schemas:new Set(),templates:new Set()};
 const foreign={vscode:/opencode|@opencode-ai|delegation-observer|delegation-attempts|reconcile_attempts|tool\.execute\.(?:before|after)/i,opencode:/\bvscode\b|\bcopilot\b|@vscode|LanguageModelToolResult|chatAgents|toolInvocationToken/i};
@@ -47,7 +47,7 @@ export function verifyPackage(target,root,{coreRoot=path.join(sourceRoot,'core')
     if(hash(fs.readFileSync(path.join(root,destination)))!==expectedHash)throw new Error(`Packaged BBVA changed: ${file}`);
   }
   const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json')));
-  if(pkg.version!=='4.0.0')throw new Error('Wrong artifact version');
+  if(pkg.version!==releaseVersion||manifest.version!==releaseVersion)throw new Error('Wrong artifact version');
   if(target==='vscode') {
     if(pkg.enabledApiProposals?.length)throw new Error('Proposed API in native package');
     if(pkg.contributes.chatAgents.length!==10||pkg.contributes.chatSkills.length!==10||pkg.contributes.languageModelTools.length!==4)throw new Error('Incomplete native contributions');

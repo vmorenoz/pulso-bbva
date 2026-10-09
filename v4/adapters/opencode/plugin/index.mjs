@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {toolDefinitions, toolContracts, validateToolInput} from '../resources/lib/tool-contracts.mjs';
+import {toolDefinitions, toolContracts, validateToolInput, isMutating} from '../resources/lib/tool-contracts.mjs';
 import {executeTool} from '../resources/lib/semantic-tools.mjs';
 import {checkSchemaVocabulary, validateSchema} from '../resources/lib/schema.mjs';
 import {exists, readJSON} from '../resources/lib/fs.mjs';
@@ -12,7 +12,17 @@ import {attemptActionSchemas} from './attempt-contracts.mjs';
 import {createDelegationObserver, readDelegationAttempts} from './delegation-observer.mjs';
 
 const resourceRoot = fileURLToPath(new URL('../resources/', import.meta.url));
-const failure = error => ({title: 'Pulso · Error', output: String(error?.message || 'Invalid operation'), ok: false,
+// Read the manifest beside the loaded runtime, never the checkout or a build constant.
+const loadedPackage = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+if (typeof loadedPackage.name !== 'string' || !loadedPackage.name || typeof loadedPackage.version !== 'string' || !loadedPackage.version) throw new Error('Loaded Pulso package identity is unavailable');
+const runtime = Object.freeze({adapter: 'opencode', packageName: loadedPackage.name, version: loadedPackage.version});
+function provenance(context) {
+  const host = Object.fromEntries(['sessionID', 'messageID', 'callID'].filter(key => typeof context?.[key] === 'string' && context[key].trim()).map(key => [key, context[key]]));
+  return {runtime, ...(Object.keys(host).length ? {host} : {})};
+}
+const failure = error => ({title: 'Pulso · Error', output: String(error?.message || 'Invalid operation').slice(0, 500), ok: false,
+  error: {code: error?.code || 'OPERATION_FAILED', message: String(error?.message || 'Invalid operation').slice(0, 500),
+    ...(error?.issues ? {issues: error.issues} : {}), ...(error?.issueCount ? {issueCount: error.issueCount} : {})},
   ...(error?.persistence ? {persistence: error.persistence} : {})});
 const nativeResult = receipt => ({title: receipt.title, output: JSON.stringify(receipt),
   metadata: {pulso: true, ok: receipt.ok, ...(receipt.persistence ? {persistence: receipt.persistence} : {})}});
@@ -51,22 +61,29 @@ export async function PulsoPlugin({directory, homeDir = os.homedir()}, native = 
       const schema = schemaToZod(descriptor, z, validator);
       return [name, (definition.inputSchema.required || []).includes(name) ? schema : schema.optional()];
     }));
-    registered[definition.name] = tool({description: definition.modelDescription + (definition.name === 'pulso_workspace' ? ' attempts/reconcile_attempts consultan telemetría pasiva sin confirmar actividad ni aceptación.' : ''), args,
+    registered[definition.name] = tool({description: definition.modelDescription
+      + (wrapped ? ' Envelope nativo: {request:{action,...}}.' : ' Filtros planos, sin request.')
+      + ' output contiene el recibo JSON: retorno nativo no equivale a ok:true; ok:true no implica objetivo cerrado.'
+      + (definition.name === 'pulso_work' ? ' accept_delivery: comprobar data.closed/readiness; aceptación guardada puede quedar pendiente de cierre. Conservar delegation y acceptanceBasis originales para accept_result.' : '')
+      + (definition.name === 'pulso_workspace' ? ' attempts/reconcile_attempts consultan telemetría pasiva sin confirmar actividad ni aceptación.' : ''), args,
       async execute(input, context) {
         let semantic, root, assertContext;
+        const origin = provenance(context);
+        const respond = receipt => nativeResult({...receipt, provenance: origin, ...(root ? {workspace: root} : {})});
         try {
           if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Expected an object');
           if (wrapped && (Object.keys(input).length !== 1 || !Object.hasOwn(input, 'request'))) throw new Error('Only the native request envelope is allowed');
-          semantic = schemas[definition.name].parse(structuredClone(wrapped ? input.request : input));
-          if (!attemptActionSchemas[semantic.action] || definition.name !== 'pulso_workspace') validateToolInput(definition.name, semantic);
+          semantic = structuredClone(wrapped ? input.request : input);
+          if (definition.name === 'pulso_workspace' && Object.hasOwn(attemptActionSchemas, semantic?.action)) semantic = schemas[definition.name].parse(semantic);
+          else validateToolInput(definition.name, semantic);
           if (typeof context?.ask !== 'function') throw new Error('Native approval is unavailable; operation blocked');
           root = rootOf(context);
           assertContext = invocationContext(context, root, context.directory);
           assertContext();
-        } catch (error) { return nativeResult(failure(error)); }
+        } catch (error) { return respond(failure(error)); }
         const action = semantic.action || 'read', resource = semantic.scope || semantic.workId || 'workspace';
         // Denial/cancellation remains a host rejection, never normal success.
-        await context.ask({permission: definition.name, patterns: [`${action}:${resource}`], always: [`${action}:${resource}`], metadata: {action, resource}});
+        await context.ask({permission: definition.name, patterns: [`${action}:${resource}`], always: [`${action}:${resource}`], metadata: {action, resource, mutating: isMutating(definition.name, semantic)}});
         assertContext();
         let receipt;
         if (definition.name === 'pulso_workspace' && attemptActionSchemas[semantic.action]) {
@@ -76,7 +93,7 @@ export async function PulsoPlugin({directory, homeDir = os.homedir()}, native = 
         try { assertContext(); } catch (error) {
           receipt = {...receipt, ok: false, contextChanged: true, output: `${receipt.output}\nContext changed after invocation: ${error.message}`};
         }
-        return nativeResult({...receipt, workspace: root});
+        return respond(receipt);
       },
     });
   }

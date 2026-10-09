@@ -1,9 +1,11 @@
 # UI y accesibilidad · {{work-id}}
 <!-- template: ui-review@1.0 -->
+Guía para resultado inline; omitir secciones irrelevantes, sin tabla/documento obligatorio.
 ## Alcance y entorno
 {{Pantallas, flujo, versión, viewport, datos sintéticos y herramientas realmente disponibles.}}
 ## Evidencia visual y funcional
-{{Capturas/rutas, inspección del DOM y navegación. Distinguir análisis estático de uso real.}}
+{{Capturas/rutas, base/versión, estado y viewport realmente observados. Distinguir análisis
+estático de uso real; no trasladar capturas ni PASS entre versiones.}}
 ## Estados y consistencia
 {{Carga, vacío, error, éxito, responsive, componentes existentes y diseño acordado.}}
 ## Interacción y accesibilidad

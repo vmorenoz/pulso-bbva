@@ -1,4 +1,4 @@
-import {closeWork,createWork,readWork,reopenWork,saveWork,status,history,validateProject,assertObservedEvidence,syncWork,repair} from './artifacts.mjs';
+import {closeWork,createWork,readWork,reopenWork,saveWork,status,history,validateProject,assertObservedEvidence,syncWork,repair,completionReadiness,criterionMode,completedTaskIds,assertTaskCancellation} from './artifacts.mjs';
 import {assertID,now,safePath} from './fs.mjs';
 import {workReceipt} from './receipts.mjs';
 import {assertSchema} from './schema.mjs';
@@ -15,8 +15,10 @@ const keys=(value,allowed)=>{for(const key of Object.keys(value))if(!allowed.inc
 
 
 const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
-const criterionAcceptance=c=>({description:c.description,verification:c.verification});
-const taskAcceptance=t=>Object.fromEntries(['criterionIds','dependsOn','writeScope','resources','acceptance'].map(key=>[key,structuredClone(t[key])]));
+const criterionAcceptance=c=>({description:c.description,verification:c.verification,acceptanceMode:criterionMode(c)});
+// Title/agent changes advance the existing acceptance-change counter. Keeping
+// the task hash shape unchanged preserves all untouched legacy observations.
+const taskAcceptance=t=>Object.fromEntries(['title','agent','criterionIds','dependsOn','writeScope','resources','acceptance'].map(key=>[key,structuredClone(t[key])]));
 function recordAcceptanceChange(work,entity,entityId,before,after,action){
   const reason=text(action.reason,'Cambiar aceptación requiere reason',{max:1000});
   const record={at:now(),entity,entityId,before,after,reason};
@@ -51,6 +53,7 @@ export function applyWorkMutation(root,input) {
   const work=readWork(root,workId,{files:false});
   if(work.revision!==expectedRevision)throw new Error(`Revisión obsoleta; actual=${work.revision}. Releer y reconciliar, no sobrescribir.`);
   const candidate=structuredClone(work),changes=[];
+  candidate.completedTaskIds=completedTaskIds(work);
   for(const action of actions){
     if(!action||typeof action!=='object'||Array.isArray(action))throw new Error('Acción inválida');
     switch(action.type){
@@ -70,7 +73,7 @@ export function applyWorkMutation(root,input) {
         assertID(action.task?.id);if(candidate.tasks.some(t=>t.id===action.task.id))throw new Error(`Tarea duplicada: ${action.task.id}`);
         const task=structuredClone(action.task);
         task.title=text(task.title,'task.title',{max:300});
-        candidate.tasks.push(task);changes.push(`${task.id} agregada`);break;
+        candidate.tasks.push(task);candidate.completedTaskIds=completedTaskIds(candidate);changes.push(`${task.id} agregada`);break;
       }
       case 'task.update': {
         keys(action,['type','taskId','patch','reason','decisionRef']);
@@ -89,7 +92,9 @@ export function applyWorkMutation(root,input) {
         keys(action,['type','taskId','status','summary']);
         assertID(action.taskId);const task=candidate.tasks.find(t=>t.id===action.taskId);if(!task)throw new Error(`Tarea inexistente: ${action.taskId}`);
         if(!['pending','in_progress','blocked','paused','done','cancelled'].includes(action.status))throw new Error('Estado de tarea inválido');
+        if(action.status==='cancelled')assertTaskCancellation(candidate,task.id);
         task.status=action.status;if(action.summary!==undefined)task.summary=text(action.summary,'task.summary',{max:2000});
+        candidate.completedTaskIds=completedTaskIds(candidate);
         if(action.status==='cancelled'&&!task.summary.trim())throw new Error('Tarea cancelada requiere motivo');
         changes.push(`${task.id} ${action.status==='done'?'completada':action.status}`);break;
       }
@@ -124,12 +129,13 @@ export function applyWorkMutation(root,input) {
         candidate.objective.criteria.push(criterion);changes.push(`${criterion.id} agregada`);break;
       }
       case 'criterion.update': {
-        keys(action,['type','criterionId','reason','decisionRef','description','verification']);
+        keys(action,['type','criterionId','reason','decisionRef','description','verification','acceptanceMode']);
         const criterion=candidate.objective.criteria.find(c=>c.id===action.criterionId);if(!criterion)throw new Error(`Criterio inexistente: ${action.criterionId}`);
-        if(action.description===undefined&&action.verification===undefined)throw new Error('criterion.update requiere descripción o verificación');
+        if(action.description===undefined&&action.verification===undefined&&action.acceptanceMode===undefined)throw new Error('criterion.update requiere descripción, verificación o acceptanceMode');
         const before=criterionAcceptance(criterion);
         if(action.description!==undefined)criterion.description=text(action.description,'criterion.description',{max:4000});
         if(action.verification!==undefined)criterion.verification=text(action.verification,'criterion.verification',{max:4000});
+        if(action.acceptanceMode!==undefined)criterion.acceptanceMode=action.acceptanceMode;
         const after=criterionAcceptance(criterion);
         if(!equal(before,after)){
           recordAcceptanceChange(candidate,'criterion',criterion.id,before,after,action);
@@ -146,7 +152,7 @@ export function applyWorkMutation(root,input) {
       case 'task.remove': {
         keys(action,['type','taskId']);
         assertID(action.taskId);const task=candidate.tasks.find(t=>t.id===action.taskId);if(!task)throw new Error(`Tarea inexistente: ${action.taskId}`);
-        if(task.evidenceIds.length||candidate.evidence.some(e=>e.taskIds.includes(action.taskId))||candidate.tasks.some(t=>t.dependsOn.includes(action.taskId)))throw new Error(`Tarea ${action.taskId} tiene dependencias`);
+        if(completedTaskIds(candidate).includes(action.taskId)||task.evidenceIds.length||candidate.evidence.some(e=>e.taskIds.includes(action.taskId))||(candidate.results||[]).some(r=>r.acceptedTaskIds.includes(action.taskId))||candidate.tasks.some(t=>t.dependsOn.includes(action.taskId)))throw new Error(`Tarea ${action.taskId} tiene dependencias o constancia de realización`);
         candidate.tasks=candidate.tasks.filter(t=>t.id!==action.taskId);changes.push(`${action.taskId} retirada`);break;
       }
       case 'document.register': {
@@ -157,7 +163,7 @@ export function applyWorkMutation(root,input) {
       }
       case 'document.unregister': {
         keys(action,['type','path']);
-        safePath(root,action.path);if(candidate.evidence.some(e=>e.report===action.path))throw new Error('El documento es informe de evidencia vigente');
+        safePath(root,action.path);if(candidate.evidence.some(e=>e.report===action.path)||(candidate.results||[]).some(r=>r.report===action.path))throw new Error('El documento es informe de evidencia o resultado conservado');
         if(!candidate.documents.some(d=>d.path===action.path))throw new Error(`Documento no registrado: ${action.path}`);
         candidate.documents=candidate.documents.filter(d=>d.path!==action.path);changes.push('documento retirado del registro');break;
       }
@@ -172,7 +178,7 @@ export function closeWorkOperation(root,{workId,expectedRevision,outcome='done',
   assertID(workId);const current=readWork(root,workId,{files:false});
   if(current.revision!==expectedRevision)throw new Error(`Revisión obsoleta; actual=${current.revision}. Releer y reconciliar, no sobrescribir.`);
   const closed=closeWork(root,workId,{outcome,summary:text(summary,'summary'),limitations:list(limitations,'limitations',30)});
-  return workReceipt(closed,{operation:'work.close',changes:[outcome==='done'?'trabajo cerrado':'trabajo cancelado']});
+  return {...workReceipt(closed,{operation:'work.close',changes:[outcome==='done'?'trabajo cerrado':'trabajo cancelado']}),readiness:completionReadiness(root,closed)};
 }
 
 export function reopenWorkOperation(root,{workId,expectedRevision,reason}) {

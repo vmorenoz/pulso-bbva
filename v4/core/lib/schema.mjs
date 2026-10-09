@@ -31,7 +31,13 @@ function datetime(v) {
 }
 function walk(s,v,p,e) {
   if (s.anyOf) {
-    if (!s.anyOf.some(sub => { const tmp=[]; walk(sub,v,p,tmp); return !tmp.length; })) e.push(`${p}: no coincide con ninguna alternativa`);
+    const alternatives=s.anyOf.map(sub=>{const errors=[];walk(sub,v,p,errors);return {sub,errors};});
+    if(alternatives.some(item=>!item.errors.length))return;
+    // Prefer the matching discriminator (e.g. action.type), then the closest
+    // branch. Surface a useful field error instead of dumping every variant.
+    const matching=alternatives.filter(({sub})=>v&&typeof v==='object'&&Object.entries(sub.properties||{}).some(([key,shape])=>Object.hasOwn(shape,'const')&&v[key]===shape.const));
+    const best=(matching.length?matching:alternatives).sort((a,b)=>a.errors.length-b.errors.length)[0];
+    e.push(...best.errors);
     return;
   }
   if (Object.hasOwn(s,'const') && JSON.stringify(v)!==JSON.stringify(s.const)) e.push(`${p}: debe ser ${JSON.stringify(s.const)}`);
@@ -66,8 +72,13 @@ function walk(s,v,p,e) {
   }
 }
 export function validateSchema(s,value) {checkSchemaVocabulary(s);const errors=[];walk(s,value,'$',errors);return errors;}
+export function schemaError(label,errors){
+  const issues=errors.slice(0,8).map(message=>({code:'SCHEMA_INVALID',entity:message.split(':')[0],message:message.slice(0,240)}));
+  const error=new Error(`${label}: ${issues[0]?.message||'valor inválido'}${errors.length>1?`; ${errors.length-1} errores adicionales (consultar issues)`:''}`.slice(0,500));
+  error.code='SCHEMA_INVALID';error.issues=issues;error.issueCount=errors.length;return error;
+}
 export function assertSchema(name,value) {
   const errors=validateSchema(schema(name),value);
-  if (errors.length) throw new Error(`${name}:\n${errors.join('\n')}`);
+  if (errors.length) throw schemaError(name,errors);
   return value;
 }

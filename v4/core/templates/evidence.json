@@ -13,7 +13,7 @@
   "command": null,
   "cwd": ".",
   "exitCode": null,
-  "basis": "Ejemplo: sustituir por fingerprint real",
+  "basis": "Ejemplo no utilizable como observación: describir scope/base/versión reales y conservar snapshots auténticos de la comprobación.",
   "files": [
     {
       "path": "src/example.js",
@@ -24,7 +24,7 @@
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }
   ],
-  "summary": "Ejemplo no ejecutado. No constituye evidencia positiva.",
+  "summary": "Ejemplo no ejecutado. Sustituir fechas y huellas de files por observaciones reales; copiar acceptanceBasis previa recibida de core, no calcular huellas de tareas ni renovar PASS antiguo. No constituye evidencia positiva.",
   "acceptanceBasis": {
     "criteria": [
       {

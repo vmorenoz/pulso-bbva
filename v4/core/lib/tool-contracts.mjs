@@ -1,5 +1,5 @@
 /** One runtime-neutral contract source. Adapters only translate these descriptors. */
-import {schema as persistedSchema, validateSchema, checkSchemaVocabulary} from './schema.mjs';
+import {schema as persistedSchema, validateSchema, checkSchemaVocabulary, schemaError} from './schema.mjs';
 
 const text = (maxLength=4000,{blank=false}={}) => ({type:'string',maxLength,...(blank?{}:{minLength:1,pattern:'\\S'})});
 const enumeration = values => ({type:'string',enum:values});
@@ -37,7 +37,7 @@ mutationInput.properties.actions.items.anyOf = mutationInput.properties.actions.
   if(shape.properties.type.const==='evidence.add')shape.properties.evidence=observedEvidenceSchema(shape.properties.evidence);
   if(shape.properties.type.const==='work.set_overview')return atLeastOne(shape,Object.keys(shape.properties).filter(key=>key!=='type'));
   if(shape.properties.type.const==='task.update')shape.properties.patch=atLeastOne(shape.properties.patch,Object.keys(shape.properties.patch.properties));
-  if(shape.properties.type.const==='criterion.update')return atLeastOne(shape,['description','verification']);
+  if(shape.properties.type.const==='criterion.update')return atLeastOne(shape,['description','verification','acceptanceMode']);
   return shape;
 });
 export const mutationSchema = mutationInput.properties.actions.items;
@@ -50,7 +50,20 @@ const workspaceActions = {
   recover:action('recover')
 };
 const workActions = {
-  get:action('get',{workId:id,section:enumeration(['overview','tasks','criteria','evidence','documents','blockers','decisions','acceptanceChanges','all']),...readPage},['workId']),
+  get:action('get',{workId:id,section:enumeration(['overview','tasks','criteria','evidence','results','documents','blockers','decisions','acceptanceChanges','all']),...readPage},['workId']),
+  prepare_delegation:action('prepare_delegation',{
+    workId:id,taskIds:{type:'array',items:id,minItems:1,maxItems:50},delegationId:id,objective:text(),
+    inputs:clone(persistedSchema('delegation').properties.inputs),output:clone(persistedSchema('delegation').properties.output),
+    constraints:clone(persistedSchema('delegation').properties.constraints),templateId:clone(persistedSchema('delegation').properties.templateId)
+  },['workId','taskIds','delegationId','objective','inputs','output','constraints','templateId']),
+  accept_result:action('accept_result',{
+    ...workRef,delegation:clone(persistedSchema('delegation')),acceptanceBasis:clone(persistedSchema('evidence').properties.acceptanceBasis),
+    result:clone(persistedSchema('result')),acceptedTaskIds:{type:'array',items:id,minItems:0,maxItems:50},summary:text(2000)
+  },['workId','expectedRevision','delegation','acceptanceBasis','result','acceptedTaskIds','summary']),
+  accept_delivery:action('accept_delivery',{
+    ...workRef,summary:text(2000),criterionIds:{type:'array',items:id,minItems:1,maxItems:50},
+    source:object({text:text(8000),messageRef:text(2000)},['text']),limitations:{type:'array',items:text(1000),maxItems:30}
+  },['workId','expectedRevision','summary','criterionIds','source','limitations']),
   validate_result:action('validate_result',{delegation:clone(persistedSchema('delegation')),result:clone(persistedSchema('result'))},['delegation','result']),
   create:action('create',clone(createInput.properties),clone(createInput.required)),
   update:action('update',mutationInput.properties,mutationInput.required),
@@ -84,7 +97,7 @@ function descriptor(name,displayName,modelDescription,actions,mutatingActions=[]
 }
 export const toolContracts={
   pulso_workspace:descriptor('pulso_workspace','Workspace','Prepara, consulta, valida, sincroniza o recupera metadatos Pulso. status devuelve data.works con items completos y nextCursor; sigue hasMore. Los cursores caducan al cambiar el índice o los filtros.',workspaceActions,['prepare','sync','recover']),
-  pulso_work:descriptor('pulso_work','Trabajo','Consulta o actualiza un objetivo. get devuelve data completo por section, con páginas limit/cursor y acceptanceBasis; sigue data.hasMore y data.nextCursor. Los cursores caducan al cambiar Work o section. validate_result valida sin escribir. create permite omitir workId y crea el criterio AC-1; las demás mutaciones requieren ID y revisión. evidence.add exige evidencia completa: static/manual/not_run usan exitCode:null; la revisión estática usa command:null, files con SHA-256 reales y acceptanceBasis obtenida antes de observar. Calcular una huella no es una prueba executed.',workActions,['create','update','block','close','reopen']),
+  pulso_work:descriptor('pulso_work','Trabajo','Consulta o actualiza un objetivo. get devuelve readiness completo, páginas por section y acceptanceBasis; sigue nextCursor. prepare_delegation es lectura y deriva encargo, base previa y hostContext. accept_result incorpora resultado revisado y acceptedTaskIds con base previa vigente; no satisface criterios. accept_delivery conserva aceptación manual declarada e intenta cierre devolviendo todos los impedimentos; no completa tareas. Las mutaciones requieren revisión actual. validate_result valida sin escribir. evidence.add requiere observación y hashes reales; calcular hashes no prueba ejecución.',workActions,['create','update','block','close','reopen','accept_result','accept_delivery']),
   pulso_history:descriptor('pulso_history','Historial','Consulta cierres con fechas, ciclos, resumen completo, limitaciones y referencias. data.items se pagina con limit/cursor; sigue hasMore y nextCursor. Cambiar historial o filtros invalida el cursor.',null,[],historySchema),
   pulso_context:descriptor('pulso_context','Contexto','Consulta o registra contexto, preferencias y aprendizajes. read devuelve entradas completas, revisions y nextCursor. Las escrituras exigen scope y expectedRevision; preferencias y aprendizajes requieren source explícito. summary es una vista limitada a 8000 caracteres.',contextActions,['set_context','set_preference','remove_preference','add_learning'])
 };
@@ -108,7 +121,7 @@ function assertJSON(value,at='input',seen=new Set()){
 export function validateInput(shape,input){
   assertJSON(input);
   const errors=validateSchema(shape,input);
-  if(errors.length)throw new Error(`input: ${errors.join('; ')}`);
+  if(errors.length)throw schemaError('input',errors);
   return input;
 }
 /** Throws before native context resolution or writes. Returns the original input. */
@@ -116,12 +129,12 @@ export function validateToolInput(definitionOrName,input){
   const name=typeof definitionOrName==='string'?definitionOrName:definitionOrName?.name;
   const descriptor=toolContracts[name];
   if(!descriptor)throw new Error(`Herramienta no admitida: ${String(name)}`);
-  validateInput(descriptor.inputSchema,input);
   if(descriptor.actionSchemas){
+    validateInput({type:'object',properties:{action:enumeration(Object.keys(descriptor.actionSchemas))},required:['action'],additionalProperties:true},input);
     const shape=descriptor.actionSchemas[input.action];
     if(!shape)throw new Error(`Acción no admitida: ${String(input.action)}`);
     validateInput(shape,input);
-  }
+  }else validateInput(descriptor.inputSchema,input);
   if(name==='pulso_history'&&input.since&&input.until&&Date.parse(input.since)>Date.parse(input.until))throw new Error('since debe ser anterior o igual a until');
   return input;
 }

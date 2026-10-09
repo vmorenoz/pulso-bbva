@@ -1,6 +1,6 @@
 {
   "name": "pulso-v4-source",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -12,10 +12,11 @@
     "build:vscode": "node scripts/build.mjs vscode",
     "check": "node scripts/check.mjs",
     "test": "node --test tests/*/*.test.mjs",
-    "verify": "npm run build && npm run check && npm test && npm run verify:installer-staged",
+    "smoke:happy": "node scripts/happy-path.mjs",
+    "verify": "npm run build && npm run check && npm run smoke:happy",
     "package:opencode": "node scripts/package.mjs opencode",
     "package:vscode": "node scripts/package.mjs vscode",
-    "verify:packages": "node --test tests/distribution/*.test.mjs",
+    "verify:packages": "node scripts/verify-packages.mjs",
     "install:pulso": "node installer/cli.mjs",
     "verify:installer-staged": "node tests/installer/stage-smoke.mjs"
   },
