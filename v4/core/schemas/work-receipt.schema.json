@@ -19,6 +19,19 @@
     "report":{"type":"string","minLength":1},
     "acceptedTaskIds":{"type":"array","items":{"type":"string","minLength":1}},
     "duplicate":{"type":"boolean"},
+    "contractVersion":{"const":2},
+    "operationId":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
+    "decisionHash":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+    "returnId":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
+    "continuityId":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
+    "intentRevision":{"type":"integer","minimum":1},
+    "appliedRevision":{"type":"integer","minimum":1},
+    "currentRevision":{"type":"integer","minimum":1},
+    "applied":{"type":"boolean"},
+    "currentPass":{"type":"boolean"},
+    "currentIntent":{"type":"boolean"},
+    "currentBasis":{"type":"boolean"},
+    "note":{"type":"string"},
     "acceptanceRecorded":{"const":true},
     "closed":{"type":"boolean"},
     "resolvedWaits":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"field":{"enum":["blockers","decisionsPending","nextAction"]},"message":{"type":"string"}},"required":["field","message"]}},
@@ -32,6 +45,14 @@
       "required":["ready","revision","issues","evidenceIds"]
     },
     "closeError":{"type":"object","additionalProperties":false,"properties":{"code":{"type":"string"},"message":{"type":"string"}},"required":["code","message"]},
-    "persistence":{"type":"object"}
+    "persistence":{
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "applied":{"type":"boolean"},"partial":{"type":"boolean"},"captured":{"type":"boolean"},
+        "workId":{"type":"string"},"delegationId":{"type":"string"},"returnId":{"type":"string"},"resultId":{"type":"string"},"evidenceId":{"type":"string"},
+        "revision":{"type":"integer","minimum":1},"acceptanceRevision":{"type":"integer","minimum":1},
+        "documents":{"type":"array","items":{"type":"string"}},"recovery":{"type":"string"},"note":{"type":"string"}
+      }
+    }
   }
 }

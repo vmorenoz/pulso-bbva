@@ -1,5 +1,5 @@
 import {closeWork,createWork,readWork,reopenWork,saveWork,status,history,validateProject,assertObservedEvidence,syncWork,repair,completionReadiness,criterionMode,completedTaskIds,assertTaskCancellation} from './artifacts.mjs';
-import {assertID,now,safePath} from './fs.mjs';
+import {assertID,now,safePath,withWorkspaceLock} from './fs.mjs';
 import {workReceipt} from './receipts.mjs';
 import {assertSchema} from './schema.mjs';
 
@@ -34,7 +34,8 @@ function invalidateAcceptance(work,{criterionIds=[],taskIds=[]}={}){
   // Evidence links describe the immutable observation. Active acceptance links may be withdrawn.
 }
 
-export function createWorkOperation(root,input) {
+export const createWorkOperation=(root,...args)=>withWorkspaceLock(root,()=>createWorkOperationLocked(root,...args));
+function createWorkOperationLocked(root,input) {
   if(input?.priority==='urgent')throw new Error('priority debe ser low, normal, high o critical; urgent no está admitido');
   assertSchema('work-create',input);
   const priority=input.priority||'normal';
@@ -43,7 +44,8 @@ export function createWorkOperation(root,input) {
   return workReceipt(work,{operation:'work.create',changes:['objetivo y criterio registrados']});
 }
 
-export function applyWorkMutation(root,input) {
+export const applyWorkMutation=(root,...args)=>withWorkspaceLock(root,()=>applyWorkMutationLocked(root,...args));
+function applyWorkMutationLocked(root,input) {
   if(input?.actions?.some?.(action=>action?.priority==='urgent'))throw new Error('priority debe ser low, normal, high o critical; urgent no está admitido');
   assertSchema('work-update',input);
   const {workId,expectedRevision,actions}=input;
@@ -176,14 +178,16 @@ export function applyWorkMutation(root,input) {
   return workReceipt(saved,{changes});
 }
 
-export function closeWorkOperation(root,{workId,expectedRevision,outcome='done',summary,limitations=[]}) {
+export const closeWorkOperation=(root,...args)=>withWorkspaceLock(root,()=>closeWorkOperationLocked(root,...args));
+function closeWorkOperationLocked(root,{workId,expectedRevision,outcome='done',summary,limitations=[]}) {
   assertID(workId);const current=readWork(root,workId,{files:false});
   if(current.revision!==expectedRevision)throw new Error(`Revisión obsoleta; actual=${current.revision}. Releer y reconciliar, no sobrescribir.`);
   const closed=closeWork(root,workId,{outcome,summary:text(summary,'summary'),limitations:list(limitations,'limitations',30)});
   return {...workReceipt(closed,{operation:'work.close',changes:[outcome==='done'?'trabajo cerrado':'trabajo cancelado']}),readiness:completionReadiness(root,closed)};
 }
 
-export function reopenWorkOperation(root,{workId,expectedRevision,reason}) {
+export const reopenWorkOperation=(root,...args)=>withWorkspaceLock(root,()=>reopenWorkOperationLocked(root,...args));
+function reopenWorkOperationLocked(root,{workId,expectedRevision,reason}) {
   assertID(workId);const current=readWork(root,workId,{files:false});
   if(current.revision!==expectedRevision)throw new Error(`Revisión obsoleta; actual=${current.revision}. Releer y reconciliar, no sobrescribir.`);
   const opened=reopenWork(root,workId,text(reason,'reason'));
@@ -191,13 +195,15 @@ export function reopenWorkOperation(root,{workId,expectedRevision,reason}) {
 }
 
 export function readStatus(root){return status(root);}
-export function syncWorkOperation(root,{workId,expectedRevision}){
+export const syncWorkOperation=(root,...args)=>withWorkspaceLock(root,()=>syncWorkOperationLocked(root,...args));
+function syncWorkOperationLocked(root,{workId,expectedRevision}){
   assertID(workId);const current=readWork(root,workId,{files:false});
   if(!Number.isSafeInteger(expectedRevision)||current.revision!==expectedRevision)throw new Error(`Revisión obsoleta; actual=${current.revision}. Releer y reconciliar, no sobrescribir.`);
   status(root);history(root);
   return workReceipt(syncWork(root,workId),{changes:['proyecciones sincronizadas']});
 }
-export function recoverWorkspaceOperation(root){
+export const recoverWorkspaceOperation=(root,...args)=>withWorkspaceLock(root,()=>recoverWorkspaceOperationLocked(root,...args));
+function recoverWorkspaceOperationLocked(root){
   const state=repair(root,{files:true});
   return {operation:'workspace.recover',recovered:true,state,validation:validateProject(root)};
 }

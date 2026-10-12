@@ -56,12 +56,20 @@ export async function selectWorkspaceRoot(vscode, {token, toolName, action} = {}
 export function createWorkspaceResolver(vscode) {
   let binding;
   let pending;
+  let generation = 0;
   const snapshot = () => JSON.stringify((vscode.workspace.workspaceFolders ?? []).map(folder => [
     folder.uri?.scheme, folder.uri?.fsPath, canonicalDirectory(folder.uri),
   ]));
+  let signature = snapshot();
+  function invalidate() {
+    generation++;
+    binding = undefined;
+    signature = snapshot();
+  }
+  const subscriptions = ['onDidChangeWorkspaceFolders', 'onDidGrantWorkspaceTrust'].flatMap(event =>
+    typeof vscode.workspace[event] === 'function' ? [vscode.workspace[event](invalidate)] : []);
   function current() {
-    const signature = snapshot();
-    if (binding && binding.signature !== signature) binding = undefined;
+    if (signature !== snapshot()) invalidate();
     return signature;
   }
   function assertRoot(root, token) {
@@ -71,47 +79,55 @@ export function createWorkspaceResolver(vscode) {
     if (!binding || binding.root !== root) throw new Error('The active Pulso project changed; retry using the selected project.');
   }
   function startSelection(options, signature) {
-    const selection = {signature};
+    const selection = {signature, generation};
     selection.promise = selectWorkspaceRoot(vscode, options).then(root => {
-      if (snapshot() !== signature) throw new Error('Workspace folders changed during project selection; retry.');
-      binding = {root, signature, id: randomUUID()};
-      return root;
+      current();
+      if (generation !== selection.generation || snapshot() !== signature) throw new Error('Workspace folders changed during project selection; retry.');
+      // Even reselecting the same root invalidates every previous invocation.
+      generation++;
+      binding = Object.freeze({root, bindingId: randomUUID(), generation});
+      return binding;
     }).finally(() => {if (pending === selection) pending = undefined;});
     pending = selection;
     return selection.promise;
   }
-  async function resolve(options = {}) {
+  async function resolveContext(options = {}) {
     assertHost(vscode, options.token);
     const signature = current();
-    if (binding) {assertRoot(binding.root, options.token); return binding.root;}
+    if (binding) {assertRoot(binding.root, options.token); return binding;}
     if (pending) {
-      if (pending.signature !== signature) throw new Error('Workspace folders changed during project selection; retry.');
-      const root = await pending.promise;
-      assertRoot(root, options.token);
-      return root;
+      if (pending.signature !== signature || pending.generation !== generation) throw new Error('Workspace folders changed during project selection; retry.');
+      const context = await pending.promise;
+      assertContext(context, options.token);
+      return context;
     }
     const roots = [...new Set((vscode.workspace.workspaceFolders ?? []).map(folder => canonicalDirectory(folder.uri)).filter(Boolean))];
     if (!roots.length) throw new Error('No open local workspace directories are available.');
     if (roots.length === 1) {
-      binding = {root: roots[0], signature, id: randomUUID()};
+      binding = Object.freeze({root: roots[0], bindingId: randomUUID(), generation: ++generation});
       assertRoot(binding.root, options.token);
-      return binding.root;
+      return binding;
     }
-    const root = await startSelection(options, signature);
-    assertRoot(root, options.token);
-    return root;
+    const context = await startSelection(options, signature);
+    assertContext(context, options.token);
+    return context;
   }
+  async function resolve(options = {}) { return (await resolveContext(options)).root; }
   async function select(options = {}) {
     assertHost(vscode, options.token);
     // A deliberate project switch gets its own picker after any initial choice.
     if (pending) await pending.promise;
-    return startSelection(options, current());
+    return (await startSelection(options, current())).root;
   }
-  function bindingId(root, token) { assertRoot(root, token); return binding.id; }
+  function bindingId(root, token) { assertRoot(root, token); return binding.bindingId; }
   function assertBinding(root, expectedBindingId, token) {
     assertRoot(root, token);
-    if (!expectedBindingId || binding.id !== expectedBindingId) throw new Error('Pulso binding changed or missing. Read status, confirm the intended workspace, then retry with its bindingId. No mutation applied.');
+    if (!expectedBindingId || binding.bindingId !== expectedBindingId) throw new Error('Pulso binding changed or missing. Read status, confirm the intended workspace, then retry with its bindingId.');
   }
-  return {resolve, select, assertRoot, bindingId, assertBinding};
+  function assertContext(context, token) {
+    assertBinding(context.root, context.bindingId, token);
+    if (context.generation !== generation) throw new Error('Pulso binding generation changed. Confirm the intended workspace.');
+  }
+  return {resolve, resolveContext, select, assertRoot, bindingId, assertBinding, assertContext,
+    dispose() { for (const subscription of subscriptions) subscription.dispose(); invalidate(); }};
 }
-

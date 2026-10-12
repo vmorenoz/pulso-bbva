@@ -2,10 +2,54 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {createWork,emptyState,initArtifacts,saveWork,status,history,validateProject} from './artifacts.mjs';
-import {atomicWrite,exists,safePath,readJSON,writeJSON,idOK,listFiles} from './fs.mjs';
-import {planProjectIdentity} from './identity.mjs';
+import {atomicWrite,exists,safePath,readJSON,writeJSON,idOK,listFiles,withWorkspaceLock,sha256} from './fs.mjs';
+import {planProjectIdentity,publishProjectIdentity,isUUID} from './identity.mjs';
 
 const preparationFile='.pulso/preparation.json';
+const migrationFile='.pulso-migration.json';
+const directoryIdentity=directory=>{const stat=fs.lstatSync(directory);if(!stat.isDirectory()||stat.isSymbolicLink())throw new Error('Migración requiere directorio propio');return {dev:stat.dev,ino:stat.ino};};
+const treeSnapshot=directory=>({identity:directoryIdentity(directory),files:listFiles(directory).map(file=>({path:file,sha256:sha256(fs.readFileSync(safePath(directory,file)))}))});
+const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+function assertTree(directory,snapshot){if(!same(treeSnapshot(directory),snapshot))throw new Error(`Migración modificada o directorio ajeno: ${directory}; datos conservados`);}
+function flushDirectory(directory){try{const fd=fs.openSync(directory,'r');try{fs.fsyncSync(fd);}finally{fs.closeSync(fd);}}catch{}}
+/** Recover only exact core-generated paths and snapshots. Never scan/delete by prefix.
+ * An abandoned write lock still requires explicit manual recovery first. Marker and
+ * backup survive any uncertain/error phase; preparing cannot bootstrap over them.
+ */
+export const recoverWorkspaceMigration=(root,options={})=>withWorkspaceLock(root,()=>recoverMigrationLocked(root,options));
+function recoverMigrationLocked(root,options){
+  if(!exists(root,migrationFile))return null;
+  const marker=readJSON(root,migrationFile);
+  if(marker?.schemaVersion!==1||marker.kind!=='legacy-migration'||!isUUID(marker.token)||!isUUID(marker.projectId)||marker.root!==fs.realpathSync(root)||
+    marker.stagePath!==`.pulso-migration-${marker.token}`||marker.backupPath!==`.pulso-legacy-${marker.token}`||!Number.isSafeInteger(marker.migratedWorks)||marker.migratedWorks<0)
+    throw new Error('Intención de migración inválida; datos conservados');
+  const folder=safePath(root,'.pulso'),stage=safePath(root,marker.stagePath),backup=safePath(root,marker.backupPath),prepared=safePath(root,`${marker.stagePath}/.pulso`);
+  if(!same(directoryIdentity(stage),marker.stageIdentity))throw new Error('Stage de migración ajeno; datos conservados');
+  const hasFolder=fs.existsSync(folder),hasBackup=fs.existsSync(backup),hasPrepared=fs.existsSync(prepared);
+  // Validate ALL existing trees before moving any of them. These are the only
+  // three accepted boundaries: before move, after backup, after publication.
+  if(hasPrepared){
+    if(!same(fs.readdirSync(stage).sort(),['.pulso']))throw new Error('Stage con archivos ajenos; datos conservados');
+    assertTree(prepared,marker.prepared);
+    const local=readJSON(stage,'.pulso/project.json');if(local.projectId!==marker.projectId)throw new Error('Identidad de migración incoherente');
+    validateProject(stage);
+    if(hasFolder&&!hasBackup)assertTree(folder,marker.source);
+    else if(!hasFolder&&hasBackup)assertTree(backup,marker.source);
+    else throw new Error('Frontera de migración ambigua; datos conservados');
+    if(!hasBackup){fs.renameSync(folder,backup);flushDirectory(root);}
+    // Destination was verified absent; never replace even an empty foreign dir.
+    if(fs.existsSync(safePath(root,'.pulso')))throw new Error('Destino de migración ocupado; datos conservados');
+    fs.renameSync(prepared,folder);flushDirectory(stage);flushDirectory(root);
+  }else{
+    if(!hasFolder||!hasBackup||fs.readdirSync(stage).length)throw new Error('Migración incompleta o ajena; datos conservados');
+    assertTree(backup,marker.source);assertTree(folder,marker.prepared);
+  }
+  publishProjectIdentity(root,marker.projectId,options);
+  // Keep the empty stage as provenance: removing it before the marker would add
+  // another crash window. No recursive cleanup or deletion of backup evidence.
+  fs.unlinkSync(safePath(root,migrationFile));flushDirectory(root);
+  return {prepared:true,target:root,existingWorkspace:false,projectId:marker.projectId,legacyMigrated:true,migrationRecovered:true,migratedWorks:marker.migratedWorks,backupPath:marker.backupPath};
+}
 const json=value=>JSON.stringify(value,null,2)+'\n';
 function seedFiles(at){return new Map([
   ['.pulso/state.json',json({...emptyState(),updatedAt:at})],
@@ -64,12 +108,11 @@ function legacyRecords(root){
   // A folder with only unknown files is not positive recognition.
   return records.length||!fs.readdirSync(tasks).length?records:null;
 }
-function migrateLegacy(root,records,{legacyState=false}={}){
+function migrateLegacy(root,records,{legacyState=false,identity,options}={}){
   const token=randomUUID(),stage=safePath(root,`.pulso-migration-${token}`),backupPath=`.pulso-legacy-${token}`,backup=safePath(root,backupPath);
   const folder=safePath(root,'.pulso');
   listFiles(folder); // Reject symlinks before copying or replacing any source data.
-  let moved=false,published=false;
-  try{
+  {
     fs.mkdirSync(stage);
     fs.cpSync(folder,path.join(stage,'.pulso'),{recursive:true,errorOnExist:true,force:false});
     if(legacyState)fs.unlinkSync(safePath(stage,'.pulso/state.json'));
@@ -84,17 +127,17 @@ function migrateLegacy(root,records,{legacyState=false}={}){
       work.blockers=[...(Array.isArray(legacy.execution?.verification_gaps)?legacy.execution.verification_gaps.filter(nonempty):[]),...(!['ready','draft'].includes(legacy.status)?[`Estado legacy ${legacy.status} preservado; requiere revisión y aceptación actual.`]:[])];
       work.nextAction='Revisar el alcance migrado antes de continuar';saveWork(stage,work,1);
     }
+    writeJSON(stage,'.pulso/project.json',{schemaVersion:1,projectId:identity.projectId});
     validateProject(stage);
-    fs.renameSync(folder,backup);moved=true;
-    fs.renameSync(path.join(stage,'.pulso'),folder);published=true;
-    return {migratedWorks:records.length,backupPath};
-  }catch(error){
-    if(moved&&!published)fs.renameSync(backup,folder);
-    throw error;
-  }finally{fs.rmSync(stage,{recursive:true,force:true});}
+    if(fs.existsSync(backup))throw new Error('Backup de migración ocupado; datos conservados');
+    writeJSON(root,migrationFile,{schemaVersion:1,kind:'legacy-migration',token,root:fs.realpathSync(root),projectId:identity.projectId,stagePath:`.pulso-migration-${token}`,backupPath,migratedWorks:records.length,stageIdentity:directoryIdentity(stage),source:treeSnapshot(folder),prepared:treeSnapshot(path.join(stage,'.pulso'))});
+    return recoverMigrationLocked(root,options);
+  }
 }
 
-export function prepareWorkspace(root,options={}){
+export const prepareWorkspace=(root,...args)=>withWorkspaceLock(root,()=>prepareWorkspaceLocked(root,...args));
+function prepareWorkspaceLocked(root,options={}){
+  const recovered=recoverMigrationLocked(root,options);if(recovered)return recovered;
   const folder=safePath(root,'.pulso');
   if(fs.existsSync(folder)&&!fs.statSync(folder).isDirectory())throw new Error(`No es directorio: ${folder}`);
   const identity=planProjectIdentity(root,options);
@@ -120,7 +163,7 @@ export function prepareWorkspace(root,options={}){
   if(exists(root,'.pulso/work')||exists(root,'.pulso/history.jsonl'))throw new Error('Workspace actual incompleto; sin marcador propio no se reconstruye. Restaura los archivos ausentes desde un respaldo.');
   const records=legacyRecords(root);
   if(records){
-    const result=migrateLegacy(root,records,{legacyState});identity.commit();
+    const result=migrateLegacy(root,records,{legacyState,identity,options});
     return {prepared:true,target:root,existingWorkspace:false,projectId:identity.projectId,legacyMigrated:true,...result};
   }
   if(exists(root,'.pulso/tasks'))throw new Error('Formato legacy no reconocido; datos conservados');

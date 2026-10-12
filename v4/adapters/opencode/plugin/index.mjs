@@ -9,7 +9,8 @@ import {exists, readJSON} from '../resources/lib/fs.mjs';
 import {readWork} from '../resources/lib/artifacts.mjs';
 import {schemaToZod, nativeToolSchemas} from './schema-converter.mjs';
 import {attemptActionSchemas} from './attempt-contracts.mjs';
-import {createDelegationObserver, readDelegationAttempts} from './delegation-observer.mjs';
+import {createDelegationObserver, readDelegationAttempts, correlation} from './delegation-observer.mjs';
+import {createDurableHooks, nativeContext} from './durable-hooks.mjs';
 
 const resourceRoot = fileURLToPath(new URL('../resources/', import.meta.url));
 // Read the manifest beside the loaded runtime, never the checkout or a build constant.
@@ -40,12 +41,11 @@ function invocationContext(context, root, originalDirectory) {
 }
 function correlatedTask(directory, args, catalog) {
   if (!catalog.specialists.some(agent => agent.id === args?.subagent_type)) return false;
-  const prompt = args.prompt || '';
-  if (typeof prompt !== 'string' || prompt.length > 65536) return false;
-  const get = label => [...prompt.matchAll(new RegExp(`(?:^|[\\s{,])"?${label}"?\\s*[:=]\\s*"?([A-Za-z0-9][A-Za-z0-9_-]{0,79})(?=["\\s,}]|$)`, 'g'))].map(match => match[1]);
-  const works = get('workId'), tasks = get('taskId');
-  if (new Set(works).size !== 1 || new Set(tasks).size !== 1) return false;
-  return readWork(directory, works[0], {files: false}).tasks.some(task => task.id === tasks[0] && task.agent === args.subagent_type);
+  const ids = correlation(args.prompt);
+  const tasks = ids.taskIds || (ids.taskId ? [ids.taskId] : []);
+  if (!ids.workId || !tasks.length || ids.correlationConflicts?.length) return false;
+  const work = readWork(directory, ids.workId, {files: false});
+  return tasks.every(id => work.tasks.some(task => task.id === id && task.agent === args.subagent_type));
 }
 
 export async function PulsoPlugin({directory, homeDir = os.homedir()}, native = {}) {
@@ -64,7 +64,7 @@ export async function PulsoPlugin({directory, homeDir = os.homedir()}, native = 
     registered[definition.name] = tool({description: definition.modelDescription
       + (wrapped ? ' Envelope nativo: {request:{action,...}}.' : ' Filtros planos, sin request.')
       + ' output contiene el recibo JSON: retorno nativo no equivale a ok:true; ok:true no implica objetivo cerrado.'
-      + (definition.name === 'pulso_work' ? ' accept_delivery: comprobar data.closed/readiness; aceptación guardada puede quedar pendiente de cierre. Conservar delegation y acceptanceBasis originales para accept_result.' : '')
+       + (definition.name === 'pulso_work' ? ' accept_delivery: comprobar data.closed/readiness. Encargos v2: preparar, task con specialistPrompt exacto, accept_result por delegationId/returnId; recuperar por ID ante error administrativo. La preparación autoriza el registro asociado al mismo padre nativo.' : '')
       + (definition.name === 'pulso_workspace' ? ' attempts/reconcile_attempts consultan telemetría pasiva sin confirmar actividad ni aceptación.' : ''), args,
       async execute(input, context) {
         let semantic, root, assertContext;
@@ -89,7 +89,7 @@ export async function PulsoPlugin({directory, homeDir = os.homedir()}, native = 
         if (definition.name === 'pulso_workspace' && attemptActionSchemas[semantic.action]) {
           receipt = {title: 'Pulso · Intentos', output: 'Telemetría pasiva; no confirma actividad ni aceptación.', ok: true,
             data: {items: readDelegationAttempts(root, semantic), liveness: 'unknown', acceptance: 'not_assessed'}};
-        } else receipt = await executeTool(definition.name, semantic, {projectRoot: root, homeDir, resourceRoot, assertContext});
+        } else receipt = await executeTool(definition.name, semantic, {projectRoot: root, homeDir, resourceRoot, assertContext, nativeContext: nativeContext(context)});
         try { assertContext(); } catch (error) {
           receipt = {...receipt, ok: false, contextChanged: true, output: `${receipt.output}\nContext changed after invocation: ${error.message}`};
         }
@@ -117,5 +117,9 @@ export async function PulsoPlugin({directory, homeDir = os.homedir()}, native = 
     observer ??= createDelegationObserver(directory);
     await observer[hook](...args);
   } catch { /* Passive observation cannot prevent native task execution. */ }};
-  return {tool: registered, 'tool.execute.before': observe('tool.execute.before'), 'tool.execute.after': observe('tool.execute.after'), event: observe('event')};
+  const durable = createDurableHooks({directory});
+  return {tool: registered,
+    'tool.execute.before': async (input, output) => {await durable['tool.execute.before'](input, output); await observe('tool.execute.before')(input, output);},
+    'tool.execute.after': async (input, output) => {await durable['tool.execute.after'](input, output); await observe('tool.execute.after')(input, output);},
+    event: async input => {const receipt = await durable.event(input); await observe('event')(input); return receipt;}};
 }

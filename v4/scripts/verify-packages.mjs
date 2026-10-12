@@ -9,6 +9,7 @@ import {sourceRoot,releaseVersion} from './build.mjs';
 import {verifyPackage} from './check.mjs';
 import {hash} from './files.mjs';
 import {happyPath} from './happy-path.mjs';
+import {durableSmoke} from './durable-smoke.mjs';
 
 function run(command,args,cwd) {
   const result=spawnSync(command,args,{cwd,encoding:'utf8',timeout:120000});
@@ -43,7 +44,7 @@ for(const target of targets) {
     assert.equal(toolDefinitions.length,4);
     for(const action of ['prepare_delegation','accept_result','accept_delivery']) {
       assert.ok(toolContracts.pulso_work.actionSchemas[action]);
-      assert.equal(isMutating('pulso_work',{action}),action!=='prepare_delegation');
+      assert.equal(isMutating('pulso_work',{action}),true);
     }
     const runtime=JSON.parse(fs.readFileSync(path.join(root,'package.json')));
     let adapterLoad;
@@ -65,7 +66,8 @@ for(const target of targets) {
       adapterLoad='Native descriptors loaded and extension syntax checked; VS Code host activation NOT_RUN';
     }
     const smoke=await happyPath({resourceRoot,tempParent});
-    console.log(JSON.stringify({target,status:'PASS',file,sha256,inventory,runtime:{name:runtime.name,version:runtime.version},adapterLoad,smoke},null,2));
+    const durable=await durableSmoke({resourceRoot,tempParent});
+    console.log(JSON.stringify({target,status:'PASS',file,sha256,inventory,runtime:{name:runtime.name,version:runtime.version},adapterLoad,smoke,durable},null,2));
   } catch(error) {
     console.error(JSON.stringify({target,status:'FAIL',error:error.message}));
     process.exitCode=1;

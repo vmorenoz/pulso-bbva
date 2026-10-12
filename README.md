@@ -12,6 +12,8 @@ V4 mantiene un núcleo común y entrega instalaciones nativas independientes:
 - [VS Code + GitHub Copilot: instalación y uso](v4/adapters/vscode/README.md)
 - [Código, construcción y verificación técnica](v4/README.md)
 - [Instalador global con selección de harness](v4/installer/README.md)
+- [Changelog desde V1](CHANGELOG.md)
+- [Continuidad multisesión de 4.2.0 y verificaciones](v4/ENTREGA-4.2.0.md)
 
 Desde `v4/`, instala las dependencias de desarrollo con `npm ci`, ejecuta `npm run verify` y genera el paquete elegido con `npm run package:opencode` o `npm run package:vscode`. El instalador global permite elegir uno o ambos destinos y previsualizar los cambios antes de aplicarlos.
 

@@ -1,10 +1,280 @@
-# API de incorporación y cierre (E1)
+# API de incorporación, continuidad y cierre
 
 Se mantienen `pulso_workspace`, `pulso_work`, `pulso_history` y `pulso_context`.
 La fuente pública ejecutable de contratos es `tool-contracts.mjs`:
 `toolContracts.pulso_work.actionSchemas` y `mutatingActions`.
 Todos los objetos siguientes son el input de `pulso_work`, no un wrapper
 `request`. Los adaptadores conservan su propio binding nativo.
+
+## Contrato durable `contractVersion: 2`
+
+Coexiste con las formas legacy descritas más abajo. El discriminante es obligatorio
+en preparar/incorporar v2; no se infiere a partir de campos parciales. Todas las
+variantes de `prepare_delegation` se clasifican globalmente como **mutación** para
+permisos, aunque la forma legacy conserva su lectura efímera. Los hooks nuevos sólo
+gestionan snapshots v2. No hay migración ni recreación de bases históricas.
+
+### Continuidad: acciones de `pulso_workspace`
+
+```text
+bind_continuity {workId, requestKey, objective, repositories: string[],
+                 constraints: string[], sourceText?, continuityId?}
+get_continuity {continuityId}
+update_intent {continuityId, expectedRevision, objective, constraints,
+               repositories?, compatibleDelegationIds?}
+status {continuityId?, ...paginación existente}
+```
+
+`repositories` son rutas relativas seguras a la raíz confiable; `.` representa esa
+raíz. No admiten escapes ni symlinks, ni otorgan permisos de filesystem. Se pueden
+declarar varios repositorios sin descubrimiento Git. Al preparar, escritura,
+integración y lecturas estables deben quedar dentro de los repositorios declarados.
+Se rechazan segmentos `.` salvo la raíz literal `.`: `./repo`, `repo/.` y
+`repo/./a` son inválidos en repositories, integrationResources y stableReadScope.
+Las comparaciones usan rutas normalizadas por segmentos, sin aliases textuales.
+
+`bind_continuity` conserva identidad del proyecto, Work/ciclo, intención revisionada,
+restricciones y fuente disponible. Misma requestKey/contenido recupera el mismo
+handle. Otra carga con esa clave falla. `nativeContext:{sessionID,messageID,callID}`
+se recibe exclusivamente en el tercer argumento de `executeTool`, desde el
+adaptador; esos campos no se admiten en JSON del modelo. Si hay owner session,
+consultas y mutaciones dirigidas exigen esa sesión. **Retomar deliberadamente**
+desde otra sesión exige `bind_continuity` con `continuityId` explícito y los datos
+de intención actuales; cambia el owner, no el snapshot ni la intención. Sin
+identidad nativa, el handle sólo asegura coherencia: no autentica chats VS Code.
+
+`update_intent` usa revisión propia (también devuelta como `intentRevision`);
+omite compatibilidad por defecto. Sólo `compatibleDelegationIds` explícitos
+conservan encargos de esa continuidad que todavía eran vigentes. Una revisión
+posterior debe volver a declarar la compatibilidad; no revive encargos ya obsoletos.
+No modifica bases ni prompt original, ni afirma haber detenido trabajo nativo.
+La compatibilidad no puede eludir scopes: escritura, lecturas estables e integración
+del snapshot deben seguir contenidos en los nuevos repositories. Se comprueba al
+actualizar intención y de nuevo al dispatch/incorporar.
+
+La cápsula deriva accepted de Work y pending de los registros; incluye returnIds,
+resultId, vigencia y resolución de reserva. `nextAction:null` evita adoptar acciones
+globales antiguas. `status` sin continuidad es inventario; `navigationFocusWorkId`
+conserva el foco global sólo como navegación y `focusWorkId:null` no activa un objetivo.
+Las consultas get_continuity/status no crean ni adquieren el mutex escritor. Usan
+archivos atómicos y hasta tres intentos optimistas si cambia Work/intención durante
+la lectura. La cápsula devuelve como máximo 50 referencias por lista, los últimos
+10 returnIds por encargo y 20 eventos históricos resumidos; `totals`, `returnCount`,
+`historyTotal` y `truncated` indican contenido adicional sin volcar cuerpos antiguos.
+
+### Preparación y recuperación
+
+```text
+prepare_delegation {
+  contractVersion:2, continuityId, intentRevision, expectedRevision,
+  requestKey, workId, taskIds, objective, inputs, output, constraints, templateId,
+  integrationResources?: string[], stableReadScope?: string[]
+}
+get_delegation {workId, delegationId, continuityId?}
+```
+
+Core genera `delegationId`. La respuesta pública v2 es compacta:
+
+```text
+data: {contractVersion:2, delegationId, workId, continuityId, intentRevision,
+       preparedFromRevision, specialistPrompt, state,
+       readWith:{action:"get_delegation", workId, delegationId, continuityId}}
+```
+
+No retransmite `delegation`, `acceptanceBasis`, `hostContext` ni referencias nativas.
+preparedFromRevision es la revisión original confirmada, no una revisión actual
+inferida al repetir. El flujo normal incorpora por IDs sin consultar el snapshot.
+get_delegation recupera los originales explícitamente; el export interno
+prepareDelegation conserva su retorno completo para consumidores de core.
+El encargo canónico interno mantiene schemaVersion 1 para
+reutilizar la validación legacy; **contractVersion 2 pertenece al registro**.
+Conserva `acceptanceBasis`, ciclo, `preparedFromRevision`, identidad durable,
+`continuityId`, `intentRevision` (alias `intentionRevision` para adaptadores),
+contexto nativo histórico, paths efectivos y fingerprints de catálogo/plantilla.
+La preparación no cambia revisión del Work ni acredita dispatch.
+
+Misma requestKey y payload recupera el snapshot aun con expectedRevision distinta;
+esa revisión no forma parte del digest. Una clave nueva no elude solapamientos de
+taskIds, incluidos conjuntos parcialmente solapados. Paths se comparan por segmentos
+y ancestro/descendiente (`a` no solapa `ab`). `stableReadScope` reclama una lectura
+estable frente a escritores; no es un permiso nuevo. `integrationResources` declara
+paths de checkout de integración exclusiva, sin inferirlos por ejecutar Git.
+El dominio de exclusión es una raíz de metadatos, no checkouts compartidos entre raíces.
+
+Tareas ya realizadas requieren nueva tarea o una revisión deliberada de su
+aceptación, conservada en Work y distinta de la base del último resultado aceptado.
+Una tarea terminada sólo con evidencia, sin resultado previo comparable, requiere
+una tarea nueva. Un error de incorporación nunca habilita repetir sus tareas.
+
+### Retorno e incorporación
+
+```text
+accept_result {
+  contractVersion:2, workId, delegationId, continuityId, intentRevision,
+  operationId, expectedRevision,
+  returnId XOR reportedReturn:{captureKey, markdown, completeness?},
+  decision:{status, summary, acceptedTaskIds?, artifacts?, changedFiles?, checks?,
+            findings?, questions?, limitations?, suggestedNextStep?},
+  reportedTerminal?: boolean
+}
+```
+
+La forma pública transporta `decision` como objeto JSON genérico acotado: **la
+semántica estricta se valida después de conservar el reporte**. Los campos técnicos
+reutilizan las reglas legacy; completed exige acceptedTaskIds explícitos. Campos
+desconocidos, identidad o markdown dentro de decision fallan semánticamente sin
+perder una captura válida. No se parsea el Markdown.
+
+Límites: Markdown reportado hasta 1.000.000 caracteres, candidato decision hasta
+64.000 unidades JSON, envelope v2 hasta 1.100.000 y profundidad JSON hasta 64.
+`completeness` es `complete | truncated | unknown` (default unknown). Las capturas
+conservan bytes UTF-8, hash, longitud, fecha y procedencia. Misma captureKey/carga
+devuelve el mismo returnId; otra carga no reemplaza el original. Una recuperación
+del reporte se conserva con nueva captureKey.
+
+Orden: transporte/permiso/binding/identidad → captura (con declaración terminal
+reportada coherente en el mismo commit administrativo cuando procede) → recibo
+idempotente previo → comprobación terminal → revisión exacta → intención/ciclo/base/tareas/decisión →
+commit canónico de Work. Capturas autorizadas sobreviven a decisión inválida,
+revisión antigua/futura, base obsoleta o cambio de intención. El error devuelve
+`persistence:{captured:true,returnId,workId,delegationId,...}`; get_delegation permite
+recuperarlas si se pierde la respuesta. Denegación o envelope inválido no capturan.
+
+`operationId` y el digest calculado por core se comprometen en **el mismo Work** que
+las tareas. El hash liga proyecto, Work/ciclo, encargo, continuidad/revisión de intención,
+returnId y decisión; excluye expectedRevision y la declaración reportedTerminal.
+Un recibo duplicado no vuelve a procesar declaraciones terminales. Repetición idéntica
+devuelve el hecho histórico incluso con revisión antigua/futura, sin escribir ni
+revalidar como PASS. El recibo distingue `appliedRevision`, `currentRevision`,
+`currentIntent`, `currentBasis`, `currentPass:false`. Otra carga con operationId
+comprometida falla. La incorporación utiliza el encargo/base originales y el resultado
+normalizado legacy; no renueva hashes para hacer pasar observaciones antiguas.
+
+La reserva de paths puede resolverse por reportedTerminal aunque después falle la
+decisión. La reserva de sus tareas pendientes de incorporación sigue impidiendo
+prepararlas de nuevo. Un dispatch nativo unresolved contradice reportedTerminal y
+no se libera por esa declaración. Captura, reserva resuelta y aceptación son hechos
+distintos; ningún retorno se convierte en evidencia ejecutada ni satisface criterios.
+En el flujo reportado normal, captura y reserva resuelta se publican juntas: no
+se escribe un segundo estado/índice sólo para reportedTerminal. Una captura repetida
+puede declarar terminal por primera vez, sin cambiar el literal ni duplicar la
+reconciliación. Si existe intento nativo unresolved, primero se conserva la captura
+y después se rechaza la declaración contradictoria; la reserva permanece sin resolver.
+Los fsync y las guardas de escritura se conservan. Las repeticiones de una aceptación
+comprometida siguen devolviendo su recibo histórico sin aplicar nuevas declaraciones.
+
+### Exports fijos para adaptadores
+
+Desde `delegation-registry.mjs`:
+
+```text
+readDelegation(root, {workId, delegationId}) -> registro v2
+recordNativeDispatch(root,
+  {workId, delegationId, sessionID, callID, agent, prompt}, {assertContext?}) -> intento
+recordNativeReturn(root,
+  {workId, delegationId, sessionID, callID, markdown, childSessionID?, completeness?},
+  {assertContext?}) -> returnId (string)
+```
+
+readDelegation es helper de runtime: el adaptador comprueba binding/permiso; la tool
+pública get_delegation comprueba además owner de continuidad. Dispatch comprueba
+prompt/rol exactos, correlación, intención/base/ciclo y claims dentro del mutex.
+La idempotencia de registrar una llamada **no autoriza volver a emitirla**; el hook
+debe impedir reemisión tras un intento conservado. No hay TTL ni agente vivo inferido.
+
+recordNativeReturn se llama **sólo ante terminal confirmado por el host**; recibe
+el literal antes de anotarlo, conserva host_capture y resuelve el intento como
+host_terminal. El helper no detecta por sí mismo running/terminal. Correlaciona la
+sesión/llamada original y conserva retornos tardíos aun con intención/owner nuevos.
+Completitud desconocida o truncada no se eleva a completa. Sin punto terminal
+contrastado, usar reportedReturn, no este helper.
+
+### Reconciliación, almacenamiento y límites
+
+```text
+reconcile_delegation {workId, delegationId, continuityId, intentRevision,
+                      reason, resolution:"not_dispatched"|"reported_terminal"|"retired"|
+                                         "explicitly_reconciled",
+                      source?:{text,messageRef?}}
+```
+
+Conserva razón y procedencia reportada. not_dispatched no puede contradecir una
+captura/dispatch. retired impide nuevos dispatch/aceptación pero **mantiene claims
+si el intento nativo sigue unresolved**; no autostop ni cancelación física.
+Retornos tardíos siguen recuperables. La acción pública close y accept_delivery
+exigen reconciliar encargos pendientes antes del cierre; una declaración de usuario
+se guarda aunque todavía no pueda cerrar. `completionReadiness` centraliza este
+impedimento: get, accept_delivery y closeWork directo coinciden. También el cierre
+cancelled exige resolver los encargos; el cálculo usa el Work recibido, sin llamar
+recursivamente a readWork. Un índice inválido produce DELEGATIONS_INVALID y no permite
+cerrar. Los cierres históricos siguen siendo legibles sin reinterpretar actividad posterior.
+
+Cuando se perdió el evento terminal del host, `explicitly_reconciled` exige reason
+y `source:{text,messageRef?}` con la declaración revisada/inspección que sustenta la
+resolución administrativa. Conserva esa fuente y limitaciones, cambia intentos
+unresolved a explicitly_reconciled y libera la reserva del protocolo. **No** la
+convierte en host_terminal ni certifica cese físico. No es automática, no usa TTL
+y no añade una llamada al flujo normal. Un retorno sin incorporar aún exige aceptar
+o retirar deliberadamente su encargo antes de repetir sus tareas. Un terminal real
+posterior puede capturarse por la llamada original y conservar su propia procedencia.
+
+Almacenamiento format 2 (todavía sin distribuir; no requiere migración de usuarios):
+
+- `.pulso/continuities-v2.json`: intención/ownership e historial administrativo.
+- `.pulso/delegations-v2.json`: índice atómico ligero, autoridad del commit de
+  claims/intentos/referencias; nunca contiene Markdown, prompt ni bases completas.
+- `.pulso/delegations-v2/<delegationId>/snapshot.json`: contrato/base/prompt inmutables.
+- `.../records/<contentHash>.json`: estados inmutables del encargo, con metadatos y
+  referencias de retornos, nunca sus cuerpos. El índice selecciona el estado comprometido.
+- `.../returns/<returnId>.json`: cada captura literal inmutable, identificada de
+  forma estable por encargo/procedencia/clave, con hash, longitud y checksum.
+
+Cada blob comprueba checksum e identidad; una corrupción no se sobrescribe.
+readDelegation carga sólo el snapshot/estado/capturas del ID elegido, conservando
+Markdown en su API. listDelegations usa exclusivamente metadatos; filtra continuidad
+antes de derivar Work y reutiliza cada Work leído. Ninguna escritura rutinaria copia
+los cuerpos de retornos anteriores. Work sigue siendo autoridad única de aceptación.
+El checksum detecta daño accidental, no autentica frente a escritores del filesystem.
+
+Se escribe blob inmutable → estado inmutable → commit atómico del índice. Si falla
+el último paso, no se declara dispatch comprometido y permanecen los claims anteriores.
+La captura ya escrita devuelve persistence.returnId y se descubre en el directorio
+del encargo mediante get_delegation, incluso huérfana del índice. Repetir **la misma
+clave** enlaza el mismo blob/returnId y repara metadatos sin emitir un agente ni
+reescribir el literal. La preparación también usa un ID generado determinísticamente
+por continuidad/requestKey: puede recuperar el snapshot huérfano sin renovar su base,
+revalidando intención/base/claims antes de incorporarlo al índice.
+get_delegation puede consultar ese snapshot huérfano con `registered:false`; no
+autoriza dispatch. El índice vacío inicial se establece antes de crear blobs.
+
+El índice administrativo es autoridad, no se reconstruye automáticamente seleccionando
+estados huérfanos o escaneando sólo parte del workspace. Corrupción/pérdida requiere
+recuperación explícita de esa autoridad; no se publica un índice parcial que olvide
+reservas. workspace.recover de Work no borra ni regenera este índice. Los blobs se
+preservan para recuperación; la historia legacy no se migra.
+Si faltase el índice pero existiesen blobs, se rechaza tratarlo como un workspace
+vacío: readiness devuelve DELEGATIONS_INVALID y tampoco se permite cerrar cancelled.
+
+Preparar, actualizar intención, capturar/reconciliar e incorporar usan
+withWorkspaceLock síncrono/reentrante para releer/validar/escribir; assertContext
+se vuelve a invocar en cada punto de mutación. Ningún mutex dura durante la ejecución
+del especialista. Runtime antiguo y escrituras externas al protocolo no quedan
+interceptados. El índice ligero sigue teniendo coste O(número de encargos/metadatos),
+pero el tamaño de Markdown ajeno no interviene en consultar un ID ni en actualizar
+claims. La regresión de rendimiento usa un cuerpo ajeno de 3 MB, lo corrompe y prueba
+lecturas/escrituras independientes y cápsulas sin acceder a él; informa bytes del
+índice y p50/p95 de lectura seleccionada. Es evidencia acotada, no certificación del
+presupuesto global de todos los ciclos/hardware ni de hosts reales.
+
+Los recibos finales de accept_result y accept_delivery (incluidos duplicados) se
+validan contra work-receipt.schema.json. Sus campos v2 y persistence están enumerados
+explícitamente; no se admite un objeto abierto para absorber campos desconocidos.
+
+Pruebas core reales: `node --test tests/core/durable-delegations.test.mjs
+tests/core/continuity.test.mjs`, desde v4; incluyen reinicio y contención entre procesos.
+No acreditan conversaciones, cancelación, compactación ni hooks de hosts reales.
+OpenCode, VS Code Local y Copilot Agent Host requieren aceptación nativa separada.
+No se activa ninguna migración, instalación o actualización de versión comercial.
 
 ## `update` — alta de tareas
 
@@ -29,7 +299,7 @@ mediante `task.update` o `criterion.update`, según sus reglas existentes.
 `expectedRevision` sigue siendo obligatorio y actual; `status` sigue siendo
 obligatorio y `done` conserva sus requisitos de sustento.
 
-## `prepare_delegation` — lectura
+## `prepare_delegation` legacy — lectura compatible, permiso global de mutación
 
 Campos obligatorios:
 
@@ -85,7 +355,7 @@ El catálogo y la plantilla se leen desde resourceRoot, nunca desde el input.
 No escribe ni reserva IDs ni lanza agentes. Conservar delegation y
 acceptanceBasis originales antes de observar el resultado.
 
-## `accept_result` — mutación
+## `accept_result` legacy — mutación
 
 Campos obligatorios:
 
@@ -216,8 +486,12 @@ Si falla la persistencia del cierre, añade `closeError` y, cuando corresponde,
 cerrado pero requiere sincronizar historia/índice. `ok:true` confirma la
 incorporación, no que el objetivo esté cerrado: consultar closed y readiness.
 
-No hay idempotencia implícita para accept_delivery: leer Work y confirmar el
-evidenceId antes de repetir tras una respuesta parcial o perdida.
+`operationId?: ID` añade idempotencia explícita a accept_delivery. Mismo contenido
+(sin expectedRevision en el hash) devuelve el evidenceId y appliedRevision
+históricos, currentRevision y currentPass:false, incluso con revisión antigua/futura
+o Work cerrado; no repite el cierre. Otra carga con la misma clave falla. El recibo
+se recupera desde la evidencia canónica del Work, no de una proyección. Sin operationId
+no hay idempotencia implícita: confirmar evidenceId antes de repetir.
 
 ## Modo de aceptación y bases compatibles
 

@@ -1,5 +1,7 @@
 # Plan maestro: robustecimiento de Pulso en OpenCode y VS Code
 
+> Continuación de planificación tras la auditoría multisesión: [Plan transversal de continuidad e aislamiento](PLAN-CONTINUIDAD-MULTISESION-OPENCODE-VSCODE.md). Este documento conserva las decisiones y entregas históricas de 4.1.0/4.1.1. El plan sucesor propone preparación durable, incorporación por referencias y aislamiento de continuidad en ambos adaptadores; distingue los cambios de contrato y de verificación todavía pendientes de implementación.
+
 ## Objetivo
 
 Pulso responde por completar el objetivo mediante sus especialistas. Una limitación del orquestador o de un rol no bloquea el trabajo mientras exista una vía autorizada adecuada. Reducir intervención del usuario, preguntas repetidas y documentación mecánica; conservar precisión y evidencia honesta.

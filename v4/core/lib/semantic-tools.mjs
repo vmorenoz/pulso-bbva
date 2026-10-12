@@ -6,9 +6,11 @@ import {toolDefinitions,validateToolInput} from './tool-contracts.mjs';
 import * as artifacts from './artifacts.mjs';
 import * as mutations from './work-mutations.mjs';
 import {prepareDelegation,acceptResult,acceptDelivery} from './acceptance.mjs';
+import {bindContinuity,checkContext,getContinuity,updateIntent} from './continuity.mjs';
+import {getDelegation,reconcileDelegation} from './delegation-registry.mjs';
 import * as memory from './memory.mjs';
-import {prepareWorkspace} from './workspace.mjs';
-import {exists,readJSON} from './fs.mjs';
+import {prepareWorkspace,recoverWorkspaceMigration} from './workspace.mjs';
+import {exists,readJSON,withWorkspaceLock} from './fs.mjs';
 import {formatReceipt} from './receipts.mjs';
 import {pagination,pageItems} from './pagination.mjs';
 
@@ -59,19 +61,25 @@ function workRead(root,args){
 }
 
 const handlers={
-  pulso_workspace(args,{projectRoot:root,homeDir}){
+  pulso_workspace(args,{projectRoot:root,homeDir,...options}){
     switch(args.action){
+      case 'bind_continuity':return ok('continuidad','Continuidad vinculada.',bindContinuity(root,args,options));
+      case 'get_continuity':return ok('continuidad','Intención y operaciones conservadas.',getContinuity(root,args,options));
+      case 'update_intent':return ok('intención','Intención actualizada; no detiene agentes nativos.',updateIntent(root,args,options));
       case 'prepare':{
         const data=prepareWorkspace(root,{homeDir});
         return ok('workspace',data.existingWorkspace?'Ya estaba preparado.':data.legacyMigrated?`Preparado y migrados ${data.migratedWorks} trabajos legacy.`:'Preparado para el encargo actual.',data);
       }
       case 'sync':return receipt('sincronización',mutations.syncWorkOperation(root,{workId:args.workId,expectedRevision:args.expectedRevision}));
       case 'recover':{
+        checkContext(options);
+        recoverWorkspaceMigration(root,{homeDir});
         if(exists(root,'.pulso/preparation.json'))prepareWorkspace(root,{homeDir});
         const data=mutations.recoverWorkspaceOperation(root);
         return ok('recuperación','Recuperación completada. Consulta status para revisar el índice; no se reanudaron sesiones nativas.',data);
       }
       case 'status':{
+        const continuity=args.continuityId?getContinuity(root,args,options):null;
         if(!exists(root,'.pulso/state.json')){
           const works=pageItems([],{kind:'status',binding:{projectRoot:root,status:args.status||null},snapshot:null,limit:args.limit||20,cursor:args.cursor});
           return ok('estado','Sin estado Pulso disponible en este workspace.',{prepared:false,works});
@@ -85,9 +93,8 @@ const handlers={
           }
           throw error;
         }
-        const focus=value.works.find(work=>work.id===value.focusWorkId);
         const works=pageItems(value.works.filter(work=>!args.status||work.status===args.status),{kind:'status',binding:{projectRoot:root,status:args.status||null},snapshot:value,limit:args.limit||20,cursor:args.cursor});
-        return ok('estado',focus?`${focus.id} · ${focus.status} · ${focus.progress.done}/${focus.progress.total} · siguiente: ${focus.nextAction||'sin acción'}`:`${value.works.length} trabajos abiertos · sin foco`,{...value,prepared:true,works});
+        return ok('estado',continuity?`${continuity.continuityId} · intención ${continuity.intentRevision} · ${continuity.objective}`:`${value.works.length} trabajos abiertos · sin continuidad seleccionada`,{...value,prepared:true,works,navigationFocusWorkId:value.focusWorkId,focusWorkId:continuity?.workId??null,...(continuity?{continuity}:{})});
       }
       case 'validate':{
         const data=mutations.validateWorkspace(root,{fresh:args.fresh||false});
@@ -95,15 +102,22 @@ const handlers={
       }
     }
   },
-  pulso_work(args,{projectRoot:root,resourceRoot}){
+  pulso_work(args,{projectRoot:root,...options}){
+    const {resourceRoot}=options;
     switch(args.action){
+      case 'get_delegation':return ok('encargo','Snapshot, retornos e intentos conservados.',getDelegation(root,args,options));
+      case 'reconcile_delegation':return ok('reconciliación','Resolución reportada; no detiene agentes.',reconcileDelegation(root,args,options));
       case 'get':return workRead(root,args);
       case 'prepare_delegation':{
-        const data=prepareDelegation(root,args,{resourceRoot});
-        return ok('encargo',`${data.delegation.id} · rev. ${data.delegation.workRevision} · preparado sin persistir ni ejecutar`,data);
+        const data=prepareDelegation(root,args,options);
+        if(data.contractVersion===2){
+          const {delegationId,contractVersion,workId,continuityId,intentRevision,preparedFromRevision,specialistPrompt,state}=data;
+          return ok('encargo',`${delegationId} · rev. ${preparedFromRevision} · snapshot conservado; no acredita dispatch`,{delegationId,contractVersion,workId,continuityId,intentRevision,preparedFromRevision,specialistPrompt,state,readWith:{action:'get_delegation',workId,delegationId,continuityId}});
+        }
+        return ok('encargo',`${data.delegation.id} · rev. ${data.delegation.workRevision} · ${data.contractVersion===2?'snapshot conservado; no acredita dispatch':'preparado sin persistir ni ejecutar'}`,data);
       }
-      case 'accept_result':return receipt('resultado',acceptResult(root,args,{resourceRoot}));
-      case 'accept_delivery':return receipt('aceptación',acceptDelivery(root,args));
+      case 'accept_result':return receipt('resultado',acceptResult(root,args,options));
+      case 'accept_delivery':return receipt('aceptación',acceptDelivery(root,args,options));
       case 'validate_result':{
         const data=artifacts.validateResult(root,args.delegation,args.result,{globalRoot:resourceRoot,catalogPath:'agents/catalog.json'});
         return ok('resultado',data.note,data);
@@ -114,7 +128,10 @@ const handlers={
       }
       case 'update':return receipt('trabajo',mutations.applyWorkMutation(root,{workId:args.workId,expectedRevision:args.expectedRevision,actions:args.actions}));
       case 'block':return receipt('trabajo',mutations.applyWorkMutation(root,{workId:args.workId,expectedRevision:args.expectedRevision,actions:[{type:'work.set_overview',status:'blocked',summary:args.summary,blockers:[args.reason],nextAction:'Resolver el bloqueo antes de continuar'}]}));
-      case 'close':return receipt('trabajo',mutations.closeWorkOperation(root,{workId:args.workId,expectedRevision:args.expectedRevision,outcome:args.outcome,summary:args.summary,limitations:args.limitations||[]}));
+      case 'close':return withWorkspaceLock(root,()=>{
+        checkContext(options);
+        return receipt('trabajo',mutations.closeWorkOperation(root,{workId:args.workId,expectedRevision:args.expectedRevision,outcome:args.outcome,summary:args.summary,limitations:args.limitations||[]}));
+      });
       case 'reopen':return receipt('trabajo',mutations.reopenWorkOperation(root,{workId:args.workId,expectedRevision:args.expectedRevision,reason:args.reason}));
     }
   },
@@ -140,7 +157,7 @@ const handlers={
 };
 
 /** All persistence is synchronous; there is no await between final check and write. */
-export async function executeTool(name,input,{projectRoot,homeDir=os.homedir(),resourceRoot=defaultResourceRoot,assertContext=()=>{}}={}){
+export async function executeTool(name,input,{projectRoot,homeDir=os.homedir(),resourceRoot=defaultResourceRoot,assertContext=()=>{},nativeContext}={}){
   const definition=toolDefinitions.find(item=>item.name===name);
   try{
     validateToolInput(name,input);
@@ -152,7 +169,10 @@ export async function executeTool(name,input,{projectRoot,homeDir=os.homedir(),r
       Promise.resolve(checked).catch(()=>{});
       throw new Error('assertContext debe comprobar el contexto síncronamente');
     }
-    return handlers[name](input,{projectRoot,homeDir,resourceRoot,assertContext});
+    if(nativeContext!==undefined){
+      if(!nativeContext||typeof nativeContext!=='object'||Object.keys(nativeContext).some(k=>!['sessionID','messageID','callID'].includes(k))||Object.values(nativeContext).some(v=>typeof v!=='string'||!v.trim()||v.length>2000))throw new Error('nativeContext confiable inválido');
+    }
+    return handlers[name](input,{projectRoot,homeDir,resourceRoot,assertContext,nativeContext});
   }catch(error){return fail(definition?.displayName.replace('Pulso · ','')||'herramienta',error);}
 }
 export function createPulsoTools(defaultContext={}){

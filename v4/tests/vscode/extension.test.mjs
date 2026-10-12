@@ -20,6 +20,7 @@ export async function fixture(t) {
   const projects = ['a','b'].map(name => path.join(base, name));
   for (const target of [extensionPath, homeDir, ...projects]) fs.mkdirSync(target, {recursive: true});
   fs.cpSync(path.join(root, 'core'), path.join(extensionPath, 'resources'), {recursive: true});
+  fs.writeFileSync(path.join(extensionPath, 'package.json'), JSON.stringify(await adapterConfig.packageManifest({coreRoot: path.join(root, 'core'), chatAgents: [], chatSkills: []})));
   for (const [source, target] of Object.entries(adapterConfig.runtimeFiles)) {
     fs.mkdirSync(path.dirname(path.join(extensionPath, target)), {recursive: true});
     fs.copyFileSync(path.join(root, 'adapters/vscode', source), path.join(extensionPath, target));
@@ -44,14 +45,14 @@ export async function fixture(t) {
 test('public registrations are read-only at activation and generated schemas derive from common definitions', async t => {
   const {projects, homeDir, host, context} = await fixture(t);
   assert.deepEqual([...host.tools.keys()], names);
-  assert.equal(context.subscriptions.length, 6);
+  assert.equal(context.subscriptions.length, 7);
   for (const directory of [...projects, homeDir]) assert.deepEqual(fs.readdirSync(directory), []);
   const manifest = await adapterConfig.packageManifest({coreRoot: path.join(root, 'core'), chatAgents: [], chatSkills: []});
-  assert.equal(manifest.version, '4.0.0');
+  assert.equal(manifest.version, JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).version);
   for (const definition of manifest.contributes.languageModelTools) {
     const {expectedBindingId, ...properties} = definition.inputSchema.properties;
     assert.deepEqual(properties, toolContracts[definition.name].inputSchema.properties);
-    if (definition.name !== 'pulso_history') assert.equal(expectedBindingId.type, 'string');
+    assert.equal(expectedBindingId.type, 'string');
     assert.ok(!definition.inputSchema.properties.sessionID);
     assert.ok(!definition.inputSchema.properties.offset);
   }
@@ -78,6 +79,12 @@ test('binding is stripped and all mutations reject missing/stale opaque tokens',
   for (const [name, action] of Object.entries(toolContracts).flatMap(([name, contract]) => contract.mutatingActions.map(action => [name, action]))) {
     const fields = {
       prepare: {}, recover: {}, sync: {workId: 'W', expectedRevision: 1},
+      bind_continuity: {workId:'W',requestKey:'bind',objective:'O',repositories:['.'],constraints:[]},
+      update_intent: {continuityId:'C',expectedRevision:1,objective:'O',constraints:[]},
+      prepare_delegation: {contractVersion:2,workId:'W',expectedRevision:1,continuityId:'C',intentRevision:1,requestKey:'prepare',taskIds:['T'],objective:'O',inputs:[],output:'report.md',constraints:[],templateId:'implementation'},
+      reconcile_delegation: {workId:'W',delegationId:'D',continuityId:'C',intentRevision:1,reason:'R',resolution:'not_dispatched'},
+      accept_result: {contractVersion:2,workId:'W',expectedRevision:1,delegationId:'D',continuityId:'C',intentRevision:1,operationId:'accept',reportedReturn:{captureKey:'return',markdown:'Report'},decision:{}},
+      accept_delivery: {workId:'W',expectedRevision:1,summary:'S',criterionIds:['AC-1'],source:{text:'Approved'},limitations:[]},
       create: {title: 'T', objective: 'O', criterion: 'C', verification: 'V'},
       update: {workId: 'W', expectedRevision: 1, actions: [{type: 'work.set_overview', summary: 'S'}]},
       block: {workId: 'W', expectedRevision: 1, summary: 'S', reason: 'R'},
@@ -122,7 +129,7 @@ test('native result preserves canonical structured read pages and partial-persis
   const run = (name, input) => invoke(name, {...input, expectedBindingId: bindingId});
   assert.equal((await run('pulso_workspace', {action: 'prepare'})).ok, true);
   assert.equal((await run('pulso_work', {action: 'create', workId: 'W', title: 'T', objective: 'O', criterion: 'C', verification: 'V'})).ok, true);
-  const get = await invoke('pulso_work', {action: 'get', workId: 'W', section: 'criteria', limit: 1});
+  const get = await run('pulso_work', {action: 'get', workId: 'W', section: 'criteria', limit: 1});
   assert.equal(get.data.objective.criteria.items.length, 1);
   assert.equal(get.data.hasMore, false);
   // Projection failure happens after canonical work.json commits revision 2.
@@ -150,18 +157,18 @@ test('native lifecycle returns close/reopen receipts and revision-bound project/
   assert.equal((await run('pulso_workspace',{action:'prepare'})).ok,true);
   assert.equal((await run('pulso_work',{action:'create',workId:'ROUNDTRIP',title:'T',objective:'O',criterion:'C',verification:'V'})).ok,true);
   assert.equal((await run('pulso_work',{action:'close',workId:'ROUNDTRIP',expectedRevision:1,outcome:'cancelled',summary:'User changed scope',limitations:['No acceptance claimed']})).ok,true);
-  const history=await invoke('pulso_history',{workId:'ROUNDTRIP',limit:1});
+  const history=await run('pulso_history',{workId:'ROUNDTRIP',limit:1});
   assert.equal(history.data.items[0].outcome,'cancelled');
   assert.deepEqual(history.data.items[0].limitations,['No acceptance claimed']);
   assert.equal((await run('pulso_work',{action:'reopen',workId:'ROUNDTRIP',expectedRevision:2,reason:'New scope'})).ok,true);
-  const work=await invoke('pulso_work',{action:'get',workId:'ROUNDTRIP'});
+  const work=await run('pulso_work',{action:'get',workId:'ROUNDTRIP'});
   assert.equal(work.data.cycle,2);assert.equal(work.data.revision,3);
-  const memory=await invoke('pulso_context',{action:'read',scope:'all'});
+  const memory=await run('pulso_context',{action:'read',scope:'all'});
   for(const scope of ['project','user']) {
     const saved=await run('pulso_context',{action:'set_preference',scope,expectedRevision:memory.data.revisions[scope],key:'language',value:'es',source:'user'});
     assert.equal(saved.ok,true,saved.output);
   }
-  const saved=await invoke('pulso_context',{action:'read',scope:'all'});
+  const saved=await run('pulso_context',{action:'read',scope:'all'});
   assert.equal(saved.data.entries.length,2);
 });
 
@@ -171,7 +178,7 @@ test('native init records static evidence and closes; hash command exit codes ar
   assert.equal((await invoke('pulso_workspace',{action:'prepare',expectedBindingId:bindingId})).ok,true);
   assert.equal((await run({action:'create',workId:'INIT',title:'Mapear proyecto',objective:'Documentar contexto',criterion:'Mapa verificado',verification:'Revisión estática contra fuentes'})).ok,true);
   assert.equal((await run({action:'update',workId:'INIT',expectedRevision:1,actions:[{type:'task.add',task:{id:'map-project',title:'Mapear contexto',criterionIds:['AC-1'],agent:'pulso-explorer',status:'in_progress',dependsOn:[],writeScope:['.pulso/project.md'],resources:[],acceptance:['Mapa verificado contra fuentes'],evidenceIds:[],summary:''}}]})).ok,true);
-  const observed=await invoke('pulso_work',{action:'get',workId:'INIT',section:'all'});
+  const observed=await run({action:'get',workId:'INIT',section:'all'});
   assert.equal(observed.data.objective.criteria.items.length,1);
   assert.equal(observed.data.objective.criteria.items[0].id,'AC-1');
   const document=Buffer.from('<!-- template: project@1.0 -->\n# Proyecto\nContexto revisado contra fuentes.\n');
@@ -190,12 +197,12 @@ test('native init records static evidence and closes; hash command exit codes ar
   assert.deepEqual(validateSchema(definition.inputSchema,request),[]);
   const saved=await invoke('pulso_work',request);
   assert.equal(saved.ok,true,saved.output);
-  const current=await invoke('pulso_work',{action:'get',workId:'INIT',section:'all'});
+  const current=await run({action:'get',workId:'INIT',section:'all'});
   assert.equal(current.data.evidence.items[0].exitCode,null);
   assert.equal(current.data.tasks.items[0].status,'done');
   const closed=await run({action:'close',workId:'INIT',expectedRevision:current.data.revision,summary:'Mapa aceptado con revisión estática',limitations:['No se ejecutaron tests ni build del producto.']});
   assert.equal(closed.ok,true,closed.output);
-  const history=await invoke('pulso_history',{workId:'INIT'});
+  const history=await invoke('pulso_history',{workId:'INIT',expectedBindingId:bindingId});
   assert.equal(history.data.items[0].outcome,'done');
 });
 

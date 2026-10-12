@@ -1,6 +1,6 @@
 {
   "name": "pulso-v4-source",
-  "version": "4.1.1",
+  "version": "4.2.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -13,7 +13,9 @@
     "check": "node scripts/check.mjs",
     "test": "node --test tests/*/*.test.mjs",
     "smoke:happy": "node scripts/happy-path.mjs",
-    "verify": "npm run build && npm run check && npm run smoke:happy",
+    "smoke:durable": "node scripts/durable-smoke.mjs",
+    "test:continuity": "node --test tests/core/persistence-transactions.test.mjs tests/core/migration-recovery.test.mjs tests/core/durable-delegations.test.mjs tests/core/continuity.test.mjs tests/opencode/durable-hooks.test.mjs tests/opencode/plugin.test.mjs tests/opencode/observer.test.mjs tests/vscode/binding-continuity.test.mjs tests/vscode/workspace.test.mjs tests/vscode/extension.test.mjs",
+    "verify": "npm run build && npm run check && npm run smoke:happy && npm run smoke:durable",
     "package:opencode": "node scripts/package.mjs opencode",
     "package:vscode": "node scripts/package.mjs vscode",
     "verify:packages": "node scripts/verify-packages.mjs",

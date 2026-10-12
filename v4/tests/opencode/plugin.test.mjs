@@ -25,6 +25,7 @@ async function fixture(t) {
     fs.copyFileSync(path.join(root, 'adapters/opencode', source), path.join(runtime, target));
   }
   fs.cpSync(path.join(root, 'adapters/opencode/vendor'), path.join(runtime, 'plugin/vendor'), {recursive: true});
+  fs.writeFileSync(path.join(runtime, 'package.json'), JSON.stringify(adapterConfig.packageManifest()));
   const {PulsoPlugin} = await import(pathToFileURL(path.join(runtime, 'plugin/index.mjs')).href);
   const plugin = await PulsoPlugin({directory: project, homeDir});
   const requests = [];
@@ -76,7 +77,7 @@ test('real SDK registrations are read-only at creation and every read asks nativ
 
 test('native envelopes and model-selected roots fail before approval or writes', async t => {
   const {plugin, context, requests, project} = await fixture(t);
-  for (const input of [{action:'prepare'}, {request:{action:'prepare'}, extra:true}, {request:{action:'prepare',root:project}}, {request:{action:'status',offset:0}}, {request:{action:'status',expectedBindingId:'fake'}}]) {
+  for (const input of [{action:'prepare'}, {request:{action:'prepare'}, extra:true}, {request:{action:'prepare',root:project}}, {request:{action:'status',offset:0}}, {request:{action:'status',expectedBindingId:'fake'}}, {request:{action:'prepare',nativeContext:{sessionID:'forged'}}}]) {
     const result = JSON.parse((await plugin.tool.pulso_workspace.execute(input,context)).output);
     assert.equal(result.ok, false);
   }
@@ -105,7 +106,7 @@ test('shared structured read and partial-persistence receipts survive native out
   const get = await invoke('pulso_work',{action:'get',workId:'W',section:'criteria',limit:1});
   assert.equal(get.data.objective.criteria.items.length,1);
   assert.equal(get.data.hasMore,false);
-  const state = path.join(project,'.pulso/state.json');const rename = fs.renameSync;
+  const state = path.join(fs.realpathSync(project),'.pulso/state.json');const rename = fs.renameSync;
   t.mock.method(fs, 'renameSync', (from, to) => {if (to === state) throw new Error('injected projection write failure'); return rename(from, to);});
   const partial = await invoke('pulso_work',{action:'update',workId:'W',expectedRevision:1,actions:[{type:'work.set_overview',summary:'persisted'}]});
   assert.equal(partial.ok,false);

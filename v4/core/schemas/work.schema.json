@@ -301,6 +301,9 @@
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
           },
           "origin": {"const":"user_acceptance"},
+          "operationId": {"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
+          "decisionHash": {"type":"string","pattern":"^[a-f0-9]{64}$"},
+          "appliedRevision": {"type":"integer","minimum":1},
           "kind": {
             "enum": [
               "executed",
@@ -511,6 +514,13 @@
           "cycle": {"type":"integer","minimum":1},
           "registeredAt": {"type":"string","format":"date-time"},
           "delegationId": {"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
+          "contractVersion": {"const":2},
+          "operationId": {"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
+          "decisionHash": {"type":"string","pattern":"^[a-f0-9]{64}$"},
+          "returnId": {"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
+          "continuityId": {"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
+          "intentRevision": {"type":"integer","minimum":1},
+          "appliedRevision": {"type":"integer","minimum":1},
           "requestHash": {"type":"string","pattern":"^[a-f0-9]{64}$"},
           "report": {"type":"string","minLength":1},
           "sha256": {"type":"string","pattern":"^[a-f0-9]{64}$"},

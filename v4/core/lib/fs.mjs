@@ -1,6 +1,55 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import os from 'node:os';
+const workspaceLocks=new Map();
+const lockRelative='.pulso-write.lock';
+function lockError(root,code='METADATA_BUSY') {
+  const error=new Error(`${code}: ${path.join(root,lockRelative)}. Releer y reintentar explícitamente. Si el proceso murió, detener los escritores y verificar propietario/host antes de retirar manualmente el lock; nunca se recupera por TTL.`);
+  error.code=code;
+  error.recovery={root,lockPath:lockRelative,ownerPath:`${lockRelative}/owner.json`,manualOnly:true};
+  return error;
+}
+function ownsLock(root,lock) {
+  try {
+    const stat=fs.lstatSync(safePath(root,lockRelative));
+    return stat.isDirectory()&&stat.dev===lock.dev&&stat.ino===lock.ino&&readJSON(root,`${lockRelative}/owner.json`).token===lock.token;
+  } catch {return false;}
+}
+/** Brief synchronous metadata transaction, never wrap network, agents or permissions.
+ * Acquisition is fail-fast (no polling/TTL theft). A killed process leaves its lock
+ * for explicit manual recovery after writers are stopped and ownership inspected.
+ * All writers must use this protocol; old runtimes and hostile filesystem changes
+ * are outside this cooperative mutex. Reads never acquire it or create metadata.
+ * A regular callback returning a Promise has already run: reject its contract and
+ * consume rejection, but this cannot cancel work it already scheduled. All callers
+ * must remain synchronous; detecting a Promise is not asynchronous confinement.
+ */
+export function withWorkspaceLock(root,callback) {
+  if(typeof callback!=='function'||callback.constructor?.name==='AsyncFunction')throw new TypeError('withWorkspaceLock requiere callback síncrono, no Promise');
+  safePath(root,lockRelative);
+  const base=fs.realpathSync(root),active=workspaceLocks.get(base);
+  const invoke=()=>{const value=callback();if(value&&typeof value.then==='function'){Promise.resolve(value).catch(()=>{});throw new TypeError('withWorkspaceLock no admite Promise; no puede cancelar trabajo ya programado');}return value;};
+  if(active){if(!ownsLock(base,active))throw lockError(base,'METADATA_LOCK_LOST');return invoke();}
+  const directory=safePath(base,lockRelative);
+  try {fs.mkdirSync(directory,{mode:0o700});}
+  catch(error){if(error.code==='EEXIST')throw lockError(base);throw error;}
+  const identity=fs.lstatSync(directory),lock={dev:identity.dev,ino:identity.ino,token:crypto.randomUUID()};
+  let published=false;
+  try {
+    writeJSON(base,`${lockRelative}/owner.json`,{schemaVersion:1,token:lock.token,pid:process.pid,hostname:os.hostname(),createdAt:now(),root:base});
+    published=true;workspaceLocks.set(base,lock);
+    return invoke();
+  } finally {
+    workspaceLocks.delete(base);
+    // Never replace the original transaction error (including partial persistence)
+    // with cleanup errors. Uncertain ownership deliberately leaves a recoverable lock.
+    try {
+      if(published&&ownsLock(base,lock)){fs.unlinkSync(safePath(base,`${lockRelative}/owner.json`));fs.rmdirSync(directory);}
+      else if(!published){const stat=fs.lstatSync(directory);if(stat.isDirectory()&&stat.dev===lock.dev&&stat.ino===lock.ino&&fs.readdirSync(directory).length===0)fs.rmdirSync(directory);}
+    } catch {}
+  }
+}
 export const sha256 = data => crypto.createHash('sha256').update(data).digest('hex');
 export const now = () => new Date().toISOString();
 export const idOK = id => typeof id==='string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(id);

@@ -2,6 +2,19 @@
 
 One canonical local semantic core, independently rendered native integrations, and a separate global installation selector. Runtime packages are self-contained and contain only their own integration and neutral resources. Historical V3 directories remain unchanged.
 
+## 4.2.0 · durable continuity
+
+The current source and local packages are **4.2.0**. See [delivery and observed checks](ENTREGA-4.2.0.md), [the cross-adapter plan](PLAN-CONTINUIDAD-MULTISESION-OPENCODE-VSCODE.md) and the [changelog from V1](../CHANGELOG.md). OpenCode was subsequently installed on explicit user request; restart existing instances to load it. VS Code installation and native conversational acceptance remain separate pending activities.
+
+- `contractVersion:2` prepares a durable snapshot and returns compact IDs plus the exact specialist prompt. Retrieve originals explicitly with `get_delegation`; do not retransmit canonical acceptance hashes.
+- Literal returns survive invalid decisions or stale revisions. `accept_result` accepts a stored `returnId` or captures `reportedReturn` before semantic validation, in the same invocation. Operation IDs make committed retries idempotent.
+- Continuity binds an objective, Work, repository scopes and a revisioned intention. Global workspace focus is navigation, not an implicit instruction to resume another objective.
+- Per-ID snapshots/return blobs and a lightweight registry avoid reading unrelated historical bodies. Short owned mutexes protect cooperative metadata writers; they do not cover agent execution or replace native permissions.
+- OpenCode correlates managed calls and captures supported native terminal wrappers/events. VS Code checks binding/generation on directed reads as well as mutations and retains explicitly reported returns without claiming native chat identity.
+- Legacy Work/evidence schema version 1 remains readable; new sidecars are format 2. Older writers do not participate in these guarantees and must not write the same workspace concurrently during a runtime transition.
+
+Native conversational acceptance remains **NOT_RUN** for OpenCode, VS Code Local and Copilot Agent Host. No exactly-once execution or interruption of an already running specialist is claimed. A lost event requires an available native replay or explicit, sourced reconciliation.
+
 ## Use and build
 
 Node.js 22 or newer is required. From this directory:
@@ -29,7 +42,7 @@ Exactly four operations are published: `pulso_workspace`, `pulso_work`, `pulso_h
 
 V4 public reads use `limit` and snapshot/filter-bound `cursor`, not the earlier public `offset` input. Follow `hasMore` and `nextCursor`; work sections expose actionable read hints. The low-level history offset helper remains for compatibility inside the core. Memory writes require explicit scope, source where appropriate, and revision. Success returns structured data and receipts; partial persistence failures retain confirmed work IDs/revisions and failure facts so clients do not blindly retry committed mutations.
 
-Canonical `.pulso/work/ID/work.json` is authoritative; state and history are projections. Persisted schemaVersion remains 1. The core retains optimistic revision checks, owned bootstrap recovery, project/work UUIDs, user-memory locking, immutable observed evidence, acceptance-change audits, historical evidence tolerance and idempotent projection repair. There is no synthetic complete-map action. Optimistic revisions do not provide a multiprocess lock: only one coordinator writes a checkout at a time.
+Canonical `.pulso/work/ID/work.json` owns task/acceptance decisions; state and history are projections. Work/evidence schemaVersion remains 1. Continuity owns the current intention; the durable registry owns snapshots, returns and protocol reservations. Short metadata mutexes protect cooperative multiprocess writes on the same canonical root. They are never held across delegation. Native product writes still require compatible declared scopes, and Git integration on a shared checkout must be serialized. Old runtimes ignoring the mutex and different metadata roots pointing at the same checkout remain outside this exclusion domain.
 
 ### 4.1.0 acceptance contracts
 
@@ -40,7 +53,7 @@ Canonical `.pulso/work/ID/work.json` is authoritative; state and history are pro
 
 ### 4.1.1 specialist Markdown contract
 
-The prompt contract and runtime release are **4.1.1**; persisted `schemaVersion:1` is unchanged. Older runtimes are not guaranteed to understand the new optional fields.
+In the historical **4.1.1** baseline, the prompt contract and runtime release used that version while persisted `schemaVersion:1` stayed unchanged. The following describes the legacy Markdown contract, still supported alongside durable v2. Older runtimes are not guaranteed to understand newer optional fields.
 
 `prepare_delegation` returns a ready-to-send `specialistPrompt` with four headings: `## Objetivo`, `## Alcance`, `## Condiciones`, `## Entrega`. Only specialist communication uses Markdown. The coordinator retains the original `delegation`, `acceptanceBasis` and trusted `hostContext`; tools and persistence continue using validated JSON, revisions, scopes and integrity hashes. The prompt includes the workspace and authorized relative paths, without internal bases, hashes or JSON schema paths. Inputs must exist; descriptive task resource labels grant no read access and are excluded from the prompt and `readScope`.
 
@@ -73,7 +86,7 @@ These are technical implementation facts, not claims of live-host acceptance. Th
 
 OpenCode envelopes wrap the three action tools in `request`; history filters remain flat. Native permission requests cover reads and writes. Passive observer files exist only in that adapter: foreground tool return is not semantic acceptance; experimental background launch is not child completion. No experimental feature is enabled by installation.
 
-VS Code arguments are flat with adapter-owned `expectedBindingId` for mutations. The extension binds one canonical local open folder per window; multiple roots require explicit selection. It checks trust, cancellation and binding before writes and after asynchronous boundaries. The public invocation API does not authenticate the calling agent or reveal a session cwd; opaque invocation tokens are never decoded or treated as role authorization. Native agent tool selection, prompts and host approvals govern coordinator ownership. Unsupported root mappings fail closed instead of following the active editor.
+VS Code arguments are flat with adapter-owned `expectedBindingId` for mutations and directed reads. Only initial unanchored status discovery permits an absent binding. The extension binds one canonical local open folder per window; multiple roots require explicit selection. It checks trust, cancellation, binding and generation across asynchronous boundaries. The public invocation API does not authenticate the calling agent or reveal a session cwd; opaque invocation tokens are never decoded or treated as role authorization. Continuity handles are references, not credentials. Native agent tool selection, prompts and host approvals remain effective. Unsupported root mappings fail closed instead of following the active editor.
 
 Native skills and agents are contributed directly; no ChatParticipant-owned model loop, private server, generic agent runtime, synthetic session or cross-harness lifecycle abstraction exists. Delegation prompts are self-contained: trusted absolute `hostContext.projectRoot/readBase` stays outside canonical JSON, while persisted paths stay relative. Pure external reviews stay conversation-only, without initializing either project.
 
@@ -91,7 +104,7 @@ All selected plans preflight before any writes. A failing target rolls itself ba
 
 ## Verification gates
 
-`npm run verify` runs **only builds, static package checks and the real-core happy path**. It does not invoke `npm test`, installer doubles or global mock suites. Those older suites remain explicitly selectable through `test` and `verify:installer-staged`; their historical results below do not apply automatically to current changes.
+`npm run verify` runs builds, static package checks and both real-core smokes (legacy and durable). It does not invoke `npm test`, installer doubles or global mock suites. `npm run test:continuity` selects the bounded core/process and adapter-contract regressions for 4.2.0; adapter doubles do not establish real-host behavior. Historical suite results below do not apply automatically to current changes.
 
 ```sh
 npm run build:opencode
@@ -99,6 +112,10 @@ npm run build:vscode
 npm run check
 npm run smoke:happy             # source core
 npm run smoke:happy -- vscode   # generated core/resources, no VS Code host
+npm run smoke:durable           # real durable flow, one fixture execution through retries
+npm run smoke:durable -- vscode # same checks against generated resources
+npm run test:continuity         # bounded core and adapter-contract regressions
+node scripts/continuity-benchmark.mjs # historical 4.1.1 vs current metadata, temporary extraction
 npm run package:opencode
 npm run package:vscode
 npm run verify:packages         # existing archives; never installs or downloads
@@ -109,7 +126,9 @@ The happy path calls the real `prepareWorkspace` and `executeTool` APIs with a d
 
 The result's role is the contract's assigned role; the work is performed by the local script, **not a native agent invocation**. No host, conversation, user acceptance or command is mocked. `accept_delivery` and manual/conversational acceptance are **NOT_RUN**. The smoke does not establish continuity, reassignment, native parallelism or natural-language acceptance in either host.
 
-`verify:packages` checks archive SHA-256 sidecars, extracts into a disposable directory, checks inventories/hashes/resources/imports/BBVA bytes against the current build, loads the extracted contracts and runs the happy path against each extracted core. OpenCode also loads the real bundled SDK and constructs native schemas without activating a host. VS Code checks native binding descriptors and extension syntax; activation requires a real VS Code host. Missing/stale/invalid archives fail explicitly. Packaging uses the locally installed VSCE (or `PULSO_VSCE_PATH`), never an automatic download. macOS uses BSD tar without GNU-specific metadata flags; archive byte reproducibility across platforms is not promised.
+The durable smoke additionally verifies snapshot preservation, capture before semantic rejection, ID recovery, stale/future revision idempotency, independent continuities, competing real writer processes and readiness/history. It runs a real Node fixture exactly once across incorporation retries. The benchmark extracts commit `daa72fc` locally and compares metadata protocol costs; it does not measure a language model or native conversation. See the 4.2.0 delivery for the observed latency tradeoff and the unmet provisional relative budget.
+
+`verify:packages` checks archive SHA-256 sidecars, extracts into a disposable directory, checks inventories/hashes/resources/imports/BBVA bytes against the current build, loads the extracted contracts and runs both smokes against each extracted core. OpenCode also loads the real bundled SDK and constructs native schemas without activating a host. VS Code checks native binding descriptors and extension syntax; activation requires a real VS Code host. Missing/stale/invalid archives fail explicitly. Packaging uses the locally installed VSCE (or `PULSO_VSCE_PATH`), never an automatic download. macOS uses BSD tar without GNU-specific metadata flags; archive byte reproducibility across platforms is not promised.
 
 ### 4.1.1 patch verification · 2026-10-09
 

@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import {randomUUID} from 'node:crypto';
-import {atomicWrite,exists,now,readJSON,safePath} from './fs.mjs';
+import {atomicWrite,exists,now,readJSON,safePath,withWorkspaceLock} from './fs.mjs';
 import {snapshotSignature} from './pagination.mjs';
 
 const projectFile='.pulso/memory.json';
@@ -108,32 +109,48 @@ function update(root,input,options){
   return {action:input.action,scope:input.scope,revision:value.revision,updatedAt:value.updatedAt};
 }
 const sameDirectory=(directory,identity)=>{try{const stat=fs.lstatSync(directory);return stat.isDirectory()&&stat.dev===identity.dev&&stat.ino===identity.ino;}catch{return false;}};
-function withUserLock(homeDir,fn){
+/** Internal synchronous user-memory transaction. Never acquire a workspace lock here. */
+export function withUserLock(homeDir,fn){
   const directory=safePath(homeDir,lockFile),token=randomUUID();
   fs.mkdirSync(path.dirname(directory),{recursive:true});safePath(homeDir,lockFile);
   try{fs.mkdirSync(directory,{mode:0o700});}
   catch(error){if(error.code!=='EEXIST')throw error;throw new Error(`MEMORIA_OCUPADA: lock ${directory}. Reintentar explícitamente; si quedó abandonado, comprobar que su propietario no vive antes de recuperarlo manualmente. Nunca se elimina por antigüedad.`);}
   const identity=fs.lstatSync(directory),ownerPath=`${lockFile}/owner.json`;
-  let owned=false;
+  let owned=false,result,failure,failed=false,cleanupFailure;
   try{
     // Publish the operation's token before reading the shared document inside the lock.
-    atomicWrite(homeDir,ownerPath,JSON.stringify({token,pid:process.pid,createdAt:now()})+'\n');
+    atomicWrite(homeDir,ownerPath,JSON.stringify({token,pid:process.pid,hostname:os.hostname(),createdAt:now(),root:path.resolve(homeDir)})+'\n');
     owned=true;
-    return fn();
-  }finally{
+    result=fn();
+  }catch(error){failed=true;failure=error;}
+  try{
     if(sameDirectory(directory,identity)){
       if(owned){
         // A replaced/foreign lock is never removed, even if this operation failed.
         let owner;try{owner=readJSON(homeDir,ownerPath);}catch{}
-        if(owner?.token===token){fs.unlinkSync(safePath(homeDir,ownerPath));fs.rmdirSync(directory);}
+        if(owner?.token===token){
+          // Preserve the owner reference if unexpected contents prevent cleanup.
+          if(fs.readdirSync(directory).some(name=>name!=='owner.json'))throw new Error('Contenido inesperado en lock de memoria; conservar para revisión manual');
+          fs.unlinkSync(safePath(homeDir,ownerPath));fs.rmdirSync(directory);
+        }else throw new Error('Propiedad del lock de memoria cambiada; no se elimina');
       }else if(fs.readdirSync(directory).length===0)fs.rmdirSync(directory);
-    }
+    }else throw new Error('Directorio del lock de memoria reemplazado; no se elimina');
+  }catch(error){cleanupFailure=error;}
+  if(failed)throw failure;
+  if(cleanupFailure){
+    const error=new Error(`Memoria persistida; limpieza de lock pendiente: ${directory}`,{cause:cleanupFailure});
+    error.code='METADATA_CLEANUP_PENDING';
+    error.persistence={applied:true,cleanupPending:true,lockPath:directory,ownerPath:path.join(directory,'owner.json'),receipt:result,recovery:'No repetir la mutación. Releer memoria; detener escritores y verificar propietario/host antes de recuperación manual del lock.'};
+    throw error;
   }
+  return result;
 }
 export function updateMemory(root,input,options={}){
   const request=mutation(input);
   // Read-only preflight rejects corrupt input/files and stale revisions before creating a lock.
-  expected(load(root,request.scope,options),request);
-  if(request.scope==='user')return withUserLock(location(root,'user',options).root,()=>update(root,request,options));
-  return update(root,request,options);
+  if(request.scope==='user'){
+    expected(load(root,request.scope,options),request);
+    return withUserLock(location(root,'user',options).root,()=>update(root,request,options));
+  }
+  return withWorkspaceLock(root,()=>update(root,request,options));
 }

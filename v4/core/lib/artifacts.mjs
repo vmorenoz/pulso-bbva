@@ -2,7 +2,8 @@
 import fs from 'node:fs';
 import {generateWorkId} from './identity.mjs';
 import {assertSchema} from './schema.mjs';
-import {safePath,exists,readJSON,readText,writeJSON,atomicWrite,assertID,now,fingerprint,sha256} from './fs.mjs';
+import {safePath,exists,readJSON,readText,writeJSON,atomicWrite,assertID,now,fingerprint,sha256,withWorkspaceLock} from './fs.mjs';
+import {pendingDelegations} from './delegation-registry.mjs';
 const terminal = status => ['done','cancelled'].includes(status);
 const wp = id => `.pulso/work/${assertID(id)}/work.json`;
 const unique = (values,label) => {if(new Set(values).size!==values.length)throw new Error(`${label}: duplicados`);};
@@ -30,7 +31,8 @@ function validateClosureInput(outcome,result,limitations) {
   if(!Array.isArray(limitations)||limitations.length>30||limitations.some(value=>typeof value!=='string'||!value.trim()||value.length>1000))throw new Error('limitations: cada limitación requiere texto no vacío de hasta 1000 caracteres');
 }
 export function emptyState() {return {schemaVersion:1,revision:1,updatedAt:now(),focusWorkId:null,works:[]};}
-export function initArtifacts(root) {
+export const initArtifacts=(root,...args)=>withWorkspaceLock(root,()=>initArtifactsLocked(root,...args));
+function initArtifactsLocked(root) {
   if(!exists(root,'.pulso/state.json'))writeJSON(root,'.pulso/state.json',emptyState());
   if(!exists(root,'.pulso/history.jsonl'))atomicWrite(root,'.pulso/history.jsonl','');
   fs.mkdirSync(safePath(root,'.pulso/work'),{recursive:true});
@@ -160,14 +162,16 @@ function putSummary(root,w,focus=false){
   if(before===JSON.stringify({works:s.works,focusWorkId:s.focusWorkId}))return s;
   s.revision++;s.updatedAt=now();writeJSON(root,'.pulso/state.json',assertSchema('state',s));return s;
 }
-export function syncWork(root,id,{focus=false}={}) {return projectWork(root,readWork(root,id,{files:false}),{focus});}
-export function createWork(root,{id=generateWorkId(),title,objective,criterion,verification,priority='normal'}) {
+export function syncWork(root,id,{focus=false}={}) {return withWorkspaceLock(root,()=>projectWork(root,readWork(root,id,{files:false}),{focus}));}
+export const createWork=(root,...args)=>withWorkspaceLock(root,()=>createWorkLocked(root,...args));
+function createWorkLocked(root,{id=generateWorkId(),title,objective,criterion,verification,priority='normal'}) {
   assertID(id);if(exists(root,wp(id)))throw new Error(`Trabajo ya existe: ${id}`);
   status(root);history(root);const ts=now();
   const w={schemaVersion:1,id,revision:1,cycle:1,title,objective:{id:'OBJ-1',outcome:objective,criteria:[{id:'AC-1',description:criterion,verification,evidenceIds:[]}]},status:'pending',priority,createdAt:ts,updatedAt:ts,summary:'Trabajo creado; alcance pendiente de revisión.',blockers:[],decisionsPending:[],nextAction:'Revisar contexto y criterio de aceptación',documents:[],tasks:[],evidence:[],acceptanceChanges:[],closure:null};
   validateWork(root,w);return commitWork(root,w,{focus:true});
 }
-export function saveWork(root,candidate,expectedRevision){
+export const saveWork=(root,...args)=>withWorkspaceLock(root,()=>saveWorkLocked(root,...args));
+function saveWorkLocked(root,candidate,expectedRevision){
   assertSchema('work',candidate);const old=readWork(root,candidate.id,{files:false});
   if(!Number.isSafeInteger(expectedRevision)||old.revision!==expectedRevision||candidate.revision!==expectedRevision)throw new Error(`Revisión obsoleta; actual=${old.revision}. Releer y reconciliar, no sobrescribir.`);
   if(terminal(old.status)||terminal(candidate.status))throw new Error('Usar close/reopen para estados terminales');
@@ -205,6 +209,9 @@ function assertObservedReport(e){if(!e.files.some(file=>file.path===e.report&&ty
  * the implementation files to retain their old bytes; final criteria do. */
 export function completionReadiness(root,w,{fresh=!terminal(w.status)}={}){
   const issues=[],used=new Set(),ev=new Map(w.evidence.map(e=>[e.id,e]));
+  // Historical closed Work remains readable. A prospective closure and all
+  // current/open readiness queries share the exact same administrative guard.
+  if(fresh||!w.closure)issues.push(...delegationIssues(root,w));
   const issue=(code,entity,message)=>issues.push({code,entity,message});
   if(fresh)for(const document of w.documents){
     // Match the document existence rule of the prospective terminal Work.
@@ -270,7 +277,17 @@ function assertCompletion(root,w,options){
   if(!readiness.ready){const error=new Error(`Cierre pendiente: ${readiness.issues.length} impedimentos`);error.code='CLOSURE_NOT_READY';error.issues=readiness.issues;error.readiness=readiness;throw error;}
   return readiness.evidenceIds;
 }
+function delegationIssues(root,w){
+  try{
+    const pending=pendingDelegations(root,w);
+    return pending.length?[{code:'DELEGATIONS_PENDING',entity:w.id,message:`Reconciliar encargos pendientes antes de cerrar: ${pending.map(r=>r.delegationId).join(', ')}`}]:[];
+  }catch(error){return [{code:'DELEGATIONS_INVALID',entity:w.id,message:error.message}];}
+}
 function prepareClosure(root,w,{outcome,summary:result,limitations}){
+  if(outcome==='cancelled'){
+    const issues=delegationIssues(root,w);
+    if(issues.length){const error=new Error(issues[0].message);error.code='CLOSURE_NOT_READY';error.issues=issues;error.readiness=completionReadiness(root,w);throw error;}
+  }
   const evid=outcome==='done'?assertCompletion(root,w):w.evidence.map(e=>e.id);
   w.completedTaskIds=completedTaskIds(w);
   if(outcome==='cancelled')for(const t of w.tasks)if(t.status!=='done'){
@@ -281,13 +298,15 @@ function prepareClosure(root,w,{outcome,summary:result,limitations}){
   w.closure={id:`${w.id}:c${w.cycle}`,cycle:w.cycle,at:w.updatedAt,outcome,summary:result,evidenceIds:evid,limitations};
   validateWork(root,w);return w;
 }
-export function closeWork(root,id,{outcome='done',summary:result,limitations=[]}={}){
+export const closeWork=(root,...args)=>withWorkspaceLock(root,()=>closeWorkLocked(root,...args));
+function closeWorkLocked(root,id,{outcome='done',summary:result,limitations=[]}={}){
   validateClosureInput(outcome,result,limitations);
   const w=readWork(root,id,{files:false});status(root);history(root);
   if(w.closure){if(w.closure.outcome!==outcome||w.closure.summary!==result||!same(w.closure.limitations,limitations))throw new Error('Trabajo ya cerrado con otro resultado');return syncWork(root,id);}
   prepareClosure(root,w,{outcome,summary:result,limitations});return commitWork(root,w);
 }
-export function reopenWork(root,id,reason){
+export const reopenWork=(root,...args)=>withWorkspaceLock(root,()=>reopenWorkLocked(root,...args));
+function reopenWorkLocked(root,id,reason){
   if(!reason?.trim())throw new Error('Reapertura requiere motivo');const w=readWork(root,id,{files:false});if(!w.closure)throw new Error('Trabajo ya abierto');status(root);recordClosure(root,w);
   w.cycle++;w.revision++;w.status='pending';w.closure=null;w.updatedAt=now();w.summary=`Reabierto: ${reason}`;w.nextAction='Revisar alcance, tareas y evidencia antes de continuar';
   w.completedTaskIds=[];
@@ -296,7 +315,8 @@ export function reopenWork(root,id,reason){
   for(const t of w.tasks){t.status='pending';t.evidenceIds=[];t.summary='Revisión requerida tras reapertura';}
   validateWork(root,w,{files:false});return commitWork(root,w,{focus:true});
 }
-export function repair(root,{files=false}={}){
+export const repair=(root,...args)=>withWorkspaceLock(root,()=>repairLocked(root,...args));
+function repairLocked(root,{files=false}={}){
   const oldHistory=history(root);const folder=safePath(root,'.pulso/work');const works=[];
   for(const item of fs.readdirSync(folder,{withFileTypes:true})){if(item.isSymbolicLink())throw new Error('Symlink en work');if(item.isDirectory()){assertID(item.name);works.push(readWork(root,item.name,{files}));}}
   // Validate every work before any changes; never use a partial successful subset.

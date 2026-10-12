@@ -10,9 +10,15 @@ const key=(sessionID,callID)=>createHash('sha256').update(JSON.stringify([sessio
 const file=(sessionID,callID)=>`${folder}/${key(sessionID,callID)}.json`;
 
 // Only explicit, unambiguous labels are correlation. Never store the prompt.
-function correlation(prompt){
+export function correlation(prompt){
   const result={};
   if(typeof prompt!=='string'||prompt.length>65536)return result;
+  const headers=[...prompt.matchAll(/^Encargo: ([A-Za-z0-9][A-Za-z0-9_-]{0,79}) · workId: ([A-Za-z0-9][A-Za-z0-9_-]{0,79}) · taskIds?: ([A-Za-z0-9][A-Za-z0-9_, -]*)$/gm)];
+  if(headers.length===1){
+    const taskIds=headers[0][3].split(', ');
+    if(taskIds.length&&new Set(taskIds).size===taskIds.length&&taskIds.every(id=>/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(id)))return {delegationId:headers[0][1],workId:headers[0][2],taskIds,...(taskIds.length===1?{taskId:taskIds[0]}:{})};
+  }
+  if(headers.length)return {correlationConflicts:['delegationId','workId','taskIds']};
   for(const label of ['workId','taskId']){
     const values=[...prompt.matchAll(new RegExp(`(?:^|[\\s{,])"?${label}"?\\s*[:=]\\s*"?([A-Za-z0-9][A-Za-z0-9_-]{0,79})(?=["\\s,}]|$)`,'g'))].map(match=>match[1]);
     if(values.length&&new Set(values).size===1)result[label]=values[0];
@@ -62,7 +68,7 @@ export function createDelegationObserver(root){
     }
     for(const [label,id] of Object.entries(correlated).filter(([label])=>label!=='correlationConflicts')){
       if(value.correlationConflicts?.includes(label))continue;
-      if(value[label]&&value[label]!==id){
+      if(value[label]&&JSON.stringify(value[label])!==JSON.stringify(id)){
         delete value[label];value.correlationConflicts=[...(value.correlationConflicts||[]),label].sort();
       }else value[label]=id;
     }

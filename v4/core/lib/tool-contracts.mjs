@@ -49,15 +49,32 @@ const compactResultInput = object({
   ...Object.fromEntries(['status','summary','artifacts','changedFiles','checks','findings','questions','limitations','suggestedNextStep'].map(key=>[key,clone(resultInput.properties[key])])),
   markdown:{type:'string',minLength:1,pattern:'\\S'}
 },['status','summary','markdown']);
+const strings={type:'array',items:text(2000),maxItems:50};
+const ids={type:'array',items:id,maxItems:50};
+const continuityRef={continuityId:id,intentRevision:integer(1)};
+const v2={contractVersion:{const:2}};
+const reportedReturn=object({captureKey:id,markdown:text(1000000),completeness:enumeration(['complete','truncated','unknown'])},['captureKey','markdown']);
+const decisionSchema=object({...Object.fromEntries(Object.entries(compactResultInput.properties).filter(([key])=>key!=='markdown')),acceptedTaskIds:ids},['status','summary']);
+export function validateDecision(value){
+  validateInput(decisionSchema,value);
+  if(value.status==='completed'&&!Object.hasOwn(value,'acceptedTaskIds'))throw new Error('completed requiere acceptedTaskIds explícitos');
+  if(value.status!=='completed'&&value.acceptedTaskIds?.length)throw new Error('Sólo completed admite acceptedTaskIds no vacío');
+  return value;
+}
 const workspaceActions = {
   prepare:action('prepare'),
-  status:action('status',{...readPage,status:enumeration(['pending','in_progress','blocked','paused'])}),
+  bind_continuity:action('bind_continuity',{workId:id,requestKey:id,continuityId:id,objective:text(),repositories:strings,constraints:strings,sourceText:text(8000)},['workId','requestKey','objective','repositories','constraints']),
+  get_continuity:action('get_continuity',{continuityId:id},['continuityId']),
+  update_intent:action('update_intent',{continuityId:id,expectedRevision:integer(1),objective:text(),constraints:strings,repositories:strings,compatibleDelegationIds:ids},['continuityId','expectedRevision','objective','constraints']),
+  status:action('status',{...readPage,continuityId:id,status:enumeration(['pending','in_progress','blocked','paused'])}),
   validate:action('validate',{fresh:{type:'boolean'}}),
   sync:action('sync',workRef,['workId','expectedRevision']),
   recover:action('recover')
 };
 const workActions = {
   get:action('get',{workId:id,section:enumeration(['overview','tasks','criteria','evidence','results','documents','blockers','decisions','acceptanceChanges','all']),...readPage},['workId']),
+  get_delegation:action('get_delegation',{workId:id,delegationId:id,continuityId:id},['workId','delegationId']),
+  reconcile_delegation:action('reconcile_delegation',{workId:id,delegationId:id,...continuityRef,reason:text(2000),source:object({text:text(8000),messageRef:text(2000)},['text']),resolution:enumeration(['not_dispatched','reported_terminal','retired','explicitly_reconciled'])},['workId','delegationId','continuityId','intentRevision','reason','resolution']),
   prepare_delegation:action('prepare_delegation',{
     workId:id,taskIds:{type:'array',items:id,minItems:1,maxItems:50},delegationId:id,objective:text(),
     inputs:clone(persistedSchema('delegation').properties.inputs),output:clone(persistedSchema('delegation').properties.output),
@@ -68,7 +85,7 @@ const workActions = {
     result:{anyOf:[resultInput,compactResultInput]},acceptedTaskIds:{type:'array',items:id,minItems:0,maxItems:50,description:'Selección explícita obligatoria para completed; para otros estados se omite o es [].'},summary:text(2000)
   },['workId','expectedRevision','delegation','acceptanceBasis','result','summary']),
   accept_delivery:action('accept_delivery',{
-    ...workRef,summary:text(2000),criterionIds:{type:'array',items:id,minItems:1,maxItems:50},
+    ...workRef,operationId:id,summary:text(2000),criterionIds:{type:'array',items:id,minItems:1,maxItems:50},
     source:object({text:text(8000),messageRef:text(2000)},['text']),limitations:{type:'array',items:text(1000),maxItems:30}
   },['workId','expectedRevision','summary','criterionIds','source','limitations']),
   validate_result:action('validate_result',{delegation:clone(persistedSchema('delegation')),result:clone(persistedSchema('result'))},['delegation','result']),
@@ -78,6 +95,17 @@ const workActions = {
   close:action('close',{...workRef,outcome:enumeration(['done','cancelled']),summary:text(4000),limitations:{type:'array',items:text(1000),maxItems:30}},['workId','expectedRevision','summary']),
   reopen:action('reopen',{...workRef,reason:text(2000)},['workId','expectedRevision','reason'])
 };
+const legacyPrepare=workActions.prepare_delegation,legacyAccept=workActions.accept_result;
+workActions.prepare_delegation={anyOf:[legacyPrepare,action('prepare_delegation',{
+  ...v2,...workRef,...continuityRef,requestKey:id,
+  ...Object.fromEntries(['taskIds','objective','inputs','output','constraints','templateId'].map(key=>[key,legacyPrepare.properties[key]])),
+  integrationResources:strings,stableReadScope:strings
+},['contractVersion','workId','expectedRevision','continuityId','intentRevision','requestKey','taskIds','objective','inputs','output','constraints','templateId'])]};
+workActions.accept_result={anyOf:[legacyAccept,...['returnId','reportedReturn'].map(transport=>action('accept_result',{
+  ...v2,...workRef,...continuityRef,delegationId:id,operationId:id,
+  [transport]:transport==='returnId'?id:reportedReturn,
+  decision:{type:'object',additionalProperties:true},reportedTerminal:{type:'boolean'}
+},['contractVersion','workId','expectedRevision','continuityId','intentRevision','delegationId','operationId',transport,'decision']))]};
 const contextActions = {
   read:action('read',{scope:enumeration(['project','user','all']),section:enumeration(['context','preferences','learning','all']),key:text(120),...readPage}),
   summary:action('summary',{scope:enumeration(['project','user','all'])}),
@@ -91,7 +119,7 @@ const historySchema=object({workId:id,since:{type:'string',format:'date-time'},u
 /** Derive the flat advertised superset from strict action descriptors. */
 function flatSchema(actions){
   const variants=new Map();
-  for(const shape of Object.values(actions))for(const [key,value] of Object.entries(shape.properties)){
+  for(const shape of Object.values(actions).flatMap(shape=>shape.anyOf||[shape]))for(const [key,value] of Object.entries(shape.properties)){
     if(key==='action')continue;
     const items=variants.get(key)||[];
     if(!items.some(item=>JSON.stringify(item)===JSON.stringify(value)))items.push(value);
@@ -103,8 +131,8 @@ function descriptor(name,displayName,modelDescription,actions,mutatingActions=[]
   return {name,displayName:`Pulso · ${displayName}`,modelDescription,canBeReferencedInPrompt:true,toolReferenceName:name,inputSchema:inputSchema||flatSchema(actions),actionSchemas:actions,mutatingActions};
 }
 export const toolContracts={
-  pulso_workspace:descriptor('pulso_workspace','Workspace','Prepara, consulta, valida, sincroniza o recupera metadatos Pulso. status devuelve data.works con items completos y nextCursor; sigue hasMore. Los cursores caducan al cambiar el índice o los filtros.',workspaceActions,['prepare','sync','recover']),
-  pulso_work:descriptor('pulso_work','Trabajo','Consulta o actualiza un objetivo. get devuelve readiness completo, páginas por section y acceptanceBasis; sigue nextCursor. prepare_delegation devuelve specialistPrompt Markdown para task y delegation, acceptanceBasis y hostContext internos para el orquestador. El especialista responde en Markdown; Pulso extrae los campos técnicos mínimos para accept_result: status, summary, markdown literal y detalles opcionales, o resultado canónico legacy. completed requiere acceptedTaskIds explícitos; otros estados admiten omitirlos. Incorpora el resultado revisado con base previa vigente; no satisface criterios ni interpreta prosa como evidencia o permisos. accept_delivery conserva aceptación manual declarada e intenta cierre devolviendo todos los impedimentos; no completa tareas. Las mutaciones requieren revisión actual. validate_result valida sin escribir. evidence.add requiere observación y hashes reales; calcular hashes no prueba ejecución.',workActions,['create','update','block','close','reopen','accept_result','accept_delivery']),
+  pulso_workspace:descriptor('pulso_workspace','Workspace','Prepara, consulta, valida, sincroniza o recupera metadatos Pulso. bind_continuity vincula un objetivo; continuityId explícito permite retomar en otra sesión. get_continuity devuelve la cápsula; update_intent preserva sólo compatibleDelegationIds explícitos. status admite continuityId sin adoptar foco global. status devuelve data.works con items completos y nextCursor; sigue hasMore.',workspaceActions,['prepare','sync','recover','bind_continuity','update_intent']),
+  pulso_work:descriptor('pulso_work','Trabajo','Consulta o actualiza un objetivo. get devuelve readiness, páginas y acceptanceBasis. prepare_delegation es mutación: contractVersion:2 conserva snapshot/base/prompt por requestKey y devuelve delegationId y specialistPrompt. get_delegation recupera contrato, retornos e intentos. accept_result v2 recibe IDs, operationId y returnId XOR reportedReturn; captura Markdown antes de validar decision. decision contiene status, summary, acceptedTaskIds explícitos para completed y detalles result opcionales. reportedTerminal resuelve sólo una reserva reportada; no prueba cese físico. reconcile_delegation no detiene agentes. Legacy sigue admitido. accept_delivery conserva aceptación manual declarada e intenta cierre; no completa tareas. validate_result valida sin escribir. Ningún retorno satisface criterios automáticamente ni prueba ejecución.',workActions,['create','update','block','close','reopen','prepare_delegation','reconcile_delegation','accept_result','accept_delivery']),
   pulso_history:descriptor('pulso_history','Historial','Consulta cierres con fechas, ciclos, resumen completo, limitaciones y referencias. data.items se pagina con limit/cursor; sigue hasMore y nextCursor. Cambiar historial o filtros invalida el cursor.',null,[],historySchema),
   pulso_context:descriptor('pulso_context','Contexto','Consulta o registra contexto, preferencias y aprendizajes. read devuelve entradas completas, revisions y nextCursor. Las escrituras exigen scope y expectedRevision; preferencias y aprendizajes requieren source explícito. summary es una vista limitada a 8000 caracteres.',contextActions,['set_context','set_preference','remove_preference','add_learning'])
 };
@@ -117,12 +145,13 @@ freeze(toolContracts);
 export const toolDefinitions=Object.freeze(Object.values(toolContracts).map(({actionSchemas,mutatingActions,...definition})=>Object.freeze(definition)));
 export function isMutating(name,input){return Boolean(toolContracts[name]?.mutatingActions.includes(input?.action));}
 
-function assertJSON(value,at='input',seen=new Set()){
+function assertJSON(value,at='input',seen=new Set(),depth=0){
+  if(depth>64)throw new Error('JSON demasiado profundo');
   if(value===null||typeof value==='string'||typeof value==='boolean'||typeof value==='number'&&Number.isFinite(value))return;
   if(!value||typeof value!=='object'||!Array.isArray(value)&&![Object.prototype,null].includes(Object.getPrototypeOf(value)))throw new Error(`${at}: se requiere un valor JSON simple`);
   if(seen.has(value))throw new Error(`${at}: referencia circular no admitida`);
   seen.add(value);
-  for(const [key,item] of Object.entries(value))assertJSON(item,`${at}.${key}`,seen);
+  for(const [key,item] of Object.entries(value))assertJSON(item,`${at}.${key}`,seen,depth+1);
   seen.delete(value);
 }
 export function validateInput(shape,input){
@@ -142,7 +171,10 @@ export function validateToolInput(definitionOrName,input){
     if(!shape)throw new Error(`Acción no admitida: ${String(input.action)}`);
     validateInput(shape,input);
   }else validateInput(descriptor.inputSchema,input);
-  if(name==='pulso_work'&&input.action==='accept_result'){
+  if(input.contractVersion===2&&JSON.stringify(input).length>1100000)throw new Error('Transporte v2 demasiado grande');
+  if(input.contractVersion===2&&input.decision&&JSON.stringify(input.decision).length>64000)throw new Error('decision demasiado grande');
+  if(name==='pulso_work'&&input.action==='reconcile_delegation'&&input.resolution==='explicitly_reconciled'&&!input.source)throw new Error('explicitly_reconciled requiere source');
+  if(name==='pulso_work'&&input.action==='accept_result'&&input.contractVersion!==2){
     if(input.result.status==='completed'&&!Object.hasOwn(input,'acceptedTaskIds'))throw new Error('completed requiere acceptedTaskIds explícitos');
     if(input.result.status!=='completed'&&input.acceptedTaskIds?.length)throw new Error('Sólo completed admite acceptedTaskIds no vacío');
   }
