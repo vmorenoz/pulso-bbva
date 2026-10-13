@@ -53,7 +53,7 @@ async function fixture(t) {
 
 test('v2 dispatch validates full prompt, role, all tasks and native parent; duplicates reject',async t => {
   const f = await fixture(t);
-  for (const args of [{...f.args,prompt:f.args.prompt+'\nEdited'},{...f.args,subagent_type:'pulso-executor'},{...f.args,prompt:f.args.prompt.replace('T1, T2','T1')}]) await assert.rejects(f.before(args));
+  for (const args of [{...f.args,prompt:f.args.prompt+'\nEdited'},{...f.args,prompt:'mode: project_initialization\n'+f.args.prompt},{...f.args,subagent_type:'pulso-executor'},{...f.args,prompt:f.args.prompt.replace('T1, T2','T1')}]) await assert.rejects(f.before(args));
   await assert.rejects(f.before(f.args,{...f.call,sessionID:'ses_other'}),/Continuidad de otra sesión/);
   await f.before();
   await assert.rejects(f.before());

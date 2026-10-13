@@ -14,6 +14,13 @@ const require = createRequire(import.meta.url);
 const zodURL = pathToFileURL(path.join(root, 'adapters/opencode/vendor/zod/index.js')).href;
 const {z} = await import(zodURL);
 const validator = {checkSchemaVocabulary, validateSchema};
+const metadataSnapshot = project => {
+  const folder = path.join(project, '.pulso');
+  return Object.fromEntries(fs.readdirSync(folder, {recursive:true}).sort().filter(file => file !== 'project.md').map(file => {
+    const target = path.join(folder, file);
+    return [file, fs.statSync(target).isFile() ? fs.readFileSync(target, 'utf8') : null];
+  }));
+};
 async function fixture(t) {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'pulso-v4-opencode-'));
   t.after(() => fs.rmSync(base, {recursive: true, force: true}));
@@ -166,4 +173,59 @@ test('only catalog role and canonical task correlation can start passive observa
   assert.equal(attempts.data.items[0].acceptance,'not_assessed');
   assert.equal(fs.readFileSync(workFile,'utf8'),before);
   assert.equal(JSON.stringify(attempts).includes('Private'),false);
+});
+
+for (const existing of [false, true]) test(`native initialization maps without Work bookkeeping; existing objective=${existing}`, async t => {
+  const {invoke,plugin,project,requests} = await fixture(t);
+  const manifest = {name:'fixture-service',type:'module',scripts:{test:'node --test'}};
+  fs.writeFileSync(path.join(project,'package.json'),JSON.stringify(manifest));
+  assert.equal((await invoke('pulso_workspace',{action:'status'})).ok,true);
+  assert.equal(fs.existsSync(path.join(project,'.pulso')),false);
+  assert.equal((await invoke('pulso_workspace',{action:'prepare'})).ok,true);
+  if (existing) {
+    assert.equal((await invoke('pulso_work',{action:'create',workId:'KEEP',title:'Product',objective:'Implement product',criterion:'Behavior',verification:'Tests'})).ok,true);
+    assert.equal((await invoke('pulso_workspace',{action:'bind_continuity',workId:'KEEP',requestKey:'keep',objective:'Implement product',repositories:['.'],constraints:[]})).ok,true);
+  }
+  const before = metadataSnapshot(project), approvals = requests.length;
+  const prompt = `mode: project_initialization\nWorkspace: ${project}\nreadBase: ${project}\nresources: [package.json]\noutput: .pulso/project.md\nwriteScope: [.pulso/project.md]\nMapear contexto con fuentes reales y la guía project instalada. Sin cambios de producto.`;
+  const args = {subagent_type:'pulso-explorer',description:'Mapa contextual',prompt};
+  const call = {tool:'task',sessionID:'ses_init',callID:'call_init'};
+  await plugin['tool.execute.before'](call,{args});
+  // Native specialist is simulated; actual plugin hooks/core run against an isolated fixture.
+  const observed = JSON.parse(fs.readFileSync(path.join(project,'package.json'),'utf8'));
+  const document = `# Proyecto\n\nServicio ${observed.name}; módulos ${observed.type}.\nComando observado: ${observed.scripts.test} (no ejecutado).\nFuente: package.json. Negocio: pendiente de confirmar.\n`;
+  fs.writeFileSync(path.join(project,'.pulso/project.md'),document);
+  const output = {output:'## Resultado\nCompletado\n## Cambios o hallazgos\n.pulso/project.md\n## Comprobación y pendientes\nFuentes leídas; negocio por confirmar.',metadata:{sessionId:'ses_map',parentSessionId:'ses_init',truncated:false}};
+  const original = structuredClone(output);
+  await plugin['tool.execute.after']({...call,args},output);
+  await plugin.event({event:{type:'message.part.updated',properties:{part:{...call,type:'tool',state:{status:'completed',input:args,...output}}}}});
+  assert.deepEqual(output,original); // No durable capture or acceptance injected.
+  assert.equal(requests.length,approvals); // Hooks did not ask for a Work operation.
+  assert.deepEqual(metadataSnapshot(project),before); // No tasks, continuity, evidence, history or telemetry writes.
+  assert.equal(fs.readFileSync(path.join(project,'.pulso/project.md'),'utf8'),document);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(project,'package.json'))),manifest);
+  assert.equal((await invoke('pulso_workspace',{action:'prepare'})).ok,true);
+  assert.equal((await invoke('pulso_workspace',{action:'status'})).ok,true);
+  assert.deepEqual(metadataSnapshot(project),before);
+  assert.equal(fs.readFileSync(path.join(project,'.pulso/project.md'),'utf8'),document);
+  if (!existing) {
+    assert.deepEqual(fs.readdirSync(path.join(project,'.pulso/work')),[]);
+    assert.ok(requests.every(request => request.permission === 'pulso_workspace' && /^(status|prepare):/.test(request.patterns[0])));
+  }
+});
+
+test('failed initialization return preserves the seed and creates no Work blocker or durable attempt', async t => {
+  const {invoke,plugin,project} = await fixture(t);
+  assert.equal((await invoke('pulso_workspace',{action:'prepare'})).ok,true);
+  const before = metadataSnapshot(project), seed = fs.readFileSync(path.join(project,'.pulso/project.md'),'utf8');
+  const args = {subagent_type:'pulso-explorer',description:'Mapa contextual',prompt:`mode: project_initialization\nWorkspace: ${project}\nreadBase: ${project}\noutput: .pulso/project.md\nwriteScope: [.pulso/project.md]\nInspeccionar fuentes autorizadas.`};
+  const call = {tool:'task',sessionID:'ses_init',callID:'call_failed'};
+  await plugin['tool.execute.before'](call,{args});
+  const output = {output:'## Resultado\nBloqueado: lectura nativa denegada. No se ha producido el mapa.',metadata:{}};
+  const original = structuredClone(output);
+  await plugin['tool.execute.after']({...call,args},output);
+  assert.deepEqual(output,original);
+  assert.deepEqual(metadataSnapshot(project),before);
+  assert.equal(fs.readFileSync(path.join(project,'.pulso/project.md'),'utf8'),seed);
+  assert.deepEqual(fs.readdirSync(path.join(project,'.pulso/work')),[]);
 });

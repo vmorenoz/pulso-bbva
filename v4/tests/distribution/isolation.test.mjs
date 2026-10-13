@@ -18,6 +18,35 @@ for(const target of ['opencode','vscode'])test(`${target}: builds independently,
   const run=()=>{const result=spawnSync(process.execPath,['scripts/build.mjs',target],{cwd:root,encoding:'utf8'});assert.equal(result.status,0,result.stderr||result.stdout);};
   run();const output=path.join(root,'dist',target),first=snapshot(output);run();assert.deepEqual(snapshot(output),first);
   verifyPackage(target,output,{coreRoot:path.join(root,'core')});assert.equal(fs.existsSync(path.join(root,'dist',sibling)),false);
+  const agentPath = id => path.join(output,target === 'opencode' ? `agents/${id}.md` : `resources/agents/${id}.agent.md`);
+  const primary = fs.readFileSync(agentPath('pulso'),'utf8'), explorer = fs.readFileSync(agentPath('pulso-explorer'),'utf8');
+  const init = fs.readFileSync(path.join(output,target === 'opencode' ? 'skills/pulso-init/SKILL.md' : 'resources/skills/pulso-init/SKILL.md'),'utf8');
+  for (const resource of [primary,explorer,init]) {
+    assert.match(resource,/mode: project_initialization/);
+    assert.match(resource,/sin prepare_delegation, accept_result, Work ni continuidad/);
+    assert.match(resource,/otras delegaciones persistentes/);
+  }
+  assert.match(init,/esqueleto de prepare.*no es un mapa/);
+  assert.doesNotMatch(init,/crea uno de mapeo|Registra tarea de Explorer|Cierra el Work exclusivo/);
+  assert.match(explorer,/sin Work, tareas, continuidad ni prepare_delegation/);
+  const field = (body,name) => JSON.parse(body.match(new RegExp(`^${name}: (.+)$`,'m'))[1]);
+  if (target === 'opencode') {
+    assert.equal(field(primary,'permission').task['pulso-explorer'],'allow');
+    const permissions = field(explorer,'permission');
+    assert.equal(permissions.edit['.pulso/project.md'],'allow');
+    for (const key of ['*','.pulso/state.json','.pulso/history.jsonl','.pulso/work/**/work.json']) assert.equal(permissions.edit[key],'deny');
+    assert.equal(permissions.bash['*'],'deny');
+    assert.equal(permissions.task['*'],'deny');
+    assert.equal(permissions.pulso_work,'deny');
+    assert.equal(field(fs.readFileSync(agentPath('pulso-executor'),'utf8'),'permission').edit['.pulso/project.md'],'deny');
+  } else {
+    assert.ok(field(primary,'tools').includes('agent'));
+    assert.ok(field(primary,'agents').includes('pulso-explorer'));
+    assert.ok(!field(primary,'tools').includes('edit'));
+    assert.ok(field(explorer,'tools').includes('edit'));
+    for (const tool of ['agent','execute','pulso_work','pulso_workspace']) assert.ok(!field(explorer,'tools').includes(tool));
+    assert.deepEqual(field(explorer,'agents'),[]);
+  }
   const core=await import(pathToFileURL(path.join(output,'resources/lib/semantic-tools.mjs')).href);assert.equal(typeof core.executeTool,'function');
   fs.writeFileSync(path.join(output,'unrelated.txt'),'accidental artifact');assert.throws(()=>verifyPackage(target,output,{coreRoot:path.join(root,'core')}),/inventory/);
 });

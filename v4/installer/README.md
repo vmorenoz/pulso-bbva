@@ -1,6 +1,6 @@
 # Pulso global installer
 
-This is a separate orchestration package, never part of either runtime payload. It configures one or both selected integrations globally. Install its pinned dependency with `npm install` in this directory, then run `node cli.mjs --help`.
+This is a separate orchestration package, never part of either runtime payload. It configures one or both selected integrations globally. For ready-to-install OpenCode releases, use the [self-contained installer archive](STANDALONE.md): it includes the runtime and pinned dependency and needs no npm installation or compilation. When developing from source, install the pinned dependency with `npm install` in this directory, then run `node cli.mjs --help`.
 
 Run interactively with `node cli.mjs`, or select explicitly with `--targets opencode,vscode`. Existing repository-local `../dist/opencode` and `../artifacts/pulso-4.0.0.vsix` are used by default. Explicit `--opencode-package /absolute/dist/opencode` and `--vsix /absolute/pulso.vsix` take priority; missing packages show the required build command. Use `--dry-run` to inspect the complete plan. `--yes` confirms that plan; it does not permit foreign collisions. Modified owned or exact known legacy resources need `--conflict backup-replace`; default is abort. Unknown files are never replaced. All selected targets are preflighted before mutation.
 

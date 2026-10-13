@@ -6,6 +6,8 @@ Asistente de desarrollo que aclara objetivos, coordina nueve especialistas y con
 
 Instala el paquete mediante el instalador de Pulso y selecciona **Pulso** en OpenCode. Usa los comandos pulso-init, pulso-status, pulso-recap y pulso-resume para preparar, consultar y retomar trabajo.
 
+`/pulso-init` prepara el proyecto y delega directamente el mapa contextual real de `project.md` al Explorador con escritura exclusiva de ese documento. Reutiliza un mapa suficiente. No crea Work, tareas ni continuidad de Work; no exige QA, evidencia formal, readiness o cierre. Los permisos nativos siguen vigentes y las demás delegaciones persistentes conservan prepare_delegation → task → accept_result.
+
 Un saludo o una consulta de estado no prepara el proyecto ni escribe archivos. La preparación es una operación explícita. Los datos del proyecto se guardan en `.pulso/` y las preferencias personales se conservan entre proyectos.
 
 ## Trabajo y revisión

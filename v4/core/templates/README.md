@@ -8,7 +8,7 @@ marcadores pendientes: usa «pendiente» con motivo y responsable cuando falte u
 
 | Archivo | Autor habitual | Uso |
 |---|---|---|
-| project.md | Explorador con encargo normal | Contexto global verificable |
+| project.md | Explorador con encargo nativo project_initialization | Contexto global verificable, sin Work |
 | work.md | Pulso | Narrativa opcional del trabajo; estado canónico en work.json |
 | objective.json / task.json | Pulso | Ejemplos de datos y esquemas asociados |
 | spec.md | Researcher / Planificador, según encargo | Comportamiento y contratos |
@@ -31,6 +31,13 @@ reales; el esquema valida estructura, no inventa el contenido. No duplicar estad
 tareas en los planes. Cada plan enlaza los IDs de tareas canónicos tras su aceptación.
 
 ## Encargos, resultados y evidencia
+
+La inicialización pulso-init es una excepción acotada: delegación nativa directa
+mode: project_initialization, sin Work, tareas, continuidad, prepare_delegation ni
+accept_result. Explorer lee recursos explícitos del workspace confirmado y solo
+escribe .pulso/project.md con la guía project. Pulso revisa el mapa y el retorno
+Markdown sin QA, evidence/readiness/cierre ni bloqueos de Work. Los permisos nativos
+siguen vigentes; el protocolo siguiente rige las demás delegaciones persistentes.
 
 `prepare_delegation` deriva identidad/base desde tareas actuales. Pulso conserva delegation,
 acceptanceBasis y hostContext originales internamente antes de observar; no copia IDs,

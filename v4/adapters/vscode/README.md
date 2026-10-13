@@ -8,7 +8,7 @@ Instala el archivo VSIX, abre una carpeta local confiable y elige **Pulso** en e
 
 Con varias carpetas abiertas, selecciona el proyecto cuando se solicite. **Pulso: Seleccionar proyecto** permite cambiarlo. Abre el worktree previsto como carpeta antes de trabajar en él.
 
-Un saludo o una consulta de estado no prepara el proyecto ni escribe archivos. Pide la preparación explícitamente para iniciar la continuidad local. Las guías pulso-init, pulso-status, pulso-recap y pulso-resume ayudan a preparar, consultar y retomar el trabajo.
+Un saludo o una consulta de estado no prepara el proyecto ni escribe archivos. `/pulso-init` prepara el proyecto y delega el mapa contextual real de `project.md` sin crear Work, tareas ni continuidad de Work. No exige QA, evidencia formal, readiness o cierre; comunica el mapa confirmado y sus limitaciones. Reutiliza un mapa suficiente. Las guías pulso-status, pulso-recap y pulso-resume ayudan a consultar y retomar el trabajo.
 
 ## Trabajo y revisión
 

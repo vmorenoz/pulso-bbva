@@ -1,7 +1,7 @@
 # Encargo ligero
 <!-- template: delegation.md@1.1; guía del orquestador, no formulario para rellenar -->
 
-Envía a task SOLO el `specialistPrompt` recibido de `prepare_delegation`.
+Para delegaciones persistentes envía SOLO el `specialistPrompt` recibido de `prepare_delegation` por la capacidad nativa del adaptador.
 Pulso conserva delegation, acceptanceBasis y hostContext originales internamente;
 no adjunta esos objetos, schemas, paths internos ni instrucciones instaladas.
 Si falta contexto conversacional indispensable, añade una frase breve en la sección
@@ -11,6 +11,13 @@ Para trabajo persistente habitual usa output `conversation`. Solicita un archivo
 solo cuando el documento sea necesario y esté autorizado. La revisión externa
 read_only_review conserva readBase explícita, output conversation, writeScope vacío,
 sin Work ni inicialización; tampoco requiere envelope JSON.
+
+El mapa inicial de pulso-init usa la excepción project_initialization: encargo
+nativo directo a Explorer, workspace/readBase confirmados, recursos explícitos y
+output/writeScope exclusivo de .pulso/project.md. No requiere Work, tareas,
+continuidad, prepare_delegation ni accept_result; no inventes IDs. El retorno es
+Markdown y Pulso revisa el documento, sin QA, evidencia formal ni cierre. No aplica
+a cambios de producto ni a otras delegaciones persistentes.
 
 ## Ejemplo renderizado: bump patch
 

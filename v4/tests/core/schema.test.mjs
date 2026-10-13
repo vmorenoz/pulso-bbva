@@ -44,3 +44,22 @@ test('evidence.add no tiene alternativa genérica para eludir su contrato observ
 test('Datos históricos admiten ausencia de la nueva base observada sin sintetizarla',()=>{
   const evidence=example('evidence');delete evidence.acceptanceBasis;assert.doesNotThrow(()=>assertSchema('evidence',evidence));assert.equal(evidence.acceptanceBasis,undefined);
 });
+
+for(const key of ['action','type'])test(`anyOf diagnóstico coherente para ${key} const y enum`,()=>{
+  for(const discriminator of [{const:'selected'},{enum:['selected','alias']}]){
+    const selected={type:'object',properties:{[key]:discriminator,status:{enum:['pass','fail']},first:{type:'string'},second:{type:'string'}},required:[key,'first','second']};
+    const other={type:'object',properties:{[key]:{const:'other'},status:{const:'pass'}},required:[key]};
+    for(const anyOf of [[other,selected],[selected,other]]){
+      const shape={anyOf};
+      assert.deepEqual(validateSchema(shape,{[key]:'selected',status:'pass'}),['$.first: requerido','$.second: requerido']);
+      assert.deepEqual(validateSchema(shape,{[key]:'selected',status:'pass',first:'a',second:'b'}),[]);
+      for(const value of [{status:'pass'},{[key]:'unknown',status:'pass'},{[key]:'selected',status:'unknown'}])assert.ok(validateSchema(shape,value).length);
+    }
+  }
+});
+test('anyOf sin discriminadores conserva rechazo y valida todas las alternativas',()=>{
+  const shape={anyOf:[{type:'string',minLength:2},{type:'integer',minimum:1}]};
+  for(const value of [null,'',0])assert.ok(validateSchema(shape,value).length);
+  for(const value of ['ok',1])assert.deepEqual(validateSchema(shape,value),[]);
+  assert.throws(()=>validateSchema({anyOf:[{const:'ok'},{not:{}}]},'ok'),/no soportada/);
+});

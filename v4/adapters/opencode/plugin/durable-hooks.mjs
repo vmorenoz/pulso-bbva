@@ -29,6 +29,8 @@ export function createDurableHooks({directory}) {
     if (typeof args?.prompt !== 'string') return null;
     // Find the identity even when the task list or the rest of the prompt was edited.
     const candidates = [...args.prompt.matchAll(/^Encargo: ([A-Za-z0-9][A-Za-z0-9_-]{0,79}) · workId: ([A-Za-z0-9][A-Za-z0-9_-]{0,79})(?= ·|$)/gm)];
+    // Direct initialization/review has no durable identity and needs no Work.
+    // Never bypass a matched managed contract based on a mode label in the prompt.
     if (!candidates.length) return null;
     if (!root || fs.realpathSync(directory) !== root) throw new Error('Native project directory changed or unavailable');
     // Absence is legacy, not a failed managed dispatch. An existing registry with

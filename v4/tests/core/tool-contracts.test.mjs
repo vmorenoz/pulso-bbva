@@ -86,3 +86,27 @@ test('invalid semantic inputs and model-selected roots fail closed',()=>{
   assert.throws(()=>validateToolInput('pulso_work',{action:'get',workId:'W-1',limit:undefined}));
   assert.throws(()=>validateToolInput('pulso_work',{action:'validate_result',delegation:{},result:{}}));
 });
+
+for(const kind of ['static','manual'])test(`anyOf evidencia ${kind}: hash63 diagnostica solo el hash`,()=>{
+  const evidence={...JSON.parse(fs.readFileSync(new URL('../../core/templates/evidence.json',import.meta.url),'utf8')),kind,status:'pass',command:null,exitCode:null,acceptanceBasis:{criteria:[{id:'AC-1',sha256:'a'.repeat(64)}],tasks:[]}};
+  const request={...fixtures.pulso_work.update,actions:[{type:'evidence.add',evidence}]};
+  const shapes=[toolContracts.pulso_work.inputSchema,toolContracts.pulso_work.actionSchemas.update];
+  for(const shape of shapes)assert.deepEqual(validateSchema(shape,request),[]);
+  assert.equal(validateToolInput('pulso_work',request),request);
+  evidence.acceptanceBasis.criteria[0].sha256='a'.repeat(63);
+  const entity='$.actions[0].evidence.acceptanceBasis.criteria[0].sha256';
+  for(const shape of shapes)assert.deepEqual(validateSchema(shape,request),[`${entity}: patrón inválido`]);
+  assert.throws(()=>validateToolInput('pulso_work',request),error=>{
+    assert.equal(error.code,'SCHEMA_INVALID');
+    assert.deepEqual(error.issues.map(issue=>issue.entity),[entity]);
+    return true;
+  });
+});
+test('anyOf evidencia executed/pass conserva invariantes de comando y salida',()=>{
+  const evidence={...JSON.parse(fs.readFileSync(new URL('../../core/templates/evidence.json',import.meta.url),'utf8')),kind:'executed',status:'pass',command:'node --test',exitCode:0};
+  for(const patch of [{command:null},{command:''},{exitCode:null},{exitCode:1},{command:null,exitCode:1}]){
+    const request={...fixtures.pulso_work.update,actions:[{type:'evidence.add',evidence:{...evidence,...patch}}]};
+    assert.ok(validateSchema(toolContracts.pulso_work.inputSchema,request).length);
+    assert.throws(()=>validateToolInput('pulso_work',request),{code:'SCHEMA_INVALID'});
+  }
+});

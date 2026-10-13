@@ -33,9 +33,16 @@ function walk(s,v,p,e) {
   if (s.anyOf) {
     const alternatives=s.anyOf.map(sub=>{const errors=[];walk(sub,v,p,errors);return {sub,errors};});
     if(alternatives.some(item=>!item.errors.length))return;
-    // Prefer the matching discriminator (e.g. action.type), then the closest
-    // branch. Surface a useful field error instead of dumping every variant.
-    const matching=alternatives.filter(({sub})=>v&&typeof v==='object'&&Object.entries(sub.properties||{}).some(([key,shape])=>Object.hasOwn(shape,'const')&&v[key]===shape.const));
+    // Prefer branches whose present const/enum discriminators all agree.
+    // A shared status must not override an incompatible kind/action/type.
+    // This only selects diagnostics: acceptance requires a fully valid branch above.
+    const matching=alternatives.filter(({sub})=>{
+      if(!v||typeof v!=='object'||Array.isArray(v))return false;
+      const discriminators=Object.entries(sub.properties||{}).filter(([key,shape])=>Object.hasOwn(v,key)&&(Object.hasOwn(shape,'const')||shape.enum));
+      return discriminators.length>0&&discriminators.every(([key,shape])=>
+        (!Object.hasOwn(shape,'const')||JSON.stringify(v[key])===JSON.stringify(shape.const))&&
+        (!shape.enum||shape.enum.some(value=>JSON.stringify(value)===JSON.stringify(v[key]))));
+    });
     const best=(matching.length?matching:alternatives).sort((a,b)=>a.errors.length-b.errors.length)[0];
     e.push(...best.errors);
     return;

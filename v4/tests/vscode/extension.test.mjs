@@ -172,7 +172,7 @@ test('native lifecycle returns close/reopen receipts and revision-bound project/
   assert.equal(saved.data.entries.length,2);
 });
 
-test('native init records static evidence and closes; hash command exit codes are rejected without writes', async t => {
+test('explicit persistent mapping Work records static evidence; hash command exit codes reject without writes (not pulso-init)', async t => {
   const {invoke,status,projects,host}=await fixture(t),{bindingId}=await status();
   const run=input=>invoke('pulso_work',{...input,expectedBindingId:bindingId});
   assert.equal((await invoke('pulso_workspace',{action:'prepare',expectedBindingId:bindingId})).ok,true);
@@ -204,6 +204,37 @@ test('native init records static evidence and closes; hash command exit codes ar
   assert.equal(closed.ok,true,closed.output);
   const history=await invoke('pulso_history',{workId:'INIT',expectedBindingId:bindingId});
   assert.equal(history.data.items[0].outcome,'done');
+});
+
+test('initialization preparation and map need no Work; binding/trust guards and reuse remain effective', async t => {
+  const {invoke,status,projects,host} = await fixture(t);
+  const project = projects[0], {bindingId} = await status();
+  assert.equal(fs.existsSync(path.join(project,'.pulso')),false);
+  await assert.rejects(invoke('pulso_workspace',{action:'prepare'}),/binding changed or missing/);
+  assert.equal((await invoke('pulso_workspace',{action:'prepare',expectedBindingId:bindingId})).ok,true);
+  const snapshot = () => Object.fromEntries(fs.readdirSync(path.join(project,'.pulso'),{recursive:true}).sort().filter(file => file !== 'project.md').map(file => {
+    const target = path.join(project,'.pulso',file);
+    return [file,fs.statSync(target).isFile() ? fs.readFileSync(target,'utf8') : null];
+  }));
+  const before = snapshot();
+  // agent/edit belong to the native host, not this extension. Simulate only the
+  // Explorer's scoped write; real extension/core preparation and guards run here.
+  fs.writeFileSync(path.join(project,'package.json'),JSON.stringify({name:'fixture',type:'module'}));
+  const source = JSON.parse(fs.readFileSync(path.join(project,'package.json'),'utf8'));
+  const document = `# Proyecto\n\n${source.name}: módulos ${source.type} según package.json.\nNegocio pendiente de confirmar; sin pruebas ejecutadas.\n`;
+  fs.writeFileSync(path.join(project,'.pulso/project.md'),document);
+  assert.deepEqual(snapshot(),before);
+  assert.deepEqual(fs.readdirSync(path.join(project,'.pulso/work')),[]);
+  assert.equal((await invoke('pulso_workspace',{action:'prepare',expectedBindingId:bindingId})).ok,true);
+  assert.equal((await status()).ok,true);
+  assert.equal(fs.readFileSync(path.join(project,'.pulso/project.md'),'utf8'),document);
+  assert.deepEqual(snapshot(),before);
+  host.vscode.workspace.isTrusted = false;
+  await assert.rejects(invoke('pulso_workspace',{action:'prepare',expectedBindingId:bindingId}),/trusted workspace/);
+  host.vscode.workspace.isTrusted = true;
+  await host.commands.get('pulso.selectProject')();
+  await assert.rejects(invoke('pulso_workspace',{action:'prepare',expectedBindingId:bindingId}),/binding changed or missing/);
+  assert.deepEqual(snapshot(),before);
 });
 
 test('a host change after a committed native operation retains its receipt and marks context drift', async t => {
