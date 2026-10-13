@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {pathToFileURL} from 'node:url';
 import {safePath,sha256,listFiles} from './lib/fs.mjs';
-import {pluginResource,homeRelative,readOptional,inventoryInstallations,knownLegacyPaths,cleanupConfigs,prepareBackups,applyChanges} from './lib/install-cleanup.mjs';
+import {pluginResource,homeRelative,readOptional,inventoryInstallations,knownLegacyPaths,cleanupConfigs,cleanupAgentPresets,prepareBackups,applyChanges} from './lib/install-cleanup.mjs';
 import {parseConfig,editConfig,removePlugins,pluginReference} from './lib/install-jsonc.mjs';
 const MANIFEST='.pulso/installations/opencode-v1.json', RUNTIME='.pulso/runtimes/opencode-v1';
 const json=x=>Buffer.from(JSON.stringify(x,null,2)+'\n');
@@ -48,7 +48,7 @@ export function planOpenCode({home=os.homedir(),env=process.env,packageRoot,mode
   const configPath=previous?.pluginConfig?.path&&configPaths.includes(previous.pluginConfig.path)?previous.pluginConfig.path:configPaths.find(p=>readOptional(home,p)!==null)||configPaths[0];
   let old=readOptional(home,configPath),text=changes.get(configPath)?.toString()||old?.toString()||'{}\n';const entry=pathToFileURL(path.join(home,RUNTIME,'plugin/index.mjs')).href;
   // Remove our old entry only at the exact path recorded by the isolated manifest.
-  if(previous?.pluginConfig){const c=previous.pluginConfig;if(!dirs.has(path.posix.dirname(c.path))||!['opencode.json','opencode.jsonc'].includes(path.posix.basename(c.path))||c.entry!==entry)throw new Error('Invalid plugin config ownership');if(c.path!==configPath&&!c.existing){const b=readOptional(home,c.path);if(b){let t=removePlugins(b.toString(),x=>x===c.entry);if(parseConfig(t).default_agent==='pulso')t=editConfig(t,['default_agent'],c.defaultAgent?.previous??undefined);changes.set(c.path,Buffer.from(t));reasons.set(c.path,'Previous native configuration');}}}
+  if(previous?.pluginConfig){const c=previous.pluginConfig;if(!dirs.has(path.posix.dirname(c.path))||!['opencode.json','opencode.jsonc'].includes(path.posix.basename(c.path))||c.entry!==entry)throw new Error('Invalid plugin config ownership');if(c.path!==configPath&&!c.existing){const b=changes.get(c.path)??readOptional(home,c.path);if(b){let t=removePlugins(b.toString(),x=>x===c.entry);if(parseConfig(t).default_agent==='pulso')t=editConfig(t,['default_agent'],c.defaultAgent?.previous??undefined);changes.set(c.path,Buffer.from(t));reasons.set(c.path,'Previous native configuration');}}}
   const parsed=parseConfig(text,configPath),exists=(parsed.plugin||[]).some(x=>pluginReference(x)===entry),same=previous?.pluginConfig?.path===configPath;
   const pluginConfig={path:configPath,entry,existing:same?previous.pluginConfig.existing:exists,defaultAgent:{previous:same?previous.pluginConfig.defaultAgent?.previous??null:parsed.default_agent??null}};
   if(!exists)text=parsed.plugin===undefined?editConfig(text,['plugin'],[entry]):editConfig(text,['plugin',-1],entry);
@@ -67,7 +67,13 @@ export function planOpenCode({home=os.homedir(),env=process.env,packageRoot,mode
   }
   const manifest={schemaVersion:1,runtime:'opencode-v1',version:pkg.version,configRoots:[...dirs],files:Object.fromEntries([...files].map(([p,b])=>[p,sha256(b)])),borrowed,pluginConfig};changes.set(MANIFEST,json(manifest));reasons.set(MANIFEST,'Previous isolated ownership');
   if(legacy.installations.length)warnings.push('Foreign historical ownership and ambiguous shared distribution files are retained. Selected native ownership was split into the isolated manifest.');
-  if(env.OPENCODE_CONFIG)warnings.push('OPENCODE_CONFIG is an additional file override; preserved and never used as a resource directory.');if(env.OPENCODE_CONFIG_CONTENT)warnings.push('OPENCODE_CONFIG_CONTENT may override global settings.');warnings.push('Project and managed settings may override global configuration; native conversation verification has not run.');
+  if(env.OPENCODE_CONFIG)warnings.push('OPENCODE_CONFIG is an additional file override; preserved and never used as a resource directory. Agent preset cleanup is limited to opencode.json/opencode.jsonc in inventoried global roots; this override may still supply presets.');if(env.OPENCODE_CONFIG_CONTENT)warnings.push('OPENCODE_CONFIG_CONTENT may override global settings.');warnings.push('Project and managed settings may override global configuration; native conversation verification has not run.');
+  // Compose all registration/migration edits first so none can restore agent presets.
+  for(const p of cleanupAgentPresets(home,legacy,changes)){
+    const reason='Removed Pulso agent model/variant presets';
+    reasons.set(p,reasons.has(p)?`${reasons.get(p)}; ${reason}`:reason);
+    actions.push({path:p,action:'agent-presets'});
+  }
   for(const [p,b] of changes){const old=readOptional(home,p);if(b===null?old===null:old?.equals(b))changes.delete(p);}
   const {originals,backup}=prepareBackups(home,changes,reasons);
   return {runtime:'opencode',target:{home,base,roots,active},actions,warnings,backup,changes,execute(){applyChanges(home,changes,originals,{backup});return {status:'configured',version:pkg.version,nativeSession:'NOT_RUN',backup};}};

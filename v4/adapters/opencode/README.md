@@ -6,6 +6,10 @@ Asistente de desarrollo que aclara objetivos, coordina nueve especialistas y con
 
 Instala el paquete mediante el instalador de Pulso y selecciona **Pulso** en OpenCode. Usa los comandos pulso-init, pulso-status, pulso-recap y pulso-resume para preparar, consultar y retomar trabajo.
 
+El instalador autocontenido requiere Node.js 22+ y `tar` de macOS/Linux. Descarga el archivo `pulso-opencode-installer-<versión>.tar.gz` y su `.sha256`, verifica la huella y extrae el archivo. Desde la carpeta extraída ejecuta `node install.mjs --dry-run` para revisar el plan y `node install.mjs` para confirmar. No requiere npm ni compilación. Reinicia OpenCode después de instalar.
+
+La instalación respalda las configuraciones modificadas y elimina sólo `model` y `variant` de IDs exactos de agentes Pulso actuales y legacy reconocidos en los archivos globales `opencode.json` y `opencode.jsonc`. Conserva el modelo global y otros agentes; las configuraciones del proyecto y el override `OPENCODE_CONFIG` pueden seguir aportando presets.
+
 `/pulso-init` prepara el proyecto y delega directamente el mapa contextual real de `project.md` al Explorador con escritura exclusiva de ese documento. Reutiliza un mapa suficiente. No crea Work, tareas ni continuidad de Work; no exige QA, evidencia formal, readiness o cierre. Los permisos nativos siguen vigentes y las demás delegaciones persistentes conservan prepare_delegation → task → accept_result.
 
 Un saludo o una consulta de estado no prepara el proyecto ni escribe archivos. La preparación es una operación explícita. Los datos del proyecto se guardan en `.pulso/` y las preferencias personales se conservan entre proyectos.
@@ -20,6 +24,7 @@ Las herramientas de acciones reciben un objeto request con action y los campos d
 
 - `prepare_delegation` v2 registra un snapshot durable bajo permiso nativo, vinculado a continuidad/intención y al padre nativo disponible. Devuelve el ID y `specialistPrompt` exacto; no lanza agentes.
 - `accept_result` v2 incorpora por `delegationId`/`returnId` y decisión revisada. Si no existe captura nativa, `reportedReturn` conserva el reporte en esa misma llamada. Un rechazo administrativo se recupera por ID, sin volver a delegar. Legacy conserva su contrato y base originales. Ninguna variante satisface criterios automáticamente.
+- `decision` contiene `status`, `summary` y, para `completed`, `acceptedTaskIds` explícitos. Los detalles opcionales (`checks`, `findings`, `limitations`, entre otros admitidos) van directamente en `decision`; `decision.details` no se admite.
 - `accept_delivery` conserva aceptación manual declarada e intenta cerrar. No acredita ejecución ni completa tareas. Comprueba `data.acceptanceRecorded`, `data.closed`, `data.readiness` y posibles `closeError`/`persistence`; consulta Work antes de repetir tras un retorno perdido o parcial.
 
 Las tres acciones usan el envelope `{request:{action,...}}` y el mismo permiso nativo `pulso_work` con patrón `action:workId`. Las mutaciones se identifican desde el contrato común. El retorno nativo contiene el recibo JSON en `output`: no equivale a `ok:true`, y `ok:true` confirma la operación, no el cierre del objetivo.

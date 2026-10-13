@@ -39,13 +39,16 @@ escribe .pulso/project.md con la guía project. Pulso revisa el mapa y el retorn
 Markdown sin QA, evidence/readiness/cierre ni bloqueos de Work. Los permisos nativos
 siguen vigentes; el protocolo siguiente rige las demás delegaciones persistentes.
 
-`prepare_delegation` deriva identidad/base desde tareas actuales. Pulso conserva delegation,
-acceptanceBasis y hostContext originales internamente antes de observar; no copia IDs,
-revisiones, fechas ni hashes de ejemplos. Envía a task SOLO `specialistPrompt`, que ya
-renderiza objetivo, alcance, condiciones y entrega. No adjunta JSON canónico, base,
-hostContext, schemas, paths internos ni instrucciones instaladas de raíz/permisos/skills.
-Solo puede añadir contexto conversacional indispensable breve en la sección pertinente,
-sin duplicar restricciones. Los recursos instalados proceden del contexto confiable.
+`prepare_delegation` deriva identidad/base desde tareas actuales. En `contractVersion:2`,
+core conserva el snapshot y devuelve IDs y `specialistPrompt`; `get_delegation` recupera
+el original cuando hace falta. En legacy, Pulso conserva delegation, acceptanceBasis y
+hostContext originales internamente antes de observar. No copia IDs, revisiones, fechas
+ni hashes de ejemplos. Envía a la herramienta nativa de delegación SOLO `specialistPrompt`
+exacto, que ya renderiza objetivo, alcance, condiciones y entrega. No adjunta JSON canónico,
+base, hostContext, schemas ni instrucciones instaladas. El contexto indispensable debe
+estar en objective/constraints o inputs autorizados antes de preparar el prompt; modificar
+el prompt preparado rompe su correspondencia con el snapshot durable. Los recursos
+instalados proceden del contexto confiable.
 
 El especialista devuelve Markdown natural con `## Resultado`, `## Cambios o hallazgos`
 y `## Comprobación y pendientes`; usa Completado/Bloqueado/Fallido/Cancelado y hechos reales,
@@ -55,14 +58,21 @@ no añaden secciones obligatorias al retorno. `output: conversation` sirve TAMBI
 delegaciones persistentes: no crea archivo ni concede escritura. La excepción
 read_only_review conserva readBase explícita, writeScope vacío y ausencia de Work.
 
-Pulso extrae `status` y `summary`, conserva el reporte íntegro literal en `markdown` y añade
-solo detalles reales al result compacto de `accept_result` (`result.json` es un ejemplo
-interno). No inventa comandos ni convierte prosa de éxito en PASS. Cada check necesita
-observación concreta, estado real y evidenceRef existente o null. Los archivos declarados
-en artifacts/changedFiles deben existir y estar autorizados. Para completed selecciona
-acceptedTaskIds explícitos; para otros estados los omite o usa []. Envía delegation/base
-originales y expectedRevision actual confirmada. Core deriva identidad y revisión del
-encargo original y genera documento, ID, fecha de registro y hash, sin segundo Markdown.
+Pulso extrae `status` y `summary` y conserva el reporte íntegro literal. En v2 incorpora
+por `delegationId`, `returnId` o `reportedReturn` y `decision`, con continuidad/intención,
+operationId y expectedRevision. Los detalles admitidos (`checks`, `findings`,
+`limitations`, etc.) van directamente en `decision`: **`decision.details` no se admite**.
+En legacy envía delegation/base originales, expectedRevision actual y el result compacto
+con `markdown` (`result.json` es un ejemplo interno de esa forma).
+
+No inventa comandos ni convierte prosa de éxito en PASS. Cada check necesita observación
+concreta, estado real y evidenceRef existente o null. Los archivos declarados en
+artifacts/changedFiles deben existir y estar autorizados. Para completed selecciona
+acceptedTaskIds explícitos; para otros estados los omite o usa []. Core deriva identidad
+y revisión del encargo original y conserva el reporte sin exigir otro archivo Markdown.
+Ante un rechazo administrativo v2, recupera la captura por ID y corrige la incorporación;
+no repite el trabajo ni la delegación. Los descriptores de las herramientas publican
+los campos admitidos para cada forma.
 `validate_result` conserva el contrato canónico legacy estricto; no recibe el compacto
 ni es un paso obligatorio. Un archivo output solo se pide cuando el documento aporta valor.
 

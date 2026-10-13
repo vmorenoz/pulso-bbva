@@ -24,10 +24,15 @@ unchanged.
 
 ## Integrity contract
 
-`bbva-integrity.json` pins the reviewed current bytes of all five BBVA
+[bbva-integrity.json](bbva-integrity.json) pins the reviewed current bytes of all five BBVA
 skills. Its four APX/CELLS SHA-256 values were intentionally updated for this
 revision; the `bbva-engineering` digest is unchanged. The build still rejects
 unexpected inventory or byte changes. Both native outputs must contain the
 exact current canonical bytes, without adapter prose injected into BBVA
 skills. Distribution tests check preservation, recipe anchors, and rejection
 of tampered or incomplete inputs.
+
+This is source-maintenance provenance, not a runtime prerequisite. Builds consume
+the canonical V4 skills and their pinned hashes, not the historical directories
+listed above. Run `npm run check` from `v4/` after building to check the current
+outputs; a historical successful check is not evidence for a later artifact.

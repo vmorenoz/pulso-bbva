@@ -47,5 +47,5 @@ Las pruebas automatizadas y el paquete se verifican por separado de una conversa
 
 - [Compatibilidad](docs/COMPATIBILITY.md)
 - [Cambios de esta versión](CHANGELOG.md)
-- [Documentación para desarrollo](https://github.com/vmorenoz/pulso-bbva/blob/feature/v3-vscode/v3-vscode/docs/BUILD.md)
+- [Documentación para desarrollo de esta versión](https://github.com/vmorenoz/pulso-bbva/blob/245c09fc51f2280132d6644f6c8c18605cd88f9a/v3-vscode/docs/BUILD.md)
 - [Licencia de distribución privada](LICENSE.md)

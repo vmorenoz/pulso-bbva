@@ -8,7 +8,7 @@ El core no conoce OpenCode, no ejecuta procesos, no recibe comandos de consola y
 
 ## Adaptador OpenCode v2
 
-`plugins/opencode-v2/index.ts` registra tools directas con la API v2 del plugin. Su raíz de trabajo proviene de `ctx.location.directory`; ninguna tool toma una ruta desde el modelo. Las llamadas devuelven texto breve. El host conserva la visibilidad nativa de delegaciones `subagent`.
+`plugins/opencode-v2/index.ts` registra tools directas con la API v2 del plugin. Cada ejecución consulta `ctx.session.get({ sessionID: context.sessionID })` y obtiene la raíz de `session.location.directory`; ninguna tool toma una ruta desde el modelo ni usa la ubicación de carga del plugin como raíz. Las llamadas devuelven texto breve. El host conserva la visibilidad nativa de delegaciones `subagent`.
 
 `lib/composition.mjs` genera en memoria agentes y comandos nativos v2, skills globales y archivos del plugin. No genera salidas precompiladas ni ramas de runtime legacy.
 

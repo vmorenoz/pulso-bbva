@@ -1,3 +1,0 @@
-# Specialists
-
-Only Pulso is human-facing and orchestrates. Each stateless specialist has one canonical role, tool policy, SpecialistTaskContract and schema-derived ResultContract. Planner proposes steps, dependencies and assumptions. Explorer reports observations with optional evidence and no severity. Executor reports changed targets and validations. Verifier reports a pass/fail/partial verdict per criterion. Security Auditor reports evidence-backed, severity-rated findings. Every specialist is not user-invocable, has `agents: []`, and has no Work MCP tools. See [Specialist communication contracts](specialist-contracts.md).

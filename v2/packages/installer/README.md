@@ -29,6 +29,9 @@ The terminal wizard asks for:
 4. A complete asset/configuration/model preview and explicit confirmation.
 5. Apply, validate, and record per-runtime managed manifests.
 
+If OpenCode is missing, the wizard offers to continue with the other selected
+runtimes or cancel; Pulso does not install OpenCode.
+
 Menus support Up/Down arrows and Enter. Runtime selection uses Space to toggle,
 `a` to select all, and `n` to clear. Custom OpenCode model selection can be
 filtered by provider, model ID, or display name. Non-TTY sessions fall back to
@@ -53,6 +56,17 @@ OpenCode local assets use `.opencode/agents/`, `.opencode/skills/`, and
 comments and unrelated settings. Profiles save exact discovered `provider/model`
 IDs; Inherited omits each agent's `model` field.
 
+OpenCode discovery and planning are read-only. Apply preflights OpenCode
+files/config and revalidates selected model IDs immediately before mutation.
+Managed files are updated only when their current hash matches the previous
+Pulso manifest; user-edited managed content and foreign `mcp.pulso`
+configuration conflict. The manifest is written last. A late I/O failure is
+reported as partial installation.
+
+The OpenCode manifest includes runtime, scope, runtime version, managed
+file/config hashes, selected profile, and exact model assignments (`null` means
+inherited). It contains no provider credentials or tokens.
+
 The installed agent assets use the breaking `pulso-task/2` / `pulso-result/2`
 contracts. Hash-matching managed agents and guard assets update safely; manually
 modified managed assets remain conflicts. Restart each host after installation.
@@ -75,6 +89,8 @@ npm run uninstall:v2
 Uninstall lets you select runtime(s) and scope. It removes only hash-matching
 Pulso assets/config entries; edited managed assets conflict and foreign agents,
 skills, MCP servers, providers, and persistent Work data are preserved.
+For OpenCode, the managed configuration entry removed is `mcp.pulso`;
+foreign MCP configuration remains.
 
 The installer does not install OpenCode, read credential files, configure model
 credentials/providers, or send telemetry. `opencode auth list` is diagnostic

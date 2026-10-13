@@ -8,7 +8,9 @@ Los helpers restringen rutas al proyecto y rechazan rutas absolutas, `..`, separ
 
 No registrar secretos, datos reales de clientes o información restringida en `.pulso`, resultados o fuentes públicas. Los hashes solo identifican archivos, no autorizan leerlos ni subirlos. Los artefactos pueden contener conocimiento de negocio sensible incluso sin credenciales: el equipo decide qué versionar según su política, Pulso no certifica esa política.
 
-El instalador precomprueba colisiones y no modifica configuraciones del host. Migra recursos globales solo con manifest y hashes reconocidos; no recorre ni cambia Work/State/History de proyectos. El instalador de Pulso no ejecuta shell ni descarga paquetes; el plugin usa la definición nativa y no requiere módulos npm instalados. No hay `--force`. Se preservan archivos modificados por el usuario; la instalación no reconcilia automáticamente contenido editado.
+El instalador precomprueba colisiones y edita JSONC para registrar el plugin y `default_agent: "pulso"`, preservando configuración ajena. Inventaría manifests y un catálogo finito de rutas legacy OpenCode; antes de reemplazar o retirar recursos Pulso modificados o sin hash histórico, los respalda. Conserva recursos de otros hosts y no recorre ni cambia Work/State/History de proyectos. Los límites de ownership, respaldos y rollback están en [INSTALLER.md](INSTALLER.md). No hay `--force`.
+
+El instalador no ejecuta shell ni descarga paquetes; requiere `jsonc-parser`. El plugin importa `@opencode-ai/plugin` y `zod` del entorno del host. Sus cuatro tools usan `context.directory` y consultan `context.ask` antes de operar, incluidas las lecturas; los agentes usan `permission` singular. La preparación explícita del workspace puede migrar legacy reconocido con respaldo, según [OPERATIONS.md](OPERATIONS.md#preparación).
 
 ## Qué NO garantizan los checks
 

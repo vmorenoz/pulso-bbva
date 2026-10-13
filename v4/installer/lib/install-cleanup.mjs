@@ -3,7 +3,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import {safePath,sha256,atomicWrite} from './fs.mjs';
-import {parseConfig,editConfig,removePlugins,pluginReference} from './install-jsonc.mjs';
+import {parseConfig,editConfig,removePlugins,pluginReference,removeAgentPresets} from './install-jsonc.mjs';
 
 export const INSTALL_MANIFEST='.pulso/installation.json';
 const record=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
@@ -16,6 +16,8 @@ const legacyFiles=[
   ...['breaker','codegraph-mcp','dashboard','lease'].map(x=>`bin/pulso-${x}.js`),
 ];
 const legacyAgents=['pulso','pulso-planner','pulso-challenger','pulso-contact-manager','pulso-config-manager','pulso-executor','pulso-explorer','pulso-verifier','pulso-integration-auditor','pulso-security-auditor','pulso-ui-auditor','pulso-experience-curator','pulso-delivery-reporter','pulso-code-auditor'];
+// Exact current catalog IDs plus recognized historical agents; never prefix-match.
+export const presetAgentNames=Object.freeze([...new Set([...legacyAgents,'pulso-researcher','pulso-plan-auditor','pulso-qa-auditor','pulso-code-reviewer'])]);
 const legacyCommands=['pulso-dashboard','pulso-doctor','pulso-autointegrate','pulso-configure'];
 const legacySkills=['pulso-protocol','pulso-adaptive-orchestration','pulso-evidence-inventory','pulso-executable-plans','pulso-human-delivery','pulso-parallel-work','pulso-preferences-capabilities','pulso-quality-review','pulso-safe-recovery'];
 
@@ -114,7 +116,7 @@ export function pluginResource(root,dir,entry){
 export function cleanupConfigs(root,inventory,changes,{keepCurrent=false,installDir=null}={}){
   for(const dir of inventory.dirs)for(const name of ['opencode.json','opencode.jsonc']){
     const relative=`${dir}/${name}`,bytes=readOptional(root,relative);if(!bytes)continue;
-    let text=bytes.toString('utf8');const entries=pluginEntries(root,dir);
+    let text=changes.get(relative)?.toString('utf8')??bytes.toString('utf8');const entries=pluginEntries(root,dir);
     const ownedConfig=inventory.current?.pluginConfig;
     if(dir===installDir)entries.delete(pathToFileURL(path.join(root,dir,'plugins/pulso/index.mjs')).href);
     if(keepCurrent&&ownedConfig?.path===relative)entries.delete(ownedConfig.entry);
@@ -139,6 +141,19 @@ export function cleanupConfigs(root,inventory,changes,{keepCurrent=false,install
     parseConfig(text,relative);
     if(text!==bytes.toString('utf8'))changes.set(relative,Buffer.from(text));
   }
+}
+
+/** Final pass over composed global configs, without expanding scope to file overrides. */
+export function cleanupAgentPresets(root,inventory,changes){
+  const configs=new Set(inventory.dirs.flatMap(dir=>['opencode.json','opencode.jsonc'].map(name=>`${dir}/${name}`)));
+  const cleaned=[];
+  for(const relative of configs){
+    const bytes=changes.has(relative)?changes.get(relative):readOptional(root,relative);if(!bytes)continue;
+    const text=bytes.toString('utf8');
+    const next=removeAgentPresets(text,presetAgentNames);
+    if(next!==text){changes.set(relative,Buffer.from(next));cleaned.push(relative);}
+  }
+  return cleaned;
 }
 
 /** One transaction for configs, resources, manifests and recoverable backups. */

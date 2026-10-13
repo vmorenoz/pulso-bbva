@@ -1,8 +1,9 @@
 # Desarrollo: una fuente por responsabilidad
 
-Node 22+ para instalador y pruebas. El core y el plugin no tienen dependencias npm de
-ejecución; el plugin exporta la definición nativa que carga OpenCode. No se modifica el
-formato de los artefactos existentes.
+Node 22+ para instalador y pruebas. El core de artefactos usa módulos de Node; el
+instalador depende de `jsonc-parser`. El plugin importa `@opencode-ai/plugin` y `zod`
+del entorno de OpenCode y exporta cuatro tools nativas. La preparación del core puede
+migrar datos legacy reconocidos; consulta [OPERATIONS.md](OPERATIONS.md#preparación).
 
 | Se edita | Se genera / consume |
 |---|---|
@@ -19,7 +20,7 @@ Se elimina `agents/commands.json`: no debe sobrevivir como fuente ni copia de re
 cargada por el build. El generador lee el frontmatter de cada skill de operación y crea
 un dispatcher mínimo que carga la skill; el cuerpo completo no se inserta en el comando.
 `name` y `description` son literales de una línea; no se introduce un parser YAML general.
-Los comandos usan el frontmatter actual v2 (`agent: pulso`, `subagent: false`) y tratan
+Los comandos usan el frontmatter v1 (`agent: pulso`, `subtask: false`) y tratan
 `$ARGUMENTS` como datos.
 
 Después de modificar una fuente:
@@ -36,7 +37,7 @@ antes. Sobre un checkout/ZIP recibido, o en un CI ya existente:
 npm run verify
 ```
 
-El check existente valida composición en memoria, frontmatter v2, plugin, schemas y fuente
+El check existente valida composición en memoria, frontmatter v1 (`permission` singular), plugin, schemas y fuente
 única de operaciones. No hay carpetas generadas que puedan quedar divergentes.
 No se crea CI, una matriz automatizada, un modo nuevo de build ni un sistema de snapshots.
 

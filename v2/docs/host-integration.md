@@ -1,4 +1,15 @@
-# Host Integration
+# Host Integration — historical initial milestone
+
+This document records the initial MCP-only milestone of v2. Its seven-tool
+catalog and absence of agent profiles or lifecycle integrations describe that
+milestone, not the current v2 distribution. For the current v2 contracts, see
+[runtime architecture](runtime-architecture.md),
+[runtime bindings](runtime-bindings.md),
+[specialist communication contracts](specialist-contracts.md), the
+[VS Code runtime](runtime-vscode.md), the [OpenCode runtime](runtime-opencode.md),
+and the [installer guide](../packages/installer/README.md).
+
+## Initial MCP transport and response contract
 
 `.mcp.json` is the repository MCP configuration consumed by compatible hosts. It declares a `mcpServers` object whose `pulso` entry has a `command`, `args`, and optional `env`; its process is started with standard input/output as the MCP transport. No agent profiles or host lifecycle integrations are part of this milestone.
 

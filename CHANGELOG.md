@@ -5,7 +5,18 @@ Las fechas proceden de commits o registros documentados: no implican publicació
 Los nombres OpenCode V1/V2 identifican al host, no la versión de Pulso; el nombre público es Pulso.
 Los directorios históricos son fuentes de consulta, no entradas de construcción de V4.
 
-## 4.2.0 — 2026-10-12 · Preparada localmente e instalada en OpenCode; no publicada
+## Cambios actuales · sin release publicada
+
+- Instalación OpenCode con `node install.mjs` desde la raíz o `v4/`: consume el archivo standalone de la versión declarada, verifica SHA-256 y no requiere npm ni build. La guía standalone permite instalar también sin checkout.
+- Limpieza de `model` y `variant` sólo para IDs exactos de agentes Pulso actuales y legacy reconocidos en los archivos globales `opencode.json` y `opencode.jsonc`, con respaldo. Se preservan el modelo global, otros agentes y el override explícito `OPENCODE_CONFIG`.
+- `/pulso-init` prepara y delega el mapa contextual sin Work, tareas, continuidad de Work ni circuito QA/evidencia/cierre.
+- Diagnóstico `anyOf` corregido para informar del hash inválido en la alternativa de evidencia pertinente, conservando la validación de las demás restricciones.
+- Documentación de `accept_result` v2 alineada con los campos planos de `decision`: `decision.details` no está admitido.
+- Builds de GitHub Actions tras push a `main` para los paquetes OpenCode, VS Code y el instalador standalone, descargables desde Artifacts de la ejecución; no publican una release.
+- Documentación técnica y guías de instalación actualizadas; el historial de verificaciones se consolida aquí. Los resultados de versiones anteriores no acreditan estos cambios.
+- Retirados los siete informes de desarrollo de v4. Consolidados nueve documentos breves de v2 y las dos guías de migración de v3 en sus guías de destino, con referencias actualizadas; corregidos contratos históricos de OpenCode v1 sin modificar su implementación ni los ADR de v2.
+
+## 4.2.0 — 2026-10-12 · Registro histórico de preparación e instalación local
 
 ### Contratos, resultados y continuidad
 
@@ -30,7 +41,7 @@ Los directorios históricos son fuentes de consulta, no entradas de construcció
 - Conversaciones reales de OpenCode, VS Code Local y Copilot Agent Host: **NOT_RUN**.
   Estos cambios no acreditan por sí solos continuidad conversacional ni concurrencia nativa resueltas.
 
-### Rendimiento observado y estado de entrega
+### Rendimiento y verificación históricos
 
 Comparación real de 12 pares contra [`daa72fc`](https://github.com/vmorenoz/pulso-bbva/commit/daa72fc):
 
@@ -44,9 +55,7 @@ Comparación real de 12 pares contra [`daa72fc`](https://github.com/vmorenoz/pul
 
 La reducción de bytes no compensa ni convierte en PASS la regresión del ciclo.
 Versión fuente: `4.2.0`; nombres de paquetes: `pulso-opencode-4.2.0.tar.gz` y `pulso-4.2.0.vsix`.
-Ambos paquetes fueron comprobados con sus cores extraídos y la suite acotada terminó con **128 pruebas aprobadas**.
-Los comandos, hashes, alcances y límites se registran en la
-[entrega 4.2.0](v4/ENTREGA-4.2.0.md). Posteriormente, por petición explícita, se instaló 4.2.0 en OpenCode global y se comprobaron versión, módulos y hashes. La instalación no acredita aceptación conversacional nativa; requiere reiniciar OpenCode para cargarla.
+En aquella revisión, ambos paquetes fueron comprobados con sus cores extraídos y la suite acotada terminó con **128 pruebas aprobadas**. Es un registro histórico, no un resultado de la fuente ni de los artefactos actuales. Posteriormente, por petición explícita, se instaló 4.2.0 en OpenCode global y se comprobaron versión, módulos y hashes. La instalación no acredita aceptación conversacional nativa; requiere reiniciar OpenCode para cargarla. Los comandos de comprobación vigentes se describen en la [guía técnica](v4/README.md#verification-gates).
 
 ## 4.1.1 — 2026-10-09
 
@@ -84,8 +93,7 @@ Referencias: [contratos y verificación](v4/README.md#411-specialist-markdown-co
   Instalación real documentada en OpenCode y el perfil local predeterminado de VS Code.
 - `accept_delivery`, conversaciones reales, continuidad y paralelismo nativos no quedan acreditados por ese smoke.
 
-Referencias: [entrega 4.1.0](v4/ENTREGA-4.1.0.md),
-[contratos de aceptación](v4/README.md#410-acceptance-contracts),
+Referencias: [contratos de aceptación](v4/README.md#410-acceptance-contracts),
 [commit 183ca80](https://github.com/vmorenoz/pulso-bbva/commit/183ca80).
 
 ## 4.0.0 — 2026-10-05 · Núcleo unificado
@@ -163,7 +171,7 @@ Referencias: [distribución](v3-opencode-v1/README.md), [endurecimiento y límit
   La distribución posterior mantiene TUI/modelos/tools reales en **NOT_RUN**.
 
 Referencias: [README inicial en dd5158e](https://github.com/vmorenoz/pulso-bbva/blob/dd5158e/v3/README.md),
-[distribución OpenCode v2](v3/README.md), [ruptura y migración](v3/docs/MIGRATION.md),
+[distribución OpenCode v2](v3/README.md), [ruptura y migración](v3/docs/INSTALLER.md#migración-y-datos-del-proyecto),
 [c6bbd29](https://github.com/vmorenoz/pulso-bbva/commit/c6bbd29).
 
 ## V2 y evolución V2.1 — 2026-09-23 a 2026-09-28

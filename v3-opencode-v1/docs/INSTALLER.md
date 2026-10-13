@@ -45,6 +45,10 @@ Se retiran plugins legacy por referencia exacta al archivo conocido y MCP por ha
 
 Se preservan `~/.pulso/preferences.json`, registry, `projects/`, archivos desconocidos y todos los datos de proyecto. No se siguen rutas de proyectos desde el registry. La migración de datos de workspace es una operación del core, independiente de este instalador global.
 
+En el proyecto activo, `pulso_workspace` con `request.action: "prepare"` migra tareas legacy reconocidas con respaldo y revisión pendiente; los formatos desconocidos se conservan y bloquean. Consulta [Preparación](OPERATIONS.md#preparación) para el contrato del core. Esta distribución mantiene su propia adaptación OpenCode v1, sin CLI de operaciones ni adaptación VS Code.
+
+La procedencia de las cinco skills BBVA figura en `bbva-provenance.json`. La discrepancia histórica de `bbva-engineering` se documenta en [HARDENING-3.1.1.md](HARDENING-3.1.1.md); no se deben cambiar los hashes históricos para ocultarla.
+
 ## Desinstalar
 
 Retira recursos globales OpenCode y recursos de distribución propios, incluidos residuos históricos reconocidos. Los recursos prestados permanecen. Restaura el agente predeterminado anterior solo si sigue siendo `pulso`; un cambio posterior del usuario permanece. No recorre proyectos ni borra sus Work, estado, contexto o historial.

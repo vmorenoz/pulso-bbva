@@ -3,8 +3,8 @@
 Se mantienen `pulso_workspace`, `pulso_work`, `pulso_history` y `pulso_context`.
 La fuente pública ejecutable de contratos es `tool-contracts.mjs`:
 `toolContracts.pulso_work.actionSchemas` y `mutatingActions`.
-Todos los objetos siguientes son el input de `pulso_work`, no un wrapper
-`request`. Los adaptadores conservan su propio binding nativo.
+Los objetos siguientes son argumentos planos de la herramienta indicada en cada
+sección, antes del envelope o binding nativo que añade cada adaptador.
 
 ## Contrato durable `contractVersion: 2`
 
@@ -41,7 +41,7 @@ adaptador; esos campos no se admiten en JSON del modelo. Si hay owner session,
 consultas y mutaciones dirigidas exigen esa sesión. **Retomar deliberadamente**
 desde otra sesión exige `bind_continuity` con `continuityId` explícito y los datos
 de intención actuales; cambia el owner, no el snapshot ni la intención. Sin
-identidad nativa, el handle sólo asegura coherencia: no autentica chats VS Code.
+identidad nativa, el handle sólo asegura coherencia: no autentica conversaciones.
 
 `update_intent` usa revisión propia (también devuelta como `intentRevision`);
 omite compatibilidad por defecto. Sólo `compatibleDelegationIds` explícitos
@@ -124,6 +124,16 @@ semántica estricta se valida después de conservar el reporte**. Los campos té
 reutilizan las reglas legacy; completed exige acceptedTaskIds explícitos. Campos
 desconocidos, identidad o markdown dentro de decision fallan semánticamente sin
 perder una captura válida. No se parsea el Markdown.
+
+`decision.details` **no está admitido**. Los campos opcionales técnicos van al
+mismo nivel que `status`, `summary` y `acceptedTaskIds`, por ejemplo:
+
+```json
+{"status":"completed","summary":"Revisión terminada","acceptedTaskIds":[],"limitations":["Sin ejecución en host real"]}
+```
+
+Este ejemplo no acepta tareas ni acredita criterios. Los checks y archivos que
+se añadan deben corresponder a observaciones y recursos reales autorizados.
 
 Límites: Markdown reportado hasta 1.000.000 caracteres, candidato decision hasta
 64.000 unidades JSON, envelope v2 hasta 1.100.000 y profundidad JSON hasta 64.
@@ -218,7 +228,7 @@ y no añade una llamada al flujo normal. Un retorno sin incorporar aún exige ac
 o retirar deliberadamente su encargo antes de repetir sus tareas. Un terminal real
 posterior puede capturarse por la llamada original y conservar su propia procedencia.
 
-Almacenamiento format 2 (todavía sin distribuir; no requiere migración de usuarios):
+Almacenamiento format 2 del contrato durable (coexiste con Work schemaVersion 1):
 
 - `.pulso/continuities-v2.json`: intención/ownership e historial administrativo.
 - `.pulso/delegations-v2.json`: índice atómico ligero, autoridad del commit de
@@ -273,8 +283,8 @@ explícitamente; no se admite un objeto abierto para absorber campos desconocido
 Pruebas core reales: `node --test tests/core/durable-delegations.test.mjs
 tests/core/continuity.test.mjs`, desde v4; incluyen reinicio y contención entre procesos.
 No acreditan conversaciones, cancelación, compactación ni hooks de hosts reales.
-OpenCode, VS Code Local y Copilot Agent Host requieren aceptación nativa separada.
-No se activa ninguna migración, instalación o actualización de versión comercial.
+Cada host y modalidad de ejecución requieren aceptación nativa separada.
+Estas pruebas no activan ninguna migración ni instalación de usuario.
 
 ## `update` — alta de tareas
 
@@ -562,10 +572,17 @@ cuando existen. Los diagnósticos de cierre no se truncan al primer impedimento.
 Esquemas de salida: `tool-error.schema.json`, `closure-readiness.schema.json` y
 los campos opcionales nuevos de `work-receipt.schema.json`.
 
+En alternativas `anyOf`, el diagnóstico conserva la rama pertinente a los
+discriminantes de la operación/evidencia. Un SHA-256 inválido en la base de una
+evidencia `static` o `manual` se señala en su ruta de hash; no se presenta como
+una exigencia de comando o exit code de la variante `executed`. Esto mejora el
+diagnóstico, sin relajar la validación ni calcular una base nueva por el usuario.
+
 Se conserva la persistencia síncrona existente: Work canónico, historia e índice
 reparables. **No hay transacción multifichero.** Un documento puede quedar escrito
 sin incorporación; una revisión de Work puede estar persistida con proyecciones
 incompletas. Los errores incluyen rutas/IDs y persistence para reconciliar sin
 reintento ciego. La recuperación existente no borra documentos huérfanos.
-No se añaden sesiones, scheduler, locks ni estados. No se garantiza que runtimes
-antiguos acepten los campos nuevos.
+El contrato durable usa los mutexes breves de metadatos descritos arriba; no son
+locks sobre la ejecución de especialistas ni un scheduler. No se garantiza que
+runtimes antiguos acepten los campos nuevos.

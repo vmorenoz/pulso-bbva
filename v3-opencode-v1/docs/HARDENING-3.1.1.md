@@ -27,18 +27,18 @@ Los cierres históricos siguen siendo legibles. Para cerrar nuevamente un Work a
 
 ## Descargar e instalar
 
-Desde un checkout sin cambios propios pendientes:
+Desde un checkout sin cambios propios pendientes, usa el commit histórico de la entrega 3.1.1:
 
 ```sh
 git fetch origin
-git switch --track origin/fix/v3-opencode-v1-hardening
+git switch --detach f4fbd372ec8fa12af80daba16c7c9445a13a6976
 cd v3-opencode-v1
 npm ci --ignore-scripts
 node install.mjs --dry-run
 node install.mjs
 ```
 
-Si la rama local ya existe, usa `git switch fix/v3-opencode-v1-hardening` y revisa su estado antes de actualizarla. No uses reset/clean para perder cambios propios. La instalación es global y modifica su entrada plugin/default_agent, conservando configuración ajena y respaldos. Reinicia OpenCode y selecciona `pulso`.
+Este checkout queda en HEAD separado, fijado a la entrega histórica. No uses reset/clean para perder cambios propios. La instalación es global y modifica su entrada plugin/default_agent, conservando configuración ajena y respaldos. Reinicia OpenCode y selecciona `pulso`.
 
 ## Prueba live breve
 

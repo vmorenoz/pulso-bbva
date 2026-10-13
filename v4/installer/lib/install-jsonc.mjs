@@ -25,6 +25,32 @@ export function editConfig(text,location,value){
   const next=applyEdits(text,modify(text,location,value,{}));
   parseConfig(next);return next;
 }
+// Remove only property tokens and a separator, retaining surrounding JSONC trivia.
+export function removeAgentPresets(text,names){
+  const config=parseConfig(text);
+  if(!record(config.agent))return text;
+  for(const name of names){
+    if(!Object.hasOwn(config.agent,name)||!record(config.agent[name]))continue;
+    for(const field of ['model','variant']){
+      if(!Object.hasOwn(config.agent[name],field))continue;
+      const object=findNodeAtLocation(parseTree(text,[],{allowTrailingComma:true}),['agent',name]);
+      const node=object.children.find(p=>p.children[0].value===field);
+      const scanner=createScanner(text,true),commas=[];scanner.setPosition(object.offset+1);
+      let depth=0;
+      while(scanner.scan()!==SyntaxKind.EOF&&scanner.getTokenOffset()<object.offset+object.length-1){
+        const token=scanner.getToken();
+        if(token===SyntaxKind.OpenBracketToken||token===SyntaxKind.OpenBraceToken)depth++;
+        else if(token===SyntaxKind.CloseBracketToken||token===SyntaxKind.CloseBraceToken)depth--;
+        else if(token===SyntaxKind.CommaToken&&depth===0)commas.push(scanner.getTokenOffset());
+      }
+      const following=commas.find(x=>x>=node.offset+node.length),preceding=commas.filter(x=>x<node.offset).at(-1);
+      const removed=object.children.length===1?commas:[following??preceding].filter(x=>x!==undefined);
+      text=applyEdits(text,[{offset:node.offset,length:node.length,content:''},...removed.map(offset=>({offset,length:1,content:''}))]);
+      parseConfig(text);
+    }
+  }
+  return text;
+}
 // Delete individual array elements, from the end, retaining unrelated comments.
 export function removePlugins(text,predicate){
   const plugins=parseConfig(text).plugin||[];

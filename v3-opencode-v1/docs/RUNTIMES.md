@@ -18,13 +18,13 @@ El plugin registra custom tools mediante el mapa `tool` nativo. Las delegaciones
 
 ## Tools
 
-`pulso_workspace`, `pulso_work`, `pulso_history` y `pulso_context`. Cada una devuelve título y resultado breve; los JSON canónicos no se muestran en la conversación.
+`pulso_workspace`, `pulso_work`, `pulso_history` y `pulso_context`. Las tres tools multiaction reciben `{ "request": { "action": "..." } }`; `pulso_history` recibe filtros directos. Devuelven título y resultado: recibos breves de mutación o datos de consulta, paginados donde corresponde.
 
-El nombre del agente determina su ID. Pulso tiene modo `primary`; especialistas, `subagent`. Los frontmatter usan `permissions` v2 y deniegan a especialistas las tools de metadata Pulso y la delegación anidada. Las políticas del host siguen siendo autoridad; revisar permisos efectivos y ownership en una sesión live.
+El nombre del agente determina su ID. Pulso tiene modo `primary`; especialistas, `subagent`. Los frontmatter usan `permission` singular de v1 y deniegan a especialistas las cuatro tools de metadata Pulso y la delegación anidada mediante `task`. Las políticas del host siguen siendo autoridad; cada tool consulta `context.ask` antes de la operación. Revisar permisos efectivos y ownership en una sesión live.
 
 ## Raíz del proyecto
 
-Cada ejecución toma el `sessionID` del contexto nativo de la tool y consulta esa sesión con `ctx.session.get()`, usando `session.location.directory`; no captura la raíz al cargar el plugin. Ninguna tool acepta `root` desde el modelo. La semántica exacta debe validarse en sesión OpenCode v1 real, particularmente worktrees y directorios anidados; no se afirma aquí aceptación live.
+Cada ejecución de una tool usa `context.directory`, proporcionado por OpenCode v1 en esa llamada. Ninguna tool acepta `root` desde el modelo. El observador pasivo de delegaciones usa por separado `directory` recibido al inicializar el plugin. La semántica exacta debe validarse en sesión OpenCode v1 real, particularmente worktrees y directorios anidados; no se afirma aquí aceptación live.
 
 ## Compatibilidad y evidencia
 

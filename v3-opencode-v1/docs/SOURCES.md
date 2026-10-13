@@ -7,4 +7,4 @@ Referencias para la adaptación OpenCode v1. Consultadas el 2026-10-01; verifica
 - OpenCode v1 plugin loader: https://raw.githubusercontent.com/anomalyco/opencode/v1.18.2/packages/opencode/src/plugin/index.ts
 - Node.js: https://nodejs.org/docs/latest/api/
 
-La documentación v2.0.20 y los tipos `@opencode/plugin` confirman `ctx.tool.transform()`/`editor.add()`. `Tool.Context` contiene `sessionID`; `Session.Info` expone `location.directory`. El handler consulta esa sesión por llamada, no la ubicación de carga global; worktrees/directorios se mantienen como validación live pendiente.
+La implementación de esta distribución en `plugins/opencode-v1/index.mjs` importa `tool` de `@opencode-ai/plugin` y Zod, y devuelve el mapa nativo `tool` con cuatro entradas. Los handlers usan `context.directory` y solicitan aprobación mediante `context.ask`; los hooks de observación usan el `directory` de inicialización. `lib/composition.mjs` emite `permission` singular, delegación `task` y comandos con `subtask: false`. Worktrees, directorios y permisos efectivos se mantienen como validación live pendiente; las referencias de consulta no constituyen aceptación del host.

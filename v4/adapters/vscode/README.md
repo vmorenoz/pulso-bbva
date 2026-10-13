@@ -6,6 +6,8 @@ Asistente de desarrollo que aclara objetivos, coordina nueve especialistas y con
 
 Instala el archivo VSIX, abre una carpeta local confiable y elige **Pulso** en el selector de agentes del chat. También puedes usar **Pulso: Abrir chat**.
 
+Usa **Extensions: Install from VSIX…** para seleccionar `pulso-<versión>.vsix` y recarga la ventana cuando se solicite. El paquete preparado no requiere npm ni compilación. La instalación se aplica al perfil seleccionado; otros perfiles y hosts remotos requieren su propia instalación compatible.
+
 Con varias carpetas abiertas, selecciona el proyecto cuando se solicite. **Pulso: Seleccionar proyecto** permite cambiarlo. Abre el worktree previsto como carpeta antes de trabajar en él.
 
 Un saludo o una consulta de estado no prepara el proyecto ni escribe archivos. `/pulso-init` prepara el proyecto y delega el mapa contextual real de `project.md` sin crear Work, tareas ni continuidad de Work. No exige QA, evidencia formal, readiness o cierre; comunica el mapa confirmado y sus limitaciones. Reutiliza un mapa suficiente. Las guías pulso-status, pulso-recap y pulso-resume ayudan a consultar y retomar el trabajo.
@@ -25,6 +27,7 @@ Las cuatro tools consumen los contratos comunes del core. VS Code recibe campos 
 - `bind_continuity`, `get_continuity` y `update_intent` mantienen un handle explícito por objetivo. Dos chats pueden usar continuidades distintas sobre la misma raíz; el adaptador no mantiene un «chat actual» global.
 - `prepare_delegation` v2 es una mutación durable: devuelve `delegationId` y `specialistPrompt` sin lanzar agentes. Los inputs conversacionales van en `objective`/`constraints` o archivos autorizados accesibles. Core conserva contrato y base; no se retransmiten hashes ni el encargo canónico.
 - `accept_result` v2 recibe IDs y decisión, con `returnId` o `reportedReturn` mutuamente excluyentes. Este adaptador usa el reporte literal del coordinador en la misma llamada: no dispone de captura directa de `agent`. El flujo sigue siendo preparar → delegar → incorporar. `reportedTerminal` resuelve sólo la reserva lógica reportada, no demuestra cese físico. Una decisión inválida puede conservar el retorno: recupera por `get_delegation` y reconcilia sin repetir implementación, delegación ni publicación. Sólo completa las tareas aceptadas y no satisface automáticamente los criterios.
+- `decision` exige `status` y `summary`; `completed` exige también `acceptedTaskIds` explícitos. Los campos opcionales admitidos, como `checks`, `findings` y `limitations`, van directamente en ese objeto. `decision.details` no se admite.
 - `accept_delivery` conserva aceptación manual declarada e intenta cerrar. `ok:true` no implica cierre: consulta `data.closed`, `data.readiness` y posibles `closeError`/`persistence`. Ante una respuesta perdida, consulta Work antes de repetir.
 - `get` incluye diagnóstico completo de cierre y permite `section=results`. `close` admite `outcome=done` o `cancelled`; una pausa o una validación pendiente no son finalización ni motivo para cancelar tareas realizadas.
 

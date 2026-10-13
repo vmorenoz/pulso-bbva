@@ -2,6 +2,8 @@
 
 La interfaz operativa son las custom tools del plugin. No existe CLI de operaciones. El único CLI de Pulso es `install.mjs`/`uninstall.mjs`, que administra recursos globales y nunca datos del proyecto.
 
+Las cuatro tools son `pulso_workspace`, `pulso_work`, `pulso_history` y `pulso_context`. Las multiaction reciben `{ "request": { "action": "..." } }`; `pulso_history` recibe filtros directos. Cada handler usa `context.directory` del host y solicita aprobación con `context.ask` antes de operar. La instalación registra el plugin y el agente predeterminado en JSONC, según [INSTALLER.md](INSTALLER.md).
+
 ## Ciclo normal
 
 1. `pulso_workspace` orienta sin escanear todos los Work.
@@ -41,7 +43,7 @@ Tras instalar los recursos actualizados, salir y reiniciar OpenCode para recarga
 
 `pulso_work` action `update` admite entre 1 y 20 acciones semánticas en una operación: `work.set_overview`, `criterion.add/update/remove`, `task.add/update/set_status/remove`, `document.register/unregister` y `evidence.add/update/remove`.
 
-La entrada no admite una raíz de proyecto, JSON completo de Work, JSON Patch, hashes proporcionados por el modelo ni rutas absolutas. El core valida referencias, computes hashes desde archivos reales y guarda una vez. Las revisiones obsoletas fallan; se debe releer y reconciliar, nunca reintentar sobrescribiendo.
+La entrada no admite una raíz de proyecto, JSON completo de Work, JSON Patch ni rutas absolutas. Una evidencia nueva incluye hashes observados de archivos e informe y `acceptanceBasis` obtenida antes de comprobar; el core contrasta esas huellas con archivos reales y la aceptación vigente, no admite hashes inventados. Valida referencias y guarda el Work una vez. Las revisiones obsoletas fallan; se debe releer y reconciliar, nunca reintentar sobrescribiendo.
 
 La tool devuelve un recibo breve con ID, revisión, estado, cambios y siguiente acción. Los archivos canónicos permanecen disponibles bajo `.pulso/` para auditoría; no se presentan completos en cada operación.
 
@@ -53,6 +55,8 @@ La tool devuelve un recibo breve con ID, revisión, estado, cambios y siguiente 
 
 Cada evidencia requiere un informe existente, enlaces a IDs existentes y archivos fingerprintados. `done` exige criterios y tareas terminadas cubiertas por evidencia positiva y vigente; la estructura por sí sola no prueba la calidad semántica ni que una afirmación de ejecución sea cierta. Las tareas y los criterios con dependencias no se pueden quitar; los cierres archivados son inmutables.
 
+`evidence.update` solo corrige el resumen y su fecha de edición; no renueva hashes ni resultados. Repetir una comprobación exige una observación nueva con otro ID de evidencia.
+
 `pulso_history` devuelve cierres filtrables y limitados. El mapeo usa las acciones ordinarias tipadas de `pulso_work`: create/update, validate_result y close solo tras aceptación; no existe un cierre automático de mapas.
 
 ## Preparación
@@ -63,7 +67,7 @@ Cada evidencia requiere un informe existente, enlaces a IDs existentes y archivo
 
 ## Límites de consistencia
 
-El core usa validación y escrituras atómicas por archivo, pero no es una transacción multiproceso. Debe existir un coordinador escritor por checkout. No hay daemon, scheduler, locks, actividad en tiempo real ni procesos de agentes propios.
+El core usa validación y escrituras atómicas por archivo, pero no es una transacción multiproceso. Debe existir un coordinador escritor por checkout. Las actualizaciones de memoria de usuario usan un lock exclusivo corto en `~/.pulso/preferences.lock`, con token y revisión comprobada dentro del lock; no coordina Work ni sesiones. No hay daemon, scheduler, actividad en tiempo real ni procesos de agentes propios.
 
 ## Observación pasiva de delegaciones
 

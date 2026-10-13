@@ -1,5 +1,7 @@
 # Specialist communication contracts
 
+Only Pulso is human-facing and orchestrates. Each stateless specialist has one canonical role, tool policy, SpecialistTaskContract and schema-derived ResultContract. Every specialist is not user-invocable, has `agents: []`, and has no Work MCP tools. The role-specific outputs are described below: Planner proposes steps, dependencies and assumptions; Explorer reports observations with optional evidence and no severity; Executor reports changed targets and validations; Verifier reports a pass/fail/partial verdict per criterion; Security Auditor reports evidence-backed, severity-rated findings.
+
 `packages/orchestration/src/agents/definitions.ts` is the canonical static source for each specialist's purpose, boundaries and tool policy. Each specialist also references a `SpecialistTaskContract` (purpose, focus, desired output, exclusions). The Zod schemas in `protocol/schemas.ts` are the sole authority for wire fields and validation; generated protocol instructions show the schema-derived result shape rather than maintaining another field list.
 
 ## Shared TaskEnvelope v2
