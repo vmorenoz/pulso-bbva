@@ -7,6 +7,9 @@ Los directorios históricos son fuentes de consulta, no entradas de construcció
 
 ## Cambios actuales · sin release publicada
 
+- Cierre por petición explícita con `close_by_user`: trabajo terminado, criterios/verificaciones y tareas no canceladas revisados y aprobados por usuario, sin pendientes actuales; conserva declaración, diagnóstico histórico, resultados y evidencias. Recuperación idempotente por operación y cierre normal técnico intacto. La cancelación del seguimiento preserva tareas históricamente realizadas cuya aceptación quedó obsoleta.
+- Correcciones de orquestación tras auditoría de sesión: delegación de investigación desde el inicio, acuerdos vigentes conservados, revisión de conclusiones contra condiciones ejecutables y reconciliación de criterios/pendientes antes de comunicar entrega.
+- `prepare_delegation` v2 devuelve el `agent` canónico junto al prompt literal; los rechazos de dispatch distinguen prompt, rol, tareas y cabecera, con posición de diferencia sin revelar contenido. Los errores de inputs muestran alcance efectivo y recuperación sin retirar requisitos necesarios.
 - Instalación OpenCode con `node install.mjs` desde la raíz o `v4/`: consume el archivo standalone de la versión declarada, verifica SHA-256 y no requiere npm ni build. La guía standalone permite instalar también sin checkout.
 - Limpieza de `model` y `variant` sólo para IDs exactos de agentes Pulso actuales y legacy reconocidos en los archivos globales `opencode.json` y `opencode.jsonc`, con respaldo. Se preservan el modelo global, otros agentes y el override explícito `OPENCODE_CONFIG`.
 - `/pulso-init` prepara y delega el mapa contextual sin Work, tareas, continuidad de Work ni circuito QA/evidencia/cierre.

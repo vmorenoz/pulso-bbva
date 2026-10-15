@@ -42,6 +42,60 @@ export async function fixture(t) {
   return {base, extensionPath, homeDir, projects, host, context, invoke, status};
 }
 
+for (const outcome of ['approved', 'cancelled', 'revoked']) test(`native close_by_user VSCode ${outcome}`, async t => {
+  const {invoke, status, host, projects, extensionPath} = await fixture(t);
+  const {bindingId} = await status();
+  const run = (name, input) => invoke(name, {...input,expectedBindingId:bindingId});
+  assert.equal((await run('pulso_workspace', {action:'prepare'})).ok, true);
+  assert.equal((await run('pulso_work', {action:'create',workId:'USER-CLOSE',title:'T',objective:'O',criterion:'C',verification:'V'})).ok, true);
+  const added = await run('pulso_work', {action:'update',workId:'USER-CLOSE',expectedRevision:1,actions:[
+    {type:'criterion.add',criterion:{id:'AC-2',description:'Second criterion',verification:'User review',acceptanceMode:'both'}},
+    ...['pending','blocked'].map((status, i) => ({type:'task.add',task:{id:`T-${i+1}`,title:'Review',criterionIds:['AC-1','AC-2'],agent:null,status,dependsOn:[],writeScope:[],resources:[],acceptance:['Approved']}})),
+  ]});
+  assert.equal(added.ok, true, JSON.stringify(added));
+  const request = {action:'close_by_user',workId:'USER-CLOSE',expectedRevision:added.data.revision,operationId:'native-user-close',summary:'User approves delivery',source:{text:'Apruebo todo; cierra el objetivo.',messageRef:'user-message-1'},limitations:[],expectedBindingId:bindingId};
+  const manifest = JSON.parse(fs.readFileSync(path.join(extensionPath,'package.json'),'utf8'));
+  const definition = manifest.contributes.languageModelTools.find(tool => tool.name === 'pulso_work');
+  assert.deepEqual(validateSchema(definition.inputSchema, request), []);
+  const confirmation = host.tools.get('pulso_work').prepareInvocation({input:request});
+  assert.ok(confirmation.confirmationMessages);
+  assert.match(JSON.stringify(confirmation.confirmationMessages), /close_by_user/);
+  const snapshot = () => Object.fromEntries(fs.readdirSync(path.join(projects[0],'.pulso'),{recursive:true}).sort().map(file => {
+    const target = path.join(projects[0],'.pulso',file);
+    return [file,fs.statSync(target).isFile() ? fs.readFileSync(target,'utf8') : null];
+  }));
+  const before = snapshot();
+  if (outcome !== 'approved') {
+    if (outcome === 'revoked') await host.commands.get('pulso.selectProject')();
+    await assert.rejects(invoke('pulso_work', request, {isCancellationRequested:outcome === 'cancelled'}), outcome === 'revoked' ? /binding changed or missing/ : /cancelled/);
+    assert.deepEqual(snapshot(), before);
+    const open = await status();
+    assert.equal(open.ok, true, JSON.stringify(open));
+    assert.deepEqual(open.data.works.items.map(work => work.id), ['USER-CLOSE']);
+    return;
+  }
+  const closed = await invoke('pulso_work', request);
+  assert.equal(closed.ok, true, JSON.stringify(closed));
+  assert.equal(closed.data.closed, true);
+  assert.equal(closed.data.verification, 'user_approved');
+  assert.deepEqual(closed.data.source, request.source);
+  assert.equal(closed.data.operationId, request.operationId);
+  assert.deepEqual(closed.data.readiness, {ready:true,issues:[],revision:added.data.revision+1,evidenceIds:[],authority:'user',verification:'user_approved'});
+  assert.deepEqual(closed.data.approval, {authority:'user',verification:'user_approved',criterionIds:['AC-1','AC-2'],taskIds:['T-1','T-2'],cancelledTaskIds:[]});
+  const work = await run('pulso_work', {action:'get',workId:request.workId,section:'all'});
+  assert.equal(work.ok, true, JSON.stringify(work));
+  assert.deepEqual(work.data.tasks.items.map(task => task.status), ['done','done']);
+  assert.deepEqual(work.data.readiness, closed.data.readiness);
+  const history = await run('pulso_history', {workId:request.workId});
+  assert.equal(history.ok, true, JSON.stringify(history));
+  assert.equal(history.data.items.length, 1);
+  assert.deepEqual(history.data.items[0].userRequest.source, request.source);
+  assert.deepEqual(history.data.items[0].userRequest.approval, closed.data.approval);
+  const current = await status();
+  assert.equal(current.ok, true, JSON.stringify(current));
+  assert.deepEqual(current.data.works.items, []);
+});
+
 test('public registrations are read-only at activation and generated schemas derive from common definitions', async t => {
   const {projects, homeDir, host, context} = await fixture(t);
   assert.deepEqual([...host.tools.keys()], names);
@@ -85,6 +139,7 @@ test('binding is stripped and all mutations reject missing/stale opaque tokens',
       reconcile_delegation: {workId:'W',delegationId:'D',continuityId:'C',intentRevision:1,reason:'R',resolution:'not_dispatched'},
       accept_result: {contractVersion:2,workId:'W',expectedRevision:1,delegationId:'D',continuityId:'C',intentRevision:1,operationId:'accept',reportedReturn:{captureKey:'return',markdown:'Report'},decision:{}},
       accept_delivery: {workId:'W',expectedRevision:1,summary:'S',criterionIds:['AC-1'],source:{text:'Approved'},limitations:[]},
+      close_by_user: {workId:'W',expectedRevision:1,operationId:'close-user',summary:'S',source:{text:'Approved'},limitations:[]},
       create: {title: 'T', objective: 'O', criterion: 'C', verification: 'V'},
       update: {workId: 'W', expectedRevision: 1, actions: [{type: 'work.set_overview', summary: 'S'}]},
       block: {workId: 'W', expectedRevision: 1, summary: 'S', reason: 'R'},

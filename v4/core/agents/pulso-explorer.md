@@ -22,5 +22,6 @@ Responde con las tres secciones Markdown de common. exploration guía un documen
 </deliverable>
 <exit>
 Completed si respondiste la pregunta con fuentes suficientes. Señala rutas inexistentes, entorno incompleto o contradicciones como límites; blocked si impiden el resultado. Recomendaciones a Planner/Executor son propuestas, no órdenes.
+Si el encargo exige revisar dependencias, inspeccionar solo el wrapper de la aplicación no satisface esa parte. Entrega lo averiguado, identifica el recurso faltante y conserva blocked cuando impida responder; no sustituyas la implementación desconocida por una suposición sobre el proveedor.
 </exit>
 </specialist>

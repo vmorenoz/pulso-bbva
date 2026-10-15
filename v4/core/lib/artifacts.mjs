@@ -9,7 +9,7 @@ const wp = id => `.pulso/work/${assertID(id)}/work.json`;
 const unique = (values,label) => {if(new Set(values).size!==values.length)throw new Error(`${label}: duplicados`);};
 const same = (a,b)=>JSON.stringify(a)===JSON.stringify(b);
 export const criterionMode=c=>c.acceptanceMode??'evidence';
-/** Footprint is cycle-local, independent of current status and acceptance freshness. */
+/** Cycle-local completion footprint, including explicit user approval; not proof of execution. */
 export const completedTaskIds=w=>[...new Set([...(w.completedTaskIds||[]),...w.tasks.filter(t=>t.status==='done').map(t=>t.id),...(w.results||[]).filter(r=>r.cycle===w.cycle).flatMap(r=>r.acceptedTaskIds)])];
 export function assertTaskCancellation(work,taskId){
   if(completedTaskIds(work).includes(taskId)){const error=new Error(`Tarea realizada en este ciclo; no se puede cancelar: ${taskId}`);error.code='TASK_ALREADY_COMPLETED';throw error;}
@@ -57,11 +57,15 @@ export function validateWork(root,w,{files=true,fresh=false}={}) {
   const visiting=new Set(),visited=new Set();
   function visit(id){if(visiting.has(id))throw new Error(`Ciclo de dependencias: ${id}`);if(visited.has(id))return;visiting.add(id);for(const d of tasks.get(id).dependsOn)visit(d);visiting.delete(id);visited.add(id);}
   for(const t of w.tasks)visit(t.id);
+  if(w.closure)validateUserClosure(w.closure,w);
+  const userApproved=w.closure?.mode==='user_requested';
   const activeEvidence=new Set(terminal(w.status)?[]:[...w.objective.criteria.flatMap(c=>c.evidenceIds),...w.tasks.flatMap(t=>t.evidenceIds)]);
   for(const d of w.documents){
     safePath(root,d.path);
     const reports=w.evidence.filter(e=>e.report===d.path);
-    if(files&&(!reports.length||reports.some(e=>activeEvidence.has(e.id)))&&!exists(root,d.path))throw new Error(`Documento no existe: ${d.path}`);
+    // A validated user closure makes documents historical, not unsafe paths.
+    // Reopening removes this exception and restores normal existence checks.
+    if(files&&!userApproved&&(!reports.length||reports.some(e=>activeEvidence.has(e.id)))&&!exists(root,d.path))throw new Error(`Documento no existe: ${d.path}`);
   }
 
   for(const e of w.evidence){
@@ -84,7 +88,7 @@ export function validateWork(root,w,{files=true,fresh=false}={}) {
     for(const section of ['criteria','tasks'])unique(r.acceptanceBasis[section].map(item=>item.id),`Resultado ${r.id} base ${section}`);
   }
   if(w.closure){refs(w.closure.evidenceIds,ev,'Cierre evidencias');if(Date.parse(w.closure.at)<Date.parse(w.createdAt))throw new Error('Fecha de cierre anterior a creación');}
-  if(w.status==='done')assertCompletion(root,w,{fresh:false});
+  if(w.status==='done'&&w.closure.mode!=='user_requested')assertCompletion(root,w,{fresh:false});
   if(fresh&&!terminal(w.status)){
     const issues=completionReadiness(root,w).issues.filter(issue=>['EVIDENCE_STALE','USER_ACCEPTANCE_STALE','TASK_UNSUPPORTED','TASK_ACCEPTANCE_STALE'].includes(issue.code));
     if(issues.length){const error=new Error('Evidencia o aceptación de tareas no vigente');error.code='ACCEPTANCE_STALE';error.issues=issues;throw error;}
@@ -140,11 +144,13 @@ export function status(root){const s=assertSchema('state',readJSON(root,'.pulso/
 export function history(root){
   const text=readText(root,'.pulso/history.jsonl');const entries=[];
   for(const [i,line] of text.split('\n').entries()){if(!line.trim())continue;let e;try{e=JSON.parse(line);}catch{throw new Error(`Historial inválido en línea ${i+1}; no se sobrescribirá`);}assertSchema('history-entry',e);if(e.workPath!==wp(e.workId)||e.closureId!==`${e.workId}:c${e.cycle}`)throw new Error('Identidad inválida en historial');entries.push(e);}
+  for(const entry of entries)validateUserClosure(entry);
   unique(entries.map(e=>e.closureId),'Cierres');return entries;
 }
 function summary(w){return {id:w.id,title:w.title,objective:w.objective.outcome,path:wp(w.id),status:w.status,priority:w.priority,workRevision:w.revision,cycle:w.cycle,progress:{done:w.tasks.filter(t=>t.status==='done').length,total:w.tasks.length},lastProgress:w.summary,blockers:w.blockers,decisionsPending:w.decisionsPending,nextAction:w.nextAction,updatedAt:w.updatedAt};}
 function closureEntry(w){const c=w.closure;
   const entry={schemaVersion:1,closureId:c.id,workId:w.id,cycle:w.cycle,title:w.title,objective:w.objective.outcome,createdAt:w.createdAt,closedAt:c.at,outcome:c.outcome,summary:c.summary,limitations:c.limitations,evidenceIds:c.evidenceIds,workPath:wp(w.id)};
+  if(c.mode==='user_requested')Object.assign(entry,{mode:c.mode,userRequest:c.userRequest});
   return assertSchema('history-entry',entry);
 }
 function recordClosure(root,w){
@@ -208,6 +214,12 @@ function assertObservedReport(e){if(!e.files.some(file=>file.path===e.report&&ty
 /** One exhaustive evaluator for reads and closure. Task history does not require
  * the implementation files to retain their old bytes; final criteria do. */
 export function completionReadiness(root,w,{fresh=!terminal(w.status)}={}){
+  // User authority supersedes the historical diagnosis for this closed cycle.
+  // Validate before granting approval; evidenceIds stays empty, not machine PASS.
+  if(w.closure?.mode==='user_requested'){
+    validateUserClosure(w.closure,w);
+    return {ready:true,issues:[],revision:w.revision,evidenceIds:[],authority:'user',verification:'user_approved'};
+  }
   const issues=[],used=new Set(),ev=new Map(w.evidence.map(e=>[e.id,e]));
   // Historical closed Work remains readable. A prospective closure and all
   // current/open readiness queries share the exact same administrative guard.
@@ -290,8 +302,7 @@ function prepareClosure(root,w,{outcome,summary:result,limitations}){
   }
   const evid=outcome==='done'?assertCompletion(root,w):w.evidence.map(e=>e.id);
   w.completedTaskIds=completedTaskIds(w);
-  if(outcome==='cancelled')for(const t of w.tasks)if(t.status!=='done'){
-    assertTaskCancellation(w,t.id);
+  if(outcome==='cancelled')for(const t of w.tasks)if(!w.completedTaskIds.includes(t.id)){
     if(!terminal(t.status)){t.status='cancelled';t.summary=`Cancelada al cerrar trabajo: ${result}`;}
   }
   w.revision++;w.status=outcome;w.summary=result;w.nextAction=null;w.updatedAt=now();
@@ -302,8 +313,78 @@ export const closeWork=(root,...args)=>withWorkspaceLock(root,()=>closeWorkLocke
 function closeWorkLocked(root,id,{outcome='done',summary:result,limitations=[]}={}){
   validateClosureInput(outcome,result,limitations);
   const w=readWork(root,id,{files:false});status(root);history(root);
+  if(w.closure?.mode==='user_requested')throw new Error('Cierre por usuario existente; no acredita cierre técnico');
   if(w.closure){if(w.closure.outcome!==outcome||w.closure.summary!==result||!same(w.closure.limitations,limitations))throw new Error('Trabajo ya cerrado con otro resultado');return syncWork(root,id);}
   prepareClosure(root,w,{outcome,summary:result,limitations});return commitWork(root,w);
+}
+function validateUserClosure(closure,work){
+  if(closure.mode===undefined&&closure.userRequest===undefined)return;
+  if(closure.mode!=='user_requested'||closure.outcome!=='done')throw new Error('Procedencia de cierre inválida');
+  const request=assertSchema('user-requested-closure',closure.userRequest);
+  const readiness=assertSchema('closure-readiness',request.readinessBefore);
+  validateClosureInput('done',closure.summary,closure.limitations);
+  if(readiness.ready!==(readiness.issues.length===0)||readiness.issues.some(i=>['DELEGATIONS_PENDING','DELEGATIONS_INVALID'].includes(i.code)))throw new Error('Snapshot de cierre inválido');
+  // These historical facts are fully determined by the snapshot. Do not
+  // reobserve historical files or recompute evidence freshness on a read.
+  const snapshotIssues={
+    TASK_OPEN:request.taskStatuses.filter(t=>!terminal(t.status)).map(t=>({code:'TASK_OPEN',entity:t.id,message:`Tarea ${t.id}: ${t.status}`})),
+    BLOCKER:request.blockers.map((message,i)=>({code:'BLOCKER',entity:`blockers[${i}]`,message})),
+    DECISION_PENDING:request.decisionsPending.map((message,i)=>({code:'DECISION_PENDING',entity:`decisionsPending[${i}]`,message}))
+  };
+  for(const [code,expected] of Object.entries(snapshotIssues)){
+    const actual=readiness.issues.filter(issue=>issue.code===code).map(({code,entity,message})=>({code,entity,message}));
+    if(!same(actual,expected))throw new Error(`Snapshot de cierre contradictorio: ${code}`);
+  }
+  unique(request.taskStatuses.map(t=>t.id),'Snapshot tareas');
+  unique(request.completedTaskIds,'Snapshot huella');unique(request.resultIds,'Snapshot resultados');
+  unique(request.criterionIds,'Snapshot criterios');
+  for(const [section,ids] of [['criteria',request.criterionIds],['tasks',request.taskStatuses.map(t=>t.id)]]){
+    if(!same(request.acceptanceBasis[section].map(item=>item.id),ids))throw new Error('Base de aprobación no corresponde al snapshot');
+  }
+  const approval=request.approval;
+  const approvedTasks=request.taskStatuses.filter(t=>t.status!=='cancelled').map(t=>t.id);
+  const cancelledTasks=request.taskStatuses.filter(t=>t.status==='cancelled').map(t=>t.id);
+  if(!same(approval.criterionIds,request.criterionIds)||!same(approval.taskIds,approvedTasks)||!same(approval.cancelledTaskIds,cancelledTasks))throw new Error('Aprobación de usuario debe cubrir exactamente todos los criterios y tareas no canceladas');
+  if(request.completedTaskIds.some(id=>!approvedTasks.includes(id))||request.taskStatuses.some(t=>t.status==='done'&&!request.completedTaskIds.includes(t.id)))throw new Error('Huella histórica de tareas incoherente');
+  const expectedTasks=request.taskStatuses.map(t=>({id:t.id,status:t.status==='cancelled'?'cancelled':'done',summary:terminal(t.status)?t.summary:userApprovalSummary(request.operationId)}));
+  const expectedCompleted=[...new Set([...request.completedTaskIds,...approvedTasks])];
+  if(work){
+    if(work.status!=='done'||closure.cycle!==work.cycle||closure.id!==`${work.id}:c${work.cycle}`||closure.at!==work.updatedAt||work.summary!==closure.summary||readiness.revision!==work.revision-1||work.blockers.length||work.decisionsPending.length||work.nextAction!==null||!same(expectedTasks,work.tasks.map(({id,status,summary})=>({id,status,summary})))||!same(expectedCompleted,work.completedTaskIds)||!same(expectedCompleted,completedTaskIds(work))||!same(request.criterionIds,work.objective.criteria.map(c=>c.id))||!same(request.acceptanceBasis,acceptanceBasis(work))||!same(request.resultIds,(work.results||[]).map(r=>r.id))||!same(closure.evidenceIds,work.evidence.map(e=>e.id)))throw new Error('Aprobación o snapshot de cierre no corresponde al Work');
+  }
+}
+const userApprovalSummary=operationId=>`Revisada y aprobada por usuario (${operationId}).`;
+/** Source is an explicit declaration supplied by the caller/host, not authenticated
+ * user identity. No language regex or test evidence can establish authorization.
+ * Approval covers all criteria and non-cancelled tasks, without establishing
+ * machine execution or physical termination of native agents.
+ */
+export const closeByUser=(root,...args)=>withWorkspaceLock(root,()=>closeByUserLocked(root,...args));
+function closeByUserLocked(root,{workId,expectedRevision,operationId,summary:result,source,limitations}){
+  assertID(operationId);validateClosureInput('done',result,limitations);
+  const w=readWork(root,workId,{files:false});status(root);const archived=history(root);
+  const criterionIds=w.objective.criteria.map(c=>c.id);
+  const approval={authority:'user',verification:'user_approved',criterionIds,taskIds:w.tasks.filter(t=>t.status!=='cancelled').map(t=>t.id),cancelledTaskIds:w.tasks.filter(t=>t.status==='cancelled').map(t=>t.id)};
+  const request={operationId,source,approval,criterionIds,acceptanceBasis:acceptanceBasis(w),readinessBefore:w.closure?.userRequest?.readinessBefore??completionReadiness(root,w),taskStatuses:w.tasks.map(({id,status,summary})=>({id,status,summary})),blockers:w.blockers,decisionsPending:w.decisionsPending,completedTaskIds:completedTaskIds(w),resultIds:(w.results||[]).map(r=>r.id)};
+  assertSchema('user-requested-closure',request);
+  const previous=[w.closure,...archived.filter(e=>e.workId===workId)].find(c=>c?.userRequest?.operationId===operationId);
+  if(previous){
+    if(previous.summary!==result||!same(previous.limitations,limitations)||previous.userRequest.source.text!==source.text||previous.userRequest.source.messageRef!==source.messageRef)throw new Error('operationId reutilizado con contenido diferente');
+    if(previous.cycle!==w.cycle)throw new Error('operationId pertenece a un ciclo cerrado; requiere nueva petición');
+    return {work:syncWork(root,workId),duplicate:true};
+  }
+  if(!Number.isSafeInteger(expectedRevision)||w.revision!==expectedRevision)throw new Error(`Revisión obsoleta; actual=${w.revision}. Releer y reconciliar, no sobrescribir.`);
+  if(w.closure)throw new Error('Trabajo ya cerrado con otro resultado');
+  const issues=delegationIssues(root,w);
+  if(issues.length){const error=new Error(issues[0].message);error.code='CLOSURE_NOT_READY';error.issues=issues;error.readiness=request.readinessBefore;throw error;}
+  for(const task of w.tasks){
+    if(task.status==='cancelled')assertTaskCancellation(w,task.id);
+    if(!terminal(task.status)){task.status='done';task.summary=userApprovalSummary(operationId);}
+  }
+  w.completedTaskIds=[...new Set([...request.completedTaskIds,...approval.taskIds])];
+  w.blockers=[];w.decisionsPending=[];
+  w.revision++;w.status='done';w.summary=result;w.nextAction=null;w.updatedAt=now();
+  w.closure={id:`${w.id}:c${w.cycle}`,cycle:w.cycle,at:w.updatedAt,outcome:'done',summary:result,evidenceIds:w.evidence.map(e=>e.id),limitations,mode:'user_requested',userRequest:request};
+  validateWork(root,w,{files:false});return {work:commitWork(root,w),duplicate:false};
 }
 export const reopenWork=(root,...args)=>withWorkspaceLock(root,()=>reopenWorkLocked(root,...args));
 function reopenWorkLocked(root,id,reason){
@@ -364,9 +445,21 @@ export function validateDelegation(root,delegation,{globalRoot,catalogPath='cata
   for(const resource of delegation.resources)if(!derived('resources').includes(resource))throw new Error(`Recurso no autorizado: ${resource}`);
   // Resources can also contain capability labels; only guarded relative paths
   // that exist authorize filesystem reads. Host roots never come from labels.
-  const resourcePaths=delegation.resources.filter(p=>{try{return exists(root,p);}catch{return false;}});
+  const discardedResources=[];
+  const resourcePaths=delegation.resources.filter((p,index)=>{
+    try{if(exists(root,p))return true;}catch{}
+    // Labels and unsafe paths may contain sensitive text: identify by position only.
+    discardedResources.push(`resources[${index}]`);return false;
+  });
   const readScope=[...new Set([...delegation.writeScope,...resourcePaths])];
-  for(const p of delegation.inputs){if(!inScope(p,readScope))throw new Error(`Input no autorizado: ${p}`);if(!exists(root,p))throw new Error(`Input inaccesible: ${p}`);}
+  for(const p of delegation.inputs){
+    if(!inScope(p,readScope))throw new Error(
+      `Input no autorizado: ${JSON.stringify(p)}. Scope efectivo autorizado (writeScope + recursos con ruta segura existente): ${JSON.stringify(readScope)}.`+
+      (discardedResources.length?` Recursos descartados por no resolver a una ruta segura existente: ${discardedResources.join(', ')} (índices desde 0; valores omitidos).`:'')+
+      ' Recuperación: revisar los recursos pertinentes de las tareas del encargo y sus rutas; actualizar la tarea cuando corresponda y preparar de nuevo el encargo conservando los requisitos. No eliminar inputs necesarios para silenciar el error.'
+    );
+    if(!exists(root,p))throw new Error(`Input inaccesible: ${p}`);
+  }
   return {work,tasks,readScope,resourcePaths};
 }
 export function validateResultIdentity(delegation,result){

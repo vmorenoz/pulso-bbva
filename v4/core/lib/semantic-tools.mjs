@@ -57,7 +57,8 @@ function workRead(root,args){
   data.acceptanceBasis=artifacts.acceptanceBasis(value,{criterionIds:basisValues('criteria').map(item=>item.id),taskIds:basisValues('tasks').map(item=>item.id)});
   data.acceptanceBasisPage=Object.fromEntries(['criteria','tasks'].map(key=>[key,basisSections.includes(key)?{total:arrays[key].length,hasMore:page.offset+page.limit<arrays[key].length,nextCursor:page.offset+page.limit<arrays[key].length?page.nextCursor:null}:{total:arrays[key].length,readWith:{section:key}}]));
   data.readiness=artifacts.completionReadiness(root,value);
-  return ok('trabajo',`${value.id} · rev. ${value.revision} · ${value.status} · tareas ${value.tasks.filter(task=>task.status==='done').length}/${value.tasks.length} · siguiente: ${value.nextAction||'sin acción'}`,data);
+  if(value.closure?.mode==='user_requested')Object.assign(data,{closed:true,authority:'user',verification:'user_approved',approval:value.closure.userRequest.approval});
+  return ok('trabajo',`${value.id} · rev. ${value.revision} · ${value.status}${data.verification==='user_approved'?' · revisado y aprobado por usuario':''} · tareas ${value.tasks.filter(task=>task.status==='done').length}/${value.tasks.length} · siguiente: ${value.nextAction||'sin acción'}`,data);
 }
 
 const handlers={
@@ -112,12 +113,16 @@ const handlers={
         const data=prepareDelegation(root,args,options);
         if(data.contractVersion===2){
           const {delegationId,contractVersion,workId,continuityId,intentRevision,preparedFromRevision,specialistPrompt,state}=data;
-          return ok('encargo',`${delegationId} · rev. ${preparedFromRevision} · snapshot conservado; no acredita dispatch`,{delegationId,contractVersion,workId,continuityId,intentRevision,preparedFromRevision,specialistPrompt,state,readWith:{action:'get_delegation',workId,delegationId,continuityId}});
+          return ok('encargo',`${delegationId} · rev. ${preparedFromRevision} · snapshot conservado; no acredita dispatch`,{delegationId,contractVersion,workId,continuityId,intentRevision,preparedFromRevision,agent:data.delegation.agent,specialistPrompt,state,readWith:{action:'get_delegation',workId,delegationId,continuityId}});
         }
         return ok('encargo',`${data.delegation.id} · rev. ${data.delegation.workRevision} · ${data.contractVersion===2?'snapshot conservado; no acredita dispatch':'preparado sin persistir ni ejecutar'}`,data);
       }
       case 'accept_result':return receipt('resultado',acceptResult(root,args,options));
       case 'accept_delivery':return receipt('aceptación',acceptDelivery(root,args,options));
+      case 'close_by_user':return withWorkspaceLock(root,()=>{
+        checkContext(options);
+        return receipt('cierre por usuario',mutations.closeByUserOperation(root,args));
+      });
       case 'validate_result':{
         const data=artifacts.validateResult(root,args.delegation,args.result,{globalRoot:resourceRoot,catalogPath:'agents/catalog.json'});
         return ok('resultado',data.note,data);
@@ -139,7 +144,7 @@ const handlers={
     const snapshot=exists(root,'.pulso/history.jsonl')?artifacts.history(root):[];
     const values=snapshot.filter(value=>(!args.workId||value.workId===args.workId)&&(!args.since||Date.parse(value.closedAt)>=Date.parse(args.since))&&(!args.until||Date.parse(value.closedAt)<=Date.parse(args.until))).reverse();
     const data=pageItems(values,{kind:'history',binding:{projectRoot:root,workId:args.workId||null,since:args.since||null,until:args.until||null},snapshot,limit:args.limit||20,cursor:args.cursor});
-    return ok('historial',data.items.length?data.items.map(value=>`${value.workId} · ${value.outcome} · ${value.summary}`).join('\n'):'Sin cierres para esta consulta.',data);
+    return ok('historial',data.items.length?data.items.map(value=>`${value.workId} · ${value.outcome}${value.mode==='user_requested'?' · user_approved · criterios y tareas revisados y aprobados por usuario; diagnóstico anterior histórico':''} · ${value.summary}`).join('\n'):'Sin cierres para esta consulta.',data);
   },
   pulso_context(args,{projectRoot:root,homeDir}){
     if(args.action==='read'){

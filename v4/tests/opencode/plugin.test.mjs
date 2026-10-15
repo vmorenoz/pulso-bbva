@@ -41,6 +41,58 @@ async function fixture(t) {
   return {base, runtime, project, second, homeDir, plugin, context, requests, invoke};
 }
 
+for (const outcome of ['approved', 'denied', 'revoked']) test(`native close_by_user OpenCode ${outcome}`, async t => {
+  const {invoke, plugin, context, requests, project, second} = await fixture(t);
+  assert.equal((await invoke('pulso_workspace', {action:'prepare'})).ok, true);
+  assert.equal((await invoke('pulso_work', {action:'create',workId:'USER-CLOSE',title:'T',objective:'O',criterion:'C',verification:'V'})).ok, true);
+  const added = await invoke('pulso_work', {action:'update',workId:'USER-CLOSE',expectedRevision:1,actions:[
+    {type:'criterion.add',criterion:{id:'AC-2',description:'Second criterion',verification:'User review',acceptanceMode:'both'}},
+    ...['pending','blocked'].map((status, i) => ({type:'task.add',task:{id:`T-${i+1}`,title:'Review',criterionIds:['AC-1','AC-2'],agent:null,status,dependsOn:[],writeScope:[],resources:[],acceptance:['Approved']}})),
+  ]});
+  assert.equal(added.ok, true, JSON.stringify(added));
+  const request = {action:'close_by_user',workId:'USER-CLOSE',expectedRevision:added.data.revision,operationId:'native-user-close',summary:'User approves delivery',source:{text:'Apruebo todo; cierra el objetivo.',messageRef:'user-message-1'},limitations:[]};
+  assert.deepEqual(plugin.tool.pulso_work.args.request.parse(request), request);
+  const before = metadataSnapshot(project);
+  const ask = context.ask;
+  context.ask = async permission => {
+    await ask(permission);
+    if (outcome === 'denied') throw new Error('permission denied');
+    if (outcome === 'revoked') context.directory = second;
+  };
+  requests.length = 0;
+  let closed;
+  if (outcome === 'approved') closed = await invoke('pulso_work', request);
+  else await assert.rejects(invoke('pulso_work', request), outcome === 'denied' ? /permission denied/ : /directory changed/);
+  assert.deepEqual(requests, [{permission:'pulso_work',patterns:['close_by_user:USER-CLOSE'],always:['close_by_user:USER-CLOSE'],metadata:{action:'close_by_user',resource:'USER-CLOSE',mutating:true}}]);
+  context.ask = ask;
+  context.directory = project;
+  const status = await invoke('pulso_workspace', {action:'status'});
+  assert.equal(status.ok, true, JSON.stringify(status));
+  if (outcome !== 'approved') {
+    assert.deepEqual(metadataSnapshot(project), before);
+    assert.deepEqual(status.data.works.items.map(work => work.id), ['USER-CLOSE']);
+    assert.deepEqual(fs.readdirSync(second), []);
+    return;
+  }
+  assert.equal(closed.ok, true, JSON.stringify(closed));
+  assert.equal(closed.data.closed, true);
+  assert.equal(closed.data.verification, 'user_approved');
+  assert.deepEqual(closed.data.source, request.source);
+  assert.equal(closed.data.operationId, request.operationId);
+  assert.deepEqual(closed.data.readiness, {ready:true,issues:[],revision:added.data.revision+1,evidenceIds:[],authority:'user',verification:'user_approved'});
+  assert.deepEqual(closed.data.approval, {authority:'user',verification:'user_approved',criterionIds:['AC-1','AC-2'],taskIds:['T-1','T-2'],cancelledTaskIds:[]});
+  const work = await invoke('pulso_work', {action:'get',workId:request.workId,section:'all'});
+  assert.equal(work.ok, true, JSON.stringify(work));
+  assert.deepEqual(work.data.tasks.items.map(task => task.status), ['done','done']);
+  assert.deepEqual(work.data.readiness, closed.data.readiness);
+  const history = await invoke('pulso_history', {workId:request.workId});
+  assert.equal(history.ok, true, JSON.stringify(history));
+  assert.equal(history.data.items.length, 1);
+  assert.deepEqual(history.data.items[0].userRequest.source, request.source);
+  assert.deepEqual(history.data.items[0].userRequest.approval, closed.data.approval);
+  assert.deepEqual(status.data.works.items, []);
+});
+
 test('all shared descriptors convert; nested action refinements match shared validation', () => {
   const converted = nativeToolSchemas(toolContracts, z, validator);
   const valid = {
@@ -68,6 +120,94 @@ test('all shared descriptors convert; nested action refinements match shared val
   assert.equal(z.toJSONSchema(numeric).type,'integer');
   assert.equal(z.toJSONSchema(numeric).maximum,100);
   assert.equal(converted.pulso_history.safeParse({since: '2026-02-31T00:00:00Z'}).success, false);
+});
+
+function assertStringLiteralsOnly(schema) {
+  if (Object.hasOwn(schema, 'const')) assert.equal(typeof schema.const, 'string');
+  if (schema.enum) assert.ok(schema.enum.every(value => typeof value === 'string'));
+  for (const child of Object.values(schema.properties || {})) assertStringLiteralsOnly(child);
+  if (schema.items) assertStringLiteralsOnly(schema.items);
+  for (const key of ['anyOf', 'oneOf', 'allOf']) for (const child of schema[key] || []) assertStringLiteralsOnly(child);
+  for (const child of Object.values(schema.$defs || {})) assertStringLiteralsOnly(child);
+}
+
+test('registered tool schemas serialize without non-string literals and preserve original contracts', async t => {
+  const original = structuredClone(toolContracts);
+  const {plugin} = await fixture(t);
+  for (const definition of Object.values(plugin.tool)) {
+    const serialized = JSON.parse(JSON.stringify(z.toJSONSchema(z.object(definition.args))));
+    assertStringLiteralsOnly(serialized);
+  }
+  const seen = new Set();
+  const check = schema => {
+    if (Object.hasOwn(schema, 'const') && typeof schema.const !== 'string') {
+      seen.add(schema.const);
+      const native = schemaToZod(schema, z, validator);
+      const published = JSON.parse(JSON.stringify(z.toJSONSchema(z.object({value:native})))).properties.value;
+      assertStringLiteralsOnly(published);
+      assert.equal(published.type, schema.type || typeof schema.const);
+      assert.ok(published.description.includes(JSON.stringify(schema.const)));
+      assert.deepEqual(native.parse(schema.const), schema.const);
+      for (const wrong of [1, 2, true, 0, false, '1', '2', 'true', '0', null]) {
+        if (wrong === schema.const) continue;
+        assert.equal(native.safeParse(wrong).success, false);
+      }
+    }
+    for (const child of Object.values(schema.properties || {})) check(child);
+    if (schema.items) check(schema.items);
+    for (const child of schema.anyOf || []) check(child);
+  };
+  for (const schema of Object.values(toolContracts.pulso_work.actionSchemas)) check(schema);
+  for (const value of [1, 2, true, 0]) assert.ok(seen.has(value));
+  const registered = z.object(plugin.tool.pulso_work.args);
+  const evidence = {id:'E',kind:'executed',status:'pass',checkedAt:'2026-10-13T00:00:00Z',criterionIds:['AC-1'],taskIds:[],report:'report.md',command:'node --test',cwd:'.',exitCode:0,basis:'Current source',files:[{path:'missing.txt',absent:true}],summary:'Passed',acceptanceBasis:{criteria:[],tasks:[]}};
+  const update = {action:'update',workId:'W',expectedRevision:1,actions:[{type:'evidence.add',evidence}]};
+  const accept = {action:'accept_result',contractVersion:2,workId:'W',expectedRevision:1,continuityId:'C',intentRevision:1,delegationId:'D',operationId:'O',returnId:'R',decision:{status:'blocked',summary:'Blocked'}};
+  for (const request of [update,accept]) assert.deepEqual(registered.parse({request}),{request});
+  for (const wrong of [1,2,true,false,'0']) {
+    const request = structuredClone(update);
+    request.actions[0].evidence.exitCode = wrong;
+    assert.equal(registered.safeParse({request}).success,false);
+  }
+  for (const wrong of [1,2,0,false,'true']) {
+    const request = structuredClone(update);
+    request.actions[0].evidence.files[0].absent = wrong;
+    assert.equal(registered.safeParse({request}).success,false);
+  }
+  for (const wrong of [1,true,0,'2']) assert.equal(registered.safeParse({request:{...accept,contractVersion:wrong}}).success,false);
+  assert.deepEqual(toolContracts, original);
+});
+
+test('recursive publication handles numeric, boolean and mixed enums without weakening runtime validation', () => {
+  const schema = {type:'object',additionalProperties:false,required:['const','enum','items'],properties:{
+    const:{type:'integer',const:2,description:'Contract version'},
+    enum:{type:'array',items:{anyOf:[{type:'integer',enum:[0,1]},{type:'boolean',const:true}]}},
+    items:{enum:['ready',2,true,null]},
+  }};
+  const original = structuredClone(schema);
+  const native = z.object({request:schemaToZod(schema,z,validator)});
+  const published = JSON.parse(JSON.stringify(z.toJSONSchema(native)));
+  assertStringLiteralsOnly(published);
+  assert.equal(published.properties.request.properties.const.description, 'Contract version\nAllowed values: 2.');
+  assert.deepEqual(published.properties.request.properties.items.anyOf.map(branch => branch.type), ['string','number','boolean','null']);
+  for (const item of ['ready',2,true,null]) {
+    const request = {const:2,enum:[0,1,true],items:item};
+    assert.deepEqual(native.parse({request}), {request});
+  }
+  for (const request of [
+    {const:1,enum:[0],items:'ready'},
+    {const:true,enum:[0],items:'ready'},
+    {const:0,enum:[0],items:'ready'},
+    {const:2,enum:[2],items:'ready'},
+    {const:2,enum:[false],items:'ready'},
+    {const:2,enum:[0],items:1},
+    {const:2,enum:[0],items:false},
+    {const:2,enum:[0],items:'2'},
+  ]) {
+    assert.ok(validateSchema(original,request).length);
+    assert.equal(native.safeParse({request}).success,false);
+  }
+  assert.deepEqual(schema,original);
 });
 
 test('real SDK registrations are read-only at creation and every read asks native permission', async t => {

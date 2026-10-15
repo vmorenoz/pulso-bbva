@@ -1,7 +1,8 @@
-import {closeWork,createWork,readWork,reopenWork,saveWork,status,history,validateProject,assertObservedEvidence,syncWork,repair,completionReadiness,criterionMode,completedTaskIds,assertTaskCancellation} from './artifacts.mjs';
+import {closeWork,closeByUser,createWork,readWork,reopenWork,saveWork,status,history,validateProject,assertObservedEvidence,syncWork,repair,completionReadiness,criterionMode,completedTaskIds,assertTaskCancellation} from './artifacts.mjs';
 import {assertID,now,safePath,withWorkspaceLock} from './fs.mjs';
 import {workReceipt} from './receipts.mjs';
 import {assertSchema} from './schema.mjs';
+import {validateToolInput} from './tool-contracts.mjs';
 
 const text=(value,label,{required=true,max=4000}={})=>{
   if(typeof value!=='string'||(required&&!value.trim())||value.length>max)throw new Error(`${label}: texto inválido`);
@@ -183,7 +184,13 @@ function closeWorkOperationLocked(root,{workId,expectedRevision,outcome='done',s
   assertID(workId);const current=readWork(root,workId,{files:false});
   if(current.revision!==expectedRevision)throw new Error(`Revisión obsoleta; actual=${current.revision}. Releer y reconciliar, no sobrescribir.`);
   const closed=closeWork(root,workId,{outcome,summary:text(summary,'summary'),limitations:list(limitations,'limitations',30)});
-  return {...workReceipt(closed,{operation:'work.close',changes:[outcome==='done'?'trabajo cerrado':'trabajo cancelado']}),readiness:completionReadiness(root,closed)};
+  return {...workReceipt(closed,{operation:'work.close',changes:[outcome==='done'?'trabajo cerrado':'trabajo cancelado']}),closed:true,readiness:completionReadiness(root,closed)};
+}
+
+export function closeByUserOperation(root,input){
+  validateToolInput('pulso_work',{...input,action:'close_by_user'});
+  const {work,duplicate}=closeByUser(root,input);
+  return {...workReceipt(work,{operation:'work.close_by_user',changes:['trabajo cerrado; criterios y tareas revisados y aprobados por usuario']}),duplicate,readiness:completionReadiness(root,work)};
 }
 
 export const reopenWorkOperation=(root,...args)=>withWorkspaceLock(root,()=>reopenWorkOperationLocked(root,...args));

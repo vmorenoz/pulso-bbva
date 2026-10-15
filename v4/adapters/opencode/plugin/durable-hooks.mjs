@@ -4,6 +4,22 @@ import path from 'node:path';
 import {readDelegation, recordNativeDispatch, recordNativeReturn} from '../resources/lib/delegation-registry.mjs';
 import {correlation} from './delegation-observer.mjs';
 
+// Diagnostics contain positions only, never prompt excerpts or differing characters.
+function promptDifference(expected, received) {
+  let offset = 0, line = 1, column = 1;
+  while (offset < expected.length && offset < received.length && expected[offset] === received[offset]) {
+    if (expected[offset] === '\n') { line++; column = 1; } else column++;
+    offset++;
+  }
+  return `prompt(firstDifference: UTF-16 offset=${offset}, line=${line}, column=${column}, expectedLength=${expected.length}, receivedLength=${received.length})`;
+}
+
+function roleLabel(role) {
+  // Only role-shaped identifiers are printable; arbitrary payloads are redacted.
+  if (typeof role === 'string' && /^[a-z][a-z0-9-]{0,79}$/.test(role)) return JSON.stringify(role);
+  return role === undefined ? '<missing>' : '<redacted invalid role>';
+}
+
 export function nativeContext(context) {
   return Object.fromEntries(['sessionID','messageID','callID'].filter(key => typeof context?.[key] === 'string' && context[key].trim()).map(key => [key, context[key]]));
 }
@@ -52,7 +68,13 @@ export function createDurableHooks({directory}) {
       }
       if (!record || record.contractVersion !== 2) continue;
       const ids = correlation(args.prompt);
-      if (candidates.length !== 1 || record.specialistPrompt !== args.prompt || record.delegation.agent !== args.subagent_type || JSON.stringify(record.delegation.taskIds) !== JSON.stringify(ids.taskIds)) throw new Error('Managed delegation prompt, role or tasks differ from the canonical snapshot');
+      const differences = [];
+      if (candidates.length !== 1) differences.push(`header(identityCount=${candidates.length}, expected=1)`);
+      else if (!ids.taskIds || ids.delegationId !== delegationId || ids.workId !== workId) differences.push('header(invalid or ambiguous task header)');
+      if (record.delegation.agent !== args.subagent_type) differences.push(`role(expected=${roleLabel(record.delegation.agent)}, received=${roleLabel(args.subagent_type)})`);
+      if (JSON.stringify(record.delegation.taskIds) !== JSON.stringify(ids.taskIds)) differences.push('task(taskIds differ in value, order or availability)');
+      if (record.specialistPrompt !== args.prompt) differences.push(promptDifference(record.specialistPrompt,args.prompt));
+      if (differences.length) throw new Error(`Managed delegation prompt, role or tasks differ from the canonical snapshot: ${differences.join('; ')}`);
       return {workId,delegationId};
     }
     return null;

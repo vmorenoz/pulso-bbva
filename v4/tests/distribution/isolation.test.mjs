@@ -29,6 +29,25 @@ for(const target of ['opencode','vscode'])test(`${target}: builds independently,
   assert.match(init,/esqueleto de prepare.*no es un mapa/);
   assert.doesNotMatch(init,/crea uno de mapeo|Registra tarea de Explorer|Cierra el Work exclusivo/);
   assert.match(explorer,/sin Work, tareas, continuidad ni prepare_delegation/);
+  // Both native distributions must preserve the coordinator/specialist boundary
+  // and the evidence rules; a source-only prompt fix is not a shipped fix.
+  assert.match(primary,/también con CodeGraph.*lo segundo se delega/);
+  assert.match(primary,/agent canónico del recibo/);
+  assert.match(primary,/no elimines inputs necesarios/);
+  assert.match(primary,/update_intent no actualiza los criterios del Work/);
+  assert.match(primary,/Antes de aceptar completed, coteja cada obligación/);
+  assert.match(primary,/close_by_user/);
+  assert.match(primary,/No se exige evidencia adicional ni pruebas, CI o informes/);
+  assert.match(primary,/source:\{text,messageRef\?\}/);
+  const statusSkill=fs.readFileSync(path.join(output,target==='opencode'?'skills/pulso-status/SKILL.md':'resources/skills/pulso-status/SKILL.md'),'utf8');
+  assert.match(statusSkill,/close_by_user/);
+  assert.match(statusSkill,/La mera invocación de pulso-status sigue siendo solo lectura/);
+  for (const id of ['pulso-explorer','pulso-executor','pulso-code-reviewer']) {
+    const specialist=fs.readFileSync(agentPath(id),'utf8');
+    assert.match(specialist,/no sustituyen las condiciones ejecutables/);
+    assert.match(specialist,/No encontrarlo en el índice no demuestra que esté ausente del disco/);
+    assert.match(specialist,/git diff --check comprueba el diff, no el comportamiento/);
+  }
   const field = (body,name) => JSON.parse(body.match(new RegExp(`^${name}: (.+)$`,'m'))[1]);
   if (target === 'opencode') {
     assert.equal(field(primary,'permission').task['pulso-explorer'],'allow');

@@ -1,0 +1,38 @@
+{
+  "$schema":"http://json-schema.org/draft-07/schema#",
+  "title":"Explicit user closure declaration; the host supplies attribution, core cannot authenticate user text",
+  "type":"object","additionalProperties":false,
+  "properties":{
+    "approval":{"type":"object","additionalProperties":false,"properties":{
+      "authority":{"const":"user"},"verification":{"const":"user_approved"},
+      "criterionIds":{"type":"array","minItems":1,"items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"}},
+      "taskIds":{"type":"array","items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"}},
+      "cancelledTaskIds":{"type":"array","items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"}}
+    },"required":["authority","verification","criterionIds","taskIds","cancelledTaskIds"]},
+    "criterionIds":{"type":"array","minItems":1,"items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"}},
+    "acceptanceBasis":{"type":"object","additionalProperties":false,"properties":{
+      "criteria":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["id","sha256"]}},
+      "tasks":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["id","sha256"]}}
+    },"required":["criteria","tasks"]},
+    "operationId":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
+    "source":{"type":"object","additionalProperties":false,"properties":{
+      "text":{"type":"string","pattern":"\\S","maxLength":8000},
+      "messageRef":{"type":"string","pattern":"\\S","maxLength":2000}
+    },"required":["text"]},
+    "readinessBefore":{"type":"object","additionalProperties":false,"properties":{
+      "ready":{"type":"boolean"},"revision":{"type":"integer","minimum":1},
+      "issues":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"code":{"type":"string","minLength":1},"entity":{"type":"string","minLength":1},"message":{"type":"string","minLength":1}},"required":["code","entity","message"]}},
+      "evidenceIds":{"type":"array","items":{"type":"string","minLength":1}}
+    },"required":["ready","revision","issues","evidenceIds"]},
+    "taskStatuses":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{
+      "id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
+      "status":{"enum":["pending","in_progress","blocked","paused","done","cancelled"]},
+      "summary":{"type":"string"}
+    },"required":["id","status","summary"]}},
+    "blockers":{"type":"array","items":{"type":"string","minLength":1}},
+    "decisionsPending":{"type":"array","items":{"type":"string","minLength":1}},
+    "completedTaskIds":{"type":"array","items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"}},
+    "resultIds":{"type":"array","items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"}}
+  },
+  "required":["operationId","source","approval","criterionIds","acceptanceBasis","readinessBefore","taskStatuses","blockers","decisionsPending","completedTaskIds","resultIds"]
+}

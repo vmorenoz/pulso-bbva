@@ -93,6 +93,11 @@ const workActions = {
   update:action('update',mutationInput.properties,mutationInput.required),
   block:action('block',{...workRef,summary:text(2000),reason:text(500)},['workId','expectedRevision','summary','reason']),
   close:action('close',{...workRef,outcome:enumeration(['done','cancelled']),summary:text(4000),limitations:{type:'array',items:text(1000),maxItems:30}},['workId','expectedRevision','summary']),
+  close_by_user:action('close_by_user',{
+    ...workRef,operationId:id,summary:text(4000),
+    source:{...object({text:text(8000),messageRef:text(2000)},['text']),description:'Petición explícita de cierre del usuario: aprueba todos los criterios y tareas no canceladas por autoridad del usuario. El host suministra la declaración; core no autentica autoría ni intención del texto. No inferir autorización desde tests/evidencia ni validar lenguaje con regex.'},
+    limitations:{type:'array',items:text(1000),maxItems:30}
+  },['workId','expectedRevision','operationId','summary','source','limitations']),
   reopen:action('reopen',{...workRef,reason:text(2000)},['workId','expectedRevision','reason'])
 };
 const legacyPrepare=workActions.prepare_delegation,legacyAccept=workActions.accept_result;
@@ -136,6 +141,8 @@ export const toolContracts={
   pulso_history:descriptor('pulso_history','Historial','Consulta cierres con fechas, ciclos, resumen completo, limitaciones y referencias. data.items se pagina con limit/cursor; sigue hasMore y nextCursor. Cambiar historial o filtros invalida el cursor.',null,[],historySchema),
   pulso_context:descriptor('pulso_context','Contexto','Consulta o registra contexto, preferencias y aprendizajes. read devuelve entradas completas, revisions y nextCursor. Las escrituras exigen scope y expectedRevision; preferencias y aprendizajes requieren source explícito. summary es una vista limitada a 8000 caracteres.',contextActions,['set_context','set_preference','remove_preference','add_learning'])
 };
+toolContracts.pulso_work.mutatingActions.push('close_by_user');
+toolContracts.pulso_work.modelDescription+=' close_by_user cierra done con verificación user_approved: todos los criterios y tareas no canceladas revisados y aprobados por usuario, readiness true y sin bloqueos pendientes. Conserva diagnóstico anterior como histórico, evidencia/resultados intactos y cancelaciones legítimas. No acredita ejecución de tests ni cese de agentes. Requiere source declarada por el host (core no autentica el texto), operationId y revisión; no inferir petición desde evidencia. Encargos pendientes requieren reconciliación previa.';
 function freeze(value){if(value&&typeof value==='object'){for(const child of Object.values(value))freeze(child);Object.freeze(value);}return value;}
 for(const descriptor of Object.values(toolContracts)){
   checkSchemaVocabulary(descriptor.inputSchema);

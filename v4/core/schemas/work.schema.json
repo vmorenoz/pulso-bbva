@@ -174,7 +174,7 @@
       "minItems": 0
     },
     "completedTaskIds": {
-      "description":"Tasks completed at least once in the current cycle; optional for legacy Work. Reset only on reopen.",
+      "description":"Tasks completed or explicitly user-approved in the current cycle; not proof of technical execution. Optional for legacy Work. Reset only on reopen.",
       "type":"array","items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"}
     },
     "tasks": {
@@ -543,6 +543,8 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "mode": {"const":"user_requested"},
+            "userRequest": {"type":"object","description":"Validated by user-requested-closure schema and closure-readiness schema in validateWork."},
             "id": {
               "type": "string",
               "minLength": 1

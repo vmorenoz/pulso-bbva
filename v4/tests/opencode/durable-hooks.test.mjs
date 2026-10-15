@@ -44,7 +44,9 @@ async function fixture(t) {
   assert.ok(delegationId,'Preparation must expose a durable ID');
   const record = await readDelegation(project,{workId:'W',delegationId});
   assert.deepEqual(record.nativeContext,{sessionID:'ses_parent',messageID:'msg_prepare',callID:'call_prepare'});
-  const args = {subagent_type:'pulso-explorer',prompt:record.specialistPrompt,description:'Contract fixture'};
+  assert.equal(prepared.agent,record.delegation.agent);
+  assert.equal(prepared.specialistPrompt,record.specialistPrompt);
+  const args = {subagent_type:prepared.agent,prompt:prepared.specialistPrompt,description:'Contract fixture'};
   const call = {tool:'task',sessionID:'ses_parent',callID:'call_task'};
   const before = (a=args,c=call) => plugin['tool.execute.before'](c,{args:a});
   const after = (output,c=call,a=args) => plugin['tool.execute.after']({...c,args:a},output);
@@ -62,6 +64,50 @@ test('v2 dispatch validates full prompt, role, all tasks and native parent; dupl
   const {createDurableHooks} = await f.load('plugin/durable-hooks.mjs');
   const restarted = createDurableHooks({directory:f.project});
   await assert.rejects(restarted['tool.execute.before'](f.call,{args:f.args}));
+});
+
+test('canonical mismatch diagnostics distinguish causes without exposing prompt content before dispatch',async t => {
+  const f = await fixture(t), prompt = f.args.prompt;
+  const header = prompt.split('\n').find(line => line.startsWith('Encargo: '));
+  const cases = [
+    [{prompt:prompt+'SECRET_PAYLOAD'},['prompt('],['role(','task(','header(']],
+    [{subagent_type:'pulso-executor'},['role(expected="pulso-explorer", received="pulso-executor")'],['prompt(','task(','header(']],
+    [{subagent_type:undefined},['received=<missing>'],['prompt(']],
+    [{subagent_type:'SECRET_PAYLOAD\nforged'},['received=<redacted invalid role>'],[]],
+    [{prompt:prompt.replace('T1, T2','T2, T1')},['task(','prompt('],['header(']],
+    [{prompt:prompt.replace('T1, T2','T1')},['task(','prompt('],['header(']],
+    [{prompt:prompt.replace('T1, T2','T1, T1')},['header(','task(','prompt('],[]],
+    [{prompt:prompt+'\n'+header},['header(identityCount=2','task(','prompt('],[]],
+    [{prompt:'SECRET_PAYLOAD\n'+prompt,subagent_type:'pulso-executor'},['role(','prompt(firstDifference: UTF-16 offset=0, line=1, column=1'],[]],
+    [{prompt:prompt.replaceAll('\n','\r\n')},['prompt('],[]],
+  ];
+  const indexPath = path.join(f.project,'.pulso/delegations-v2.json');
+  const originalIndex = fs.readFileSync(indexPath,'utf8');
+  for (const [patch,present,absent] of cases) {
+    await assert.rejects(f.before({...f.args,...patch}),error => {
+      for (const text of present) assert.ok(error.message.includes(text),error.message);
+      for (const text of absent) assert.ok(!error.message.includes(text),error.message);
+      assert.ok(!error.message.includes('SECRET_PAYLOAD'));
+      assert.ok(!error.message.includes(f.project));
+      return true;
+    });
+    assert.equal((await f.read()).attempts.length,0);
+    assert.equal(fs.readFileSync(indexPath,'utf8'),originalIndex);
+  }
+  const lines = prompt.split('\n');
+  await assert.rejects(f.before({...f.args,prompt:prompt+'SECRET_PAYLOAD'}),new RegExp(`offset=${prompt.length}, line=${lines.length}, column=${lines.at(-1).length+1}`));
+  await assert.rejects(f.before({...f.args,prompt:prompt.slice(0,-1)}),new RegExp(`offset=${prompt.length-1},`));
+  const offset = prompt.indexOf('Report findings');
+  assert.ok(offset > 0);
+  const prefixLines = prompt.slice(0,offset).split('\n');
+  await assert.rejects(f.before({...f.args,prompt:prompt.replace('Report findings','SECRET_PAYLOAD')}),error => {
+    assert.ok(error.message.includes(`offset=${offset}, line=${prefixLines.length}, column=${prefixLines.at(-1).length+1}`));
+    assert.ok(!error.message.includes('Report findings') && !error.message.includes('SECRET_PAYLOAD'));
+    return true;
+  });
+  assert.equal((await f.read()).attempts.length,0);
+  await f.before();
+  assert.equal((await f.read()).attempts.length,1);
 });
 
 test('foreground capture preserves literal bytes and gives returnId separately; multi-task telemetry stays passive',async t => {

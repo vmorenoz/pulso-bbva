@@ -48,13 +48,27 @@ test('v2 snapshot survives fresh process, same request reuses original revision 
 
 test('public v2 prepare is compact and accepts by IDs without retrieving the canonical contract',async t=>{
   const f=await fixture(t),prepared=await f.call('pulso_work',f.prep);
-  assert.deepEqual(Object.keys(prepared).sort(),['contractVersion','continuityId','delegationId','intentRevision','preparedFromRevision','readWith','specialistPrompt','state','workId'].sort());
+  assert.deepEqual(Object.keys(prepared).sort(),['agent','contractVersion','continuityId','delegationId','intentRevision','preparedFromRevision','readWith','specialistPrompt','state','workId'].sort());
+  assert.equal(prepared.agent,'pulso-executor');
+  assert.deepEqual(await f.call('pulso_work',{...f.prep,expectedRevision:999}),prepared);
   assert.equal(prepared.preparedFromRevision,f.work().revision);assert.equal(prepared.state,'prepared');
   assert.equal(prepared.readWith.action,'get_delegation');assert.equal(prepared.readWith.delegationId,prepared.delegationId);
   const accepted=await f.call('pulso_work',f.accept(prepared));assert.equal(accepted.applied,true);
   const original=await f.call('pulso_work',prepared.readWith);
   assert.equal(original.specialistPrompt,prepared.specialistPrompt);assert.equal(original.delegation.id,prepared.delegationId);
+  assert.equal(original.delegation.agent,prepared.agent);
   assert.ok(original.acceptanceBasis.tasks.length);assert.equal(original.hostContext.projectRoot,f.projectRoot);
+});
+
+test('legacy prepare retains its original receipt shape and does not create durable records',async t=>{
+  const f=await fixture(t);
+  const {contractVersion,expectedRevision,continuityId,intentRevision,requestKey,...legacy}=f.prep;
+  const prepared=await f.call('pulso_work',{...legacy,delegationId:'legacy-prepare'});
+  assert.deepEqual(Object.keys(prepared).sort(),['delegation','acceptanceBasis','specialistPrompt','hostContext','note'].sort());
+  assert.equal(prepared.delegation.agent,'pulso-executor');
+  assert.equal(prepared.delegation.id,'legacy-prepare');
+  assert.equal(typeof prepared.specialistPrompt,'string');
+  assert.equal(fs.existsSync(path.join(f.projectRoot,'.pulso/delegations-v2.json')),false);
 });
 
 test('reported capture and terminal become visible together even when revision rejects acceptance',async t=>{

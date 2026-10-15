@@ -1,6 +1,29 @@
 /** Finite JSON Schema → native Zod boundary; shared validation stays authoritative. */
+function publicationSchema(schema) {
+  const projected = structuredClone(schema);
+  // Visit schema positions only: property names may themselves be keywords.
+  if (schema.properties) projected.properties = Object.fromEntries(
+    Object.entries(schema.properties).map(([name, child]) => [name, publicationSchema(child)]));
+  if (schema.items) projected.items = publicationSchema(schema.items);
+  if (schema.anyOf) projected.anyOf = schema.anyOf.map(publicationSchema);
+  const values = Object.hasOwn(schema, 'const') ? [schema.const] : schema.enum;
+  if (values && !values.length) throw new Error('Empty enum is unsupported');
+  if (values?.some(value => typeof value !== 'string')) {
+    delete projected.const;
+    delete projected.enum;
+    projected.description = [schema.description, `Allowed values: ${values.map(value => JSON.stringify(value)).join(', ')}.`].filter(Boolean).join('\n');
+    if (!schema.type && !schema.anyOf) {
+      const types = [...new Set(values.map(value => value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value))];
+      if (types.length === 1) projected.type = types[0];
+      else projected.anyOf = types.map(type => ({type}));
+    }
+  }
+  return projected;
+}
+
 export function schemaToZod(schema, z, {checkSchemaVocabulary, validateSchema}) {
   checkSchemaVocabulary(schema);
+  const published = publicationSchema(schema);
   const convert = current => {
     let value;
     if (current.anyOf) {
@@ -27,17 +50,14 @@ export function schemaToZod(schema, z, {checkSchemaVocabulary, validateSchema}) 
     else if (current.type === 'null') value = z.null();
     else if (current.type !== undefined) throw new Error(`Unsupported type: ${current.type}`);
     else value = z.unknown();
-    // Reuse exact shared Unicode length, safe-integer, datetime and nested
-    // constraints rather than a subtly different native validation dialect.
-    value = value.refine(input => validateSchema(current, input).length === 0,
-      {message: 'Input does not match the shared Pulso contract'});
-    // Publish the original finite descriptor as Zod JSON Schema metadata.
-    // This preserves exact advertised bounds (including Unicode lengths)
-    // while the shared validator governs native parsing without dialect drift.
+    // Parents must carry the recursive projection too, never original children.
     value = value.meta(structuredClone(current));
     return value;
   };
-  return convert(schema);
+  // Runtime validation uses the exact original, including constraints relaxed
+  // for publication, Unicode lengths, safe integers and nested alternatives.
+  return convert(published).refine(input => validateSchema(schema, input).length === 0,
+    {message: 'Input does not match the shared Pulso contract'}).meta(published);
 }
 
 export function nativeToolSchemas(toolContracts, z, validator, extensions = {}) {

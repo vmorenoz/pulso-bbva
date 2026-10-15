@@ -5,6 +5,8 @@
   "type":"object",
   "additionalProperties":false,
   "properties":{
+    "authority":{"const":"user"},
+    "verification":{"const":"user_approved"},
     "ready":{"type":"boolean"},
     "revision":{"type":"integer","minimum":1},
     "issues":{"type":"array","items":{

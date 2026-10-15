@@ -7,7 +7,17 @@
   "required": ["schemaVersion", "operation", "workId", "revision", "status", "progress", "changes", "nextAction"],
   "properties": {
     "schemaVersion": {"const": 1},
-    "operation": {"enum": ["work.create", "work.apply", "work.close", "work.reopen", "work.accept_result", "work.accept_delivery"]},
+    "operation": {"enum": ["work.create", "work.apply", "work.close", "work.close_by_user", "work.reopen", "work.accept_result", "work.accept_delivery"]},
+    "mode":{"const":"user_requested"},
+    "authority":{"const":"user"},
+    "verification":{"const":"user_approved"},
+    "approval":{"type":"object","additionalProperties":false,"properties":{
+      "authority":{"const":"user"},"verification":{"const":"user_approved"},
+      "criterionIds":{"type":"array","minItems":1,"items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"}},
+      "taskIds":{"type":"array","items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"}},
+      "cancelledTaskIds":{"type":"array","items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"}}
+    },"required":["authority","verification","criterionIds","taskIds","cancelledTaskIds"]},
+    "source":{"type":"object","additionalProperties":false,"properties":{"text":{"type":"string","pattern":"\\S","maxLength":8000},"messageRef":{"type":"string","pattern":"\\S","maxLength":2000}},"required":["text"]},
     "workId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"},
     "revision": {"type": "integer", "minimum": 1},
     "status": {"enum": ["pending", "in_progress", "blocked", "paused", "done", "cancelled"]},
@@ -38,6 +48,7 @@
     "readiness":{
       "type":"object","additionalProperties":false,
       "properties":{
+        "authority":{"const":"user"},"verification":{"const":"user_approved"},
         "ready":{"type":"boolean"},"revision":{"type":"integer","minimum":1},
         "issues":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"code":{"type":"string"},"entity":{"type":"string"},"message":{"type":"string"}},"required":["code","entity","message"]}},
         "evidenceIds":{"type":"array","items":{"type":"string"}}

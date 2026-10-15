@@ -33,7 +33,7 @@
       "id": "pulso-executor",
       "label": "Ejecutor",
       "template": "implementation.md",
-      "description": "Implementa exclusivamente el cambio delegado, siguiendo patrones existentes, contratos y criterios de aceptación."
+      "description": "Implementa el cambio delegado y realiza diagnóstico o inspección Git de solo lectura cuando se le asignan, respetando alcance, permisos y criterios de aceptación."
     },
     {
       "id": "pulso-qa-auditor",

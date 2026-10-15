@@ -5,6 +5,8 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "mode": {"const":"user_requested"},
+    "userRequest": {"type":"object","description":"Validated by user-requested-closure schema and closure-readiness schema on history reads."},
     "schemaVersion": {
       "const": 1
     },

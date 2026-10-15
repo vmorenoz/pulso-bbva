@@ -77,11 +77,16 @@ Core genera `delegationId`. La respuesta pública v2 es compacta:
 
 ```text
 data: {contractVersion:2, delegationId, workId, continuityId, intentRevision,
-       preparedFromRevision, specialistPrompt, state,
+       preparedFromRevision, agent, specialistPrompt, state,
        readWith:{action:"get_delegation", workId, delegationId, continuityId}}
 ```
 
 No retransmite `delegation`, `acceptanceBasis`, `hostContext` ni referencias nativas.
+`agent` identifica el rol canónico para el dispatch nativo; se transmite el
+`specialistPrompt` literal, sin añadir secciones ni retirar condiciones. El adaptador
+informa discrepancias de prompt, rol, tareas o cabecera antes del dispatch; para el
+prompt muestra posición de la primera diferencia, nunca su contenido. Recuperar el
+snapshot no autoriza cambiarlo: un contrato corregido requiere preparación propia.
 preparedFromRevision es la revisión original confirmada, no una revisión actual
 inferida al repetir. El flujo normal incorpora por IDs sin consultar el snapshot.
 get_delegation recupera los originales explícitamente; el export interno
@@ -105,6 +110,45 @@ Tareas ya realizadas requieren nueva tarea o una revisión deliberada de su
 aceptación, conservada en Work y distinta de la base del último resultado aceptado.
 Una tarea terminada sólo con evidencia, sin resultado previo comparable, requiere
 una tarea nueva. Un error de incorporación nunca habilita repetir sus tareas.
+
+### Cierre explícito y aprobación del usuario
+
+```text
+close_by_user {
+  workId, expectedRevision, operationId, summary,
+  source:{text, messageRef?}, limitations:[]
+}
+```
+
+Solo se usa ante una petición explícita del usuario de cerrar el trabajo. El
+coordinador transmite fielmente esa declaración; core exige la fuente, pero no
+autentica su autoría a partir del texto. Consultar estado o recibir tests verdes
+no autoriza esta vía. Para «todos», se seleccionan los IDs abiertos del workspace
+con paginación y se cierra cada uno con su revisión confirmada.
+
+La operación termina el Work como `done`, marca todas las tareas no canceladas
+como `done` y aprueba todos los criterios/verificaciones por autoridad del usuario.
+Limpia bloqueos, decisiones y siguiente acción. Devuelve `closed:true`,
+`authority:"user"`, `verification:"user_approved"`, `approval` con los IDs cubiertos
+y `readiness:{ready:true, issues:[], authority:"user", verification:"user_approved", ...}`.
+No quedan verificaciones pendientes actuales. No se fabrican comandos, ejecuciones
+de CI ni evidencias técnicas positivas; las evidencias y resultados previos se conservan.
+
+`closure.mode:"user_requested"` y `closure.userRequest` conservan la petición,
+operationId, aprobación completa, base de aceptación y diagnóstico/estados anteriores
+como snapshot histórico, también en history. El recibo de sync conserva la fuente.
+La misma operationId y contenido recupera el cierre sin duplicar historial; distinto
+contenido o reutilización tras reopen se rechaza. Reopen inicia un ciclo que vuelve
+a requerir la aceptación ordinaria. Los archivos históricos ausentes no bloquean
+la recuperación de un cierre aprobado por usuario; las rutas inseguras y metadata
+corrupta siguen rechazadas.
+
+Los encargos pendientes deben reconciliarse antes de cerrar: aprobación del usuario
+no equivale a detener un agente. Se mantienen revisiones, locks y permisos nativos.
+`accept_delivery` conserva su semántica de aceptación ordinaria; `close` sin esta
+petición sigue evaluando el cierre técnico. Cancelar un Work conserva las tareas
+históricamente realizadas aunque su aceptación sea obsoleta, sin volverlas a aprobar
+ni cancelar artificialmente.
 
 ### Retorno e incorporación
 
