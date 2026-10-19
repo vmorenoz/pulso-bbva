@@ -29,6 +29,9 @@ function permissions(primary, agent, catalog) {
       value.edit[`${prefix}**`] = 'deny';
       value.edit[`${prefix}work/**/*.md`] = 'allow';
       value.edit[`${prefix}project.md`] = agent.id === 'pulso-explorer' ? 'allow' : 'deny';
+      if (['pulso-executor','pulso-qa-auditor'].includes(agent.id)) {
+        for (const extension of ['json','zip']) value.edit[`${prefix}work/*/trace-evidence/*.${extension}`] = 'allow';
+      }
       for (const file of ['state.json','history.jsonl','memory.json','project.json','work/**/work.json','preparation.json','recovery/**','delegation-attempts/**']) value.edit[`${prefix}${file}`] = 'deny';
     }
     for (const name of names) value[name] = 'deny';

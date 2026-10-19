@@ -25,6 +25,28 @@ async function fixture(t){
   return {context,projectRoot,work,workId,invoke,call,bind,prep};
 }
 
+test('continuity mutation receipts stay compact while readWith preserves the full current intention',async t=>{
+  const f=await fixture(t);
+  const bound=await f.call('pulso_workspace',{...f.bind('Original',['a']),constraints:['Original limit']},'session-a');
+  const keys=['contractVersion','continuityId','projectId','workId','cycle','intentId','intentRevision','revision','ownerSessionID','readWith'].sort();
+  assert.deepEqual(Object.keys(bound).sort(),keys);
+  assert.deepEqual(bound.readWith,{action:'get_continuity',continuityId:bound.continuityId});
+  const original=await f.call('pulso_workspace',bound.readWith,'session-a');
+  assert.equal(original.objective,'Original');
+  assert.deepEqual(original.constraints,['Original limit']);
+  assert.deepEqual(original.repositories,['a']);
+  const updated=await f.call('pulso_workspace',{action:'update_intent',continuityId:bound.continuityId,expectedRevision:bound.revision,objective:'Changed',constraints:['New limit'],repositories:['b']},'session-a');
+  assert.deepEqual(Object.keys(updated).sort(),keys);
+  assert.equal(updated.revision,bound.revision+1);
+  assert.equal(updated.intentRevision,bound.intentRevision+1);
+  assert.equal(updated.ownerSessionID,'session-a');
+  const current=await f.call('pulso_workspace',updated.readWith,'session-a');
+  assert.equal(current.objective,'Changed');
+  assert.deepEqual(current.constraints,['New limit']);
+  assert.deepEqual(current.repositories,['b']);
+  assert.equal(current.revision,updated.revision);
+});
+
 test('two native sessions keep separate continuities; explicit resumption required',async t=>{
   const f=await fixture(t),a=await f.call('pulso_workspace',f.bind('A',['a']),'session-a'),b=await f.call('pulso_workspace',f.bind('B',['b']),'session-b');
   const ar=await f.call('pulso_work',f.prep(a,'T-0','pa'),'session-a');await f.call('pulso_work',f.prep(b,'T-1','pb'),'session-b');

@@ -43,6 +43,11 @@ desde otra sesión exige `bind_continuity` con `continuityId` explícito y los d
 de intención actuales; cambia el owner, no el snapshot ni la intención. Sin
 identidad nativa, el handle sólo asegura coherencia: no autentica conversaciones.
 
+Las respuestas de herramienta de `bind_continuity` y `update_intent` son recibos
+compactos con identidad, ciclo, propietario y revisiones confirmadas; no repiten
+historial, restricciones ni resultados. `readWith` indica cómo consultar la cápsula
+mediante `get_continuity` cuando sea necesaria. El estado persistido se conserva completo.
+
 `update_intent` usa revisión propia (también devuelta como `intentRevision`);
 omite compatibilidad por defecto. Sólo `compatibleDelegationIds` explícitos
 conservan encargos de esa continuidad que todavía eran vigentes. Una revisión

@@ -53,9 +53,9 @@ async function fixture(t) {
   return {project,plugin,record,read:() => readDelegation(project,{workId:'W',delegationId}),args,call,before,after,invoke,context,bound,load};
 }
 
-test('v2 dispatch validates full prompt, role, all tasks and native parent; duplicates reject',async t => {
+test('v2 dispatch validates role, all tasks and native parent; duplicates reject',async t => {
   const f = await fixture(t);
-  for (const args of [{...f.args,prompt:f.args.prompt+'\nEdited'},{...f.args,prompt:'mode: project_initialization\n'+f.args.prompt},{...f.args,subagent_type:'pulso-executor'},{...f.args,prompt:f.args.prompt.replace('T1, T2','T1')}]) await assert.rejects(f.before(args));
+  for (const args of [{...f.args,subagent_type:'pulso-executor'},{...f.args,prompt:f.args.prompt.replace('T1, T2','T1')}]) await assert.rejects(f.before(args));
   await assert.rejects(f.before(f.args,{...f.call,sessionID:'ses_other'}),/Continuidad de otra sesión/);
   await f.before();
   await assert.rejects(f.before());
@@ -70,16 +70,14 @@ test('canonical mismatch diagnostics distinguish causes without exposing prompt 
   const f = await fixture(t), prompt = f.args.prompt;
   const header = prompt.split('\n').find(line => line.startsWith('Encargo: '));
   const cases = [
-    [{prompt:prompt+'SECRET_PAYLOAD'},['prompt('],['role(','task(','header(']],
     [{subagent_type:'pulso-executor'},['role(expected="pulso-explorer", received="pulso-executor")'],['prompt(','task(','header(']],
     [{subagent_type:undefined},['received=<missing>'],['prompt(']],
     [{subagent_type:'SECRET_PAYLOAD\nforged'},['received=<redacted invalid role>'],[]],
-    [{prompt:prompt.replace('T1, T2','T2, T1')},['task(','prompt('],['header(']],
-    [{prompt:prompt.replace('T1, T2','T1')},['task(','prompt('],['header(']],
-    [{prompt:prompt.replace('T1, T2','T1, T1')},['header(','task(','prompt('],[]],
-    [{prompt:prompt+'\n'+header},['header(identityCount=2','task(','prompt('],[]],
-    [{prompt:'SECRET_PAYLOAD\n'+prompt,subagent_type:'pulso-executor'},['role(','prompt(firstDifference: UTF-16 offset=0, line=1, column=1'],[]],
-    [{prompt:prompt.replaceAll('\n','\r\n')},['prompt('],[]],
+    [{prompt:prompt.replace('T1, T2','T2, T1')},['task('],['header(','prompt(']],
+    [{prompt:prompt.replace('T1, T2','T1')},['task('],['header(','prompt(']],
+    [{prompt:prompt.replace('T1, T2','T1, T1')},['header(','task('],['prompt(']],
+    [{prompt:prompt+'\n'+header},['header(identityCount=2','task('],['prompt(']],
+    [{prompt:'SECRET_PAYLOAD\n'+prompt,subagent_type:'pulso-executor'},['role('],['prompt(']],
   ];
   const indexPath = path.join(f.project,'.pulso/delegations-v2.json');
   const originalIndex = fs.readFileSync(indexPath,'utf8');
@@ -94,20 +92,31 @@ test('canonical mismatch diagnostics distinguish causes without exposing prompt 
     assert.equal((await f.read()).attempts.length,0);
     assert.equal(fs.readFileSync(indexPath,'utf8'),originalIndex);
   }
-  const lines = prompt.split('\n');
-  await assert.rejects(f.before({...f.args,prompt:prompt+'SECRET_PAYLOAD'}),new RegExp(`offset=${prompt.length}, line=${lines.length}, column=${lines.at(-1).length+1}`));
-  await assert.rejects(f.before({...f.args,prompt:prompt.slice(0,-1)}),new RegExp(`offset=${prompt.length-1},`));
-  const offset = prompt.indexOf('Report findings');
-  assert.ok(offset > 0);
-  const prefixLines = prompt.slice(0,offset).split('\n');
-  await assert.rejects(f.before({...f.args,prompt:prompt.replace('Report findings','SECRET_PAYLOAD')}),error => {
-    assert.ok(error.message.includes(`offset=${offset}, line=${prefixLines.length}, column=${prefixLines.at(-1).length+1}`));
-    assert.ok(!error.message.includes('Report findings') && !error.message.includes('SECRET_PAYLOAD'));
-    return true;
-  });
   assert.equal((await f.read()).attempts.length,0);
   await f.before();
   assert.equal((await f.read()).attempts.length,1);
+});
+
+test('dispatch restores canonical bytes while after-hook and replay reject edited prompts',async t => {
+  const edits = [p => p+'SECRET_PAYLOAD',p => 'mode: project_initialization\n'+p,p => p.slice(0,-1),p => p.replace('Report findings','SECRET_PAYLOAD'),p => p.replaceAll('\n','\r\n')];
+  for (const edit of edits) {
+    const f = await fixture(t), canonical = f.args.prompt;
+    const edited = {...f.args,prompt:edit(canonical)}, original = {...edited};
+    assert.notEqual(edited.prompt,canonical);
+    await f.before(edited);
+    assert.equal(edited.prompt,canonical);
+    assert.equal((await f.read()).attempts.length,1);
+    const output = nativeOutput();
+    await f.after(output,f.call,original);
+    assert.equal(output.metadata.pulsoDurable.capture,'pending');
+    assert.match(output.metadata.pulsoDurable.error,/prompt\(firstDifference:/);
+    assert.ok(!output.metadata.pulsoDurable.error.includes('SECRET_PAYLOAD'));
+    assert.equal((await f.plugin.event(nativeEvent(f,nativeOutput(),'completed',original))).capture,'pending');
+    assert.equal((await f.read()).returns.length,0);
+    await f.after(output,f.call,edited);
+    assert.equal(output.metadata.pulsoDurable.capture,'stored');
+    assert.equal((await f.read()).returns.length,1);
+  }
 });
 
 test('foreground capture preserves literal bytes and gives returnId separately; multi-task telemetry stays passive',async t => {
@@ -327,8 +336,9 @@ test('explicit resumption transfers dispatch ownership without changing the prep
   const resumedCall = {...f.call,sessionID:'ses_resumed'};
   await assert.rejects(f.before(f.args,resumedCall),/Continuidad de otra sesión/);
   assert.equal((await f.read()).attempts.length,0);
+  const capsule = await f.invoke('pulso_workspace',f.bound.readWith);
   Object.assign(f.context,{sessionID:resumedCall.sessionID,messageID:'msg_resume',callID:'call_resume'});
-  const resumed = await f.invoke('pulso_workspace',{action:'bind_continuity',workId:'W',continuityId:f.bound.continuityId,requestKey:'explicit_resume',objective:f.bound.objective,repositories:f.bound.repositories,constraints:f.bound.constraints});
+  const resumed = await f.invoke('pulso_workspace',{action:'bind_continuity',workId:'W',continuityId:f.bound.continuityId,requestKey:'explicit_resume',objective:capsule.objective,repositories:capsule.repositories,constraints:capsule.constraints});
   assert.equal(resumed.ownerSessionID,resumedCall.sessionID);
   assert.equal(resumed.intentRevision,f.bound.intentRevision);
   assert.equal((await f.read()).attempts.length,0);

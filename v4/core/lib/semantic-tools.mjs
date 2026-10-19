@@ -19,6 +19,11 @@ const ok=(title,output,data)=>({title:`Pulso · ${title}`,output,ok:true,...(dat
 const fail=(title,error)=>({title:`Pulso · ${title}`,output:`${error?.persistence?.applied?'Aplicado parcialmente; no repitas a ciegas':'No se completó'}: ${String(error?.message||'operación inválida').slice(0,500)}`,ok:false,error:{code:error?.code||'OPERATION_FAILED',message:String(error?.message||'operación inválida').slice(0,500),...(error?.issues?{issues:error.issues}:{}),...(error?.issueCount?{issueCount:error.issueCount}:{}),...(error?.revision?{revision:error.revision}:{})},...(error?.readiness?{data:{readiness:error.readiness}}:{}),...(error?.persistence?{persistence:error.persistence}:{})});
 const receipt=(title,data)=>ok(title,formatReceipt(data),data);
 
+function continuityReceipt(value){
+  const {contractVersion,continuityId,projectId,workId,cycle,intentId,intentRevision,revision,ownerSessionID}=value;
+  return {contractVersion,continuityId,projectId,workId,cycle,intentId,intentRevision,revision,ownerSessionID,readWith:{action:'get_continuity',continuityId}};
+}
+
 function memorySummary(project,user){
   const primary=project||user;
   const counts=project&&user?`${project.preferences.length} del proyecto, ${user.preferences.length} del usuario`:`${primary.preferences.length} del ${project?'proyecto':'usuario'}`;
@@ -64,9 +69,9 @@ function workRead(root,args){
 const handlers={
   pulso_workspace(args,{projectRoot:root,homeDir,...options}){
     switch(args.action){
-      case 'bind_continuity':return ok('continuidad','Continuidad vinculada.',bindContinuity(root,args,options));
+      case 'bind_continuity':return ok('continuidad','Continuidad vinculada.',continuityReceipt(bindContinuity(root,args,options)));
       case 'get_continuity':return ok('continuidad','Intención y operaciones conservadas.',getContinuity(root,args,options));
-      case 'update_intent':return ok('intención','Intención actualizada; no detiene agentes nativos.',updateIntent(root,args,options));
+      case 'update_intent':return ok('intención','Intención actualizada; no detiene agentes nativos.',continuityReceipt(updateIntent(root,args,options)));
       case 'prepare':{
         const data=prepareWorkspace(root,{homeDir});
         return ok('workspace',data.existingWorkspace?'Ya estaba preparado.':data.legacyMigrated?`Preparado y migrados ${data.migratedWorks} trabajos legacy.`:'Preparado para el encargo actual.',data);

@@ -41,7 +41,7 @@ export function createDurableHooks({directory}) {
     const metadata = path.join(root,'.pulso');
     if (fs.existsSync(metadata) && fs.realpathSync(metadata) !== metadata) throw new Error('External metadata tree is not allowed');
   };
-  async function matched(args) {
+  async function matched(args, {useCanonicalPrompt = false} = {}) {
     if (typeof args?.prompt !== 'string') return null;
     // Find the identity even when the task list or the rest of the prompt was edited.
     const candidates = [...args.prompt.matchAll(/^Encargo: ([A-Za-z0-9][A-Za-z0-9_-]{0,79}) · workId: ([A-Za-z0-9][A-Za-z0-9_-]{0,79})(?= ·|$)/gm)];
@@ -73,8 +73,11 @@ export function createDurableHooks({directory}) {
       else if (!ids.taskIds || ids.delegationId !== delegationId || ids.workId !== workId) differences.push('header(invalid or ambiguous task header)');
       if (record.delegation.agent !== args.subagent_type) differences.push(`role(expected=${roleLabel(record.delegation.agent)}, received=${roleLabel(args.subagent_type)})`);
       if (JSON.stringify(record.delegation.taskIds) !== JSON.stringify(ids.taskIds)) differences.push('task(taskIds differ in value, order or availability)');
-      if (record.specialistPrompt !== args.prompt) differences.push(promptDifference(record.specialistPrompt,args.prompt));
+      if (!useCanonicalPrompt && record.specialistPrompt !== args.prompt) differences.push(promptDifference(record.specialistPrompt,args.prompt));
       if (differences.length) throw new Error(`Managed delegation prompt, role or tasks differ from the canonical snapshot: ${differences.join('; ')}`);
+      // Only dispatch substitutes the prepared bytes, after identity, role and tasks match.
+      // Return capture remains strict: it must describe the prompt actually dispatched.
+      if (useCanonicalPrompt) args.prompt = record.specialistPrompt;
       return {workId,delegationId};
     }
     return null;
@@ -108,7 +111,7 @@ export function createDurableHooks({directory}) {
   return {
     async 'tool.execute.before'(input, output) {
       if (input.tool !== 'task') return;
-      const ids = await matched(output.args);
+      const ids = await matched(output.args,{useCanonicalPrompt:true});
       if (!ids) return;
       const host = nativeContext(input);
       if (!host.sessionID || !host.callID) throw new Error('Managed dispatch requires native sessionID and callID');

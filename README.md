@@ -12,6 +12,7 @@ V4 mantiene un núcleo común y entrega instalaciones nativas independientes:
 - [VS Code + GitHub Copilot: instalación y uso](v4/adapters/vscode/README.md)
 - [Código, construcción y verificación técnica](v4/README.md)
 - [Instalador global con selección de harness](v4/installer/README.md)
+- [Instalar en otro equipo desde main o un commit](v4/INSTALLATION.md)
 - [Changelog desde V1](CHANGELOG.md)
 
 Para instalar **OpenCode**, ejecuta el mismo comando desde la raíz del repositorio o desde `v4/`:

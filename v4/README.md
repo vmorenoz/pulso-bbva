@@ -17,6 +17,8 @@ Native conversational acceptance remains **NOT_RUN** for OpenCode, VS Code Local
 
 ## Install a prepared package
 
+For a fresh machine and a reproducible build from `main` or a specific commit, follow [Instalar Pulso en otro equipo](INSTALLATION.md).
+
 From either the repository root or this `v4/` directory:
 
 ```sh
