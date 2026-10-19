@@ -83,11 +83,11 @@ test('bootstrap marker never authorizes overwriting changed seed data or mixed l
     assert.equal(fs.readFileSync(path.join(root,'.pulso',file),'utf8'),bytes);assert.equal(fs.existsSync(path.join(root,'.pulso/history.jsonl')),false);
   }
 });
-test('unmarked partial workspaces are not claimed as bootstrap and missing context is reported',t=>{
+test('unmarked empty partial workspace is repaired without rewriting its state',t=>{
   const root=repo(t),homeDir=temp(t),before=fs.readFileSync(path.join(root,'.pulso/state.json'),'utf8');
-  assert.throws(()=>prepareWorkspace(root,{homeDir}),/sin marcador propio/);
-  assert.equal(fs.readFileSync(path.join(root,'.pulso/state.json'),'utf8'),before);assert.equal(fs.existsSync(path.join(root,'.pulso/preparation.json')),false);assert.deepEqual(fs.readdirSync(homeDir),[]);
-  fs.unlinkSync(path.join(root,'.pulso/history.jsonl'));assert.throws(()=>prepareWorkspace(root,{homeDir}));assert.equal(fs.existsSync(path.join(root,'.pulso/history.jsonl')),false);
+  assert.equal(prepareWorkspace(root,{homeDir}).repaired,true);
+  assert.equal(fs.readFileSync(path.join(root,'.pulso/state.json'),'utf8'),before);assert.equal(fs.existsSync(path.join(root,'.pulso/preparation.json')),false);
+  fs.unlinkSync(path.join(root,'.pulso/history.jsonl'));assert.equal(prepareWorkspace(root,{homeDir}).repaired,true);
 });
 test('recognized legacy state migrates with tasks and keeps original state in backup',t=>{
   const root=legacyRepo(t),homeDir=temp(t),original=JSON.stringify({schema_version:1,custom:'retain legacy state'});

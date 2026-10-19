@@ -61,6 +61,30 @@ test('two native sessions keep separate continuities; explicit resumption requir
   const inventory=await f.call('pulso_workspace',{action:'status'});assert.equal(inventory.focusWorkId,null);assert.equal(inventory.continuity,undefined);
 });
 
+test('incomplete preparation preserves paginated works and validates explicit continuity',async t=>{
+  const f=await fixture(t),bound=await f.call('pulso_workspace',f.bind('Status',['a']),'session-a');
+  await f.call('pulso_work',{action:'create',title:'Second work',objective:'Pagination',criterion:'Visible',verification:'Read status'});
+  const args={action:'status',continuityId:bound.continuityId,limit:1};
+  const complete=await f.call('pulso_workspace',args,'session-a');
+  const denied=await f.invoke('pulso_workspace',args,'session-b');
+  assert.equal(denied.ok,false);
+  fs.unlinkSync(path.join(f.projectRoot,'.pulso/decisions.md'));
+  const partial=await f.call('pulso_workspace',args,'session-a');
+  assert.equal(partial.prepared,false);assert.equal(partial.incomplete,true);
+  assert.deepEqual(partial.missing,['.pulso/decisions.md']);
+  assert.deepEqual(partial.works,complete.works);assert.equal(partial.works.total,2);assert.equal(partial.works.hasMore,true);
+  assert.deepEqual(partial.continuity,complete.continuity);assert.equal(partial.focusWorkId,f.workId);
+  assert.equal(partial.navigationFocusWorkId,complete.navigationFocusWorkId);
+  const next=await f.call('pulso_workspace',{...args,cursor:partial.works.nextCursor},'session-a');
+  assert.equal(next.works.items.length,1);assert.notEqual(next.works.items[0].id,partial.works.items[0].id);
+  assert.equal(next.prepared,false);
+  const rejected=await f.invoke('pulso_workspace',args,'session-b');
+  assert.equal(rejected.ok,false);assert.deepEqual(rejected.error,denied.error);
+  assert.equal((await f.invoke('pulso_workspace',{...args,continuityId:'missing-continuity'},'session-a')).ok,false);
+  const inventory=await f.call('pulso_workspace',{action:'status'});
+  assert.equal(inventory.works.total,2);assert.equal(inventory.focusWorkId,null);
+});
+
 test('explicit compatibility preserves original base; default new intention rejects old result after capture',async t=>{
   const f=await fixture(t),a=await f.call('pulso_workspace',f.bind('A',['a','b']));
   const p1=await f.call('pulso_work',f.prep(a,'T-0','p1')),r1=await f.call('pulso_work',p1.readWith),r2=await f.call('pulso_work',f.prep(a,'T-1','p2'));

@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {createWork,emptyState,initArtifacts,saveWork,status,history,validateProject} from './artifacts.mjs';
 import {atomicWrite,exists,safePath,readJSON,writeJSON,idOK,listFiles,withWorkspaceLock,sha256} from './fs.mjs';
 import {planProjectIdentity,publishProjectIdentity,isUUID} from './identity.mjs';
+import {readMemory} from './memory.mjs';
 
 const preparationFile='.pulso/preparation.json';
 const migrationFile='.pulso-migration.json';
@@ -61,6 +62,57 @@ function seedFiles(at){return new Map([
 function seed(root){
   initArtifacts(root);
   for(const [file,bytes] of seedFiles(new Date().toISOString()))if(!exists(root,file))atomicWrite(root,file,bytes);
+}
+export function workspacePreparation(root){
+  const required=[...seedFiles('').keys(),'.pulso/project.json','.pulso/work'];
+  const missing=required.filter(file=>!exists(root,file));
+  const invalid=required.filter(file=>exists(root,file)&&!(file.endsWith('/work')?fs.statSync(safePath(root,file)).isDirectory():fs.statSync(safePath(root,file)).isFile()));
+  const pending=exists(root,preparationFile)||exists(root,migrationFile);
+  return {prepared:!missing.length&&!invalid.length&&!pending,incomplete:Boolean(missing.length||invalid.length||pending),missing,invalid,pending};
+}
+function incomplete(reason){return Object.assign(new Error(`WORKSPACE_INCOMPLETE: ${reason}; datos conservados. No se reconstruye historial de trabajo ni se importa un respaldo.`),{code:'WORKSPACE_INCOMPLETE'});}
+function assertEmptyRepair(root){
+  try{
+    const state=status(root);
+    if(state.works.length||state.focusWorkId!==null)throw new Error('estado con trabajo o foco');
+    const inspection=workspacePreparation(root);
+    if(inspection.invalid.length)throw new Error(`tipo inválido: ${inspection.invalid.join(', ')}`);
+    if(exists(root,'.pulso/history.jsonl')&&history(root).length)throw new Error('historial no vacío');
+    if(exists(root,'.pulso/memory.json'))readMemory(root,'project');
+    const allowed=new Set([...seedFiles('').keys()].map(file=>path.basename(file)).concat(['project.json','preparation.json','archive']));
+    // Only archive is opaque. Unknown/active metadata cannot prove an empty
+    // workspace; even orphaned work or reservations must block reconstruction.
+    for(const name of fs.readdirSync(safePath(root,'.pulso'))){
+      if(allowed.has(name))continue;
+      const target=safePath(root,`.pulso/${name}`);
+      if(!fs.statSync(target).isDirectory()||fs.readdirSync(target).length)throw new Error(`metadatos incompatibles: ${name}`);
+    }
+  }catch(error){throw incomplete(error.message);}
+}
+function finishEmptyRepair(root,identity){
+  const marker=readJSON(root,preparationFile),files=seedFiles(marker.startedAt);
+  if(marker.schemaVersion!==1||marker.kind!=='empty-repair'||!isUUID(marker.projectId)||!Number.isFinite(Date.parse(marker.startedAt))||
+    !Array.isArray(marker.files)||new Set(marker.files).size!==marker.files.length||marker.files.some(file=>!files.has(file)||file==='.pulso/state.json')||
+    !marker.preserved||typeof marker.preserved!=='object'||Array.isArray(marker.preserved))throw incomplete('marcador de reparación inválido');
+  assertEmptyRepair(root);
+  for(const file of files.keys()){
+    if(marker.files.includes(file)){
+      if(exists(root,file)&&fs.readFileSync(safePath(root,file),'utf8')!==files.get(file))throw incomplete(`semilla modificada: ${file}`);
+    }else if(!exists(root,file)||sha256(fs.readFileSync(safePath(root,file)))!==marker.preserved[file])throw incomplete(`archivo previo modificado: ${file}`);
+  }
+  if(exists(root,'.pulso/project.json')&&readJSON(root,'.pulso/project.json').projectId!==marker.projectId)throw incomplete('identidad modificada');
+  if(marker.preserved['.pulso/project.json']&&(!exists(root,'.pulso/project.json')||sha256(fs.readFileSync(safePath(root,'.pulso/project.json')))!==marker.preserved['.pulso/project.json']))throw incomplete('identidad previa modificada');
+  for(const file of marker.files)if(!exists(root,file))atomicWrite(root,file,files.get(file));
+  fs.mkdirSync(safePath(root,'.pulso/work'),{recursive:true});
+  identity.commit();
+  fs.unlinkSync(safePath(root,preparationFile));flushDirectory(safePath(root,'.pulso'));
+}
+function startEmptyRepair(root,identity){
+  assertEmptyRepair(root);
+  const startedAt=new Date().toISOString(),files=[...seedFiles(startedAt).keys()],preserved=[...files,'.pulso/project.json'].filter(file=>exists(root,file));
+  writeJSON(root,preparationFile,{schemaVersion:1,kind:'empty-repair',startedAt,projectId:identity.projectId,
+    files:files.filter(file=>!exists(root,file)),preserved:Object.fromEntries(preserved.map(file=>[file,sha256(fs.readFileSync(safePath(root,file)))]))});
+  finishEmptyRepair(root,identity);
 }
 function finishBootstrap(root,identity){
   const marker=readJSON(root,preparationFile),files=seedFiles(marker?.startedAt);
@@ -142,6 +194,11 @@ function prepareWorkspaceLocked(root,options={}){
   if(fs.existsSync(folder)&&!fs.statSync(folder).isDirectory())throw new Error(`No es directorio: ${folder}`);
   const identity=planProjectIdentity(root,options);
   if(exists(root,preparationFile)){
+    const marker=readJSON(root,preparationFile);
+    if(marker.kind==='empty-repair'){
+      finishEmptyRepair(root,{commit:()=>publishProjectIdentity(root,marker.projectId,options)});
+      return {prepared:true,target:root,existingWorkspace:true,projectId:marker.projectId,repairRecovered:true};
+    }
     finishBootstrap(root,identity);
     return {prepared:true,target:root,existingWorkspace:false,projectId:identity.projectId,bootstrapRecovered:true};
   }
@@ -151,16 +208,16 @@ function prepareWorkspaceLocked(root,options={}){
     legacyState=saved?.schemaVersion===undefined&&saved?.schema_version===1;
     if(!legacyState){
       // Invalid current state is never evidence of a legacy workspace.
+      if(workspacePreparation(root).incomplete){
+        startEmptyRepair(root,identity);
+        return {prepared:true,target:root,existingWorkspace:true,projectId:identity.projectId,repaired:true};
+      }
       status(root);history(root);
-      if(!fs.existsSync(safePath(root,'.pulso/work'))||!fs.statSync(safePath(root,'.pulso/work')).isDirectory())
-        throw new Error(`Workspace Pulso incompleto en ${root}; datos conservados. Restaura los archivos ausentes desde un respaldo.`);
-      for(const file of ['.pulso/project.md','.pulso/decisions.md','.pulso/memory.json'])if(!exists(root,file)||!fs.statSync(safePath(root,file)).isFile())
-        throw new Error(`Workspace Pulso incompleto: ${file}; sin marcador propio no se reconstruye. Restaura el archivo desde un respaldo.`);
       identity.commit();
       return {prepared:true,target:root,existingWorkspace:true,projectId:identity.projectId};
     }
   }
-  if(exists(root,'.pulso/work')||exists(root,'.pulso/history.jsonl'))throw new Error('Workspace actual incompleto; sin marcador propio no se reconstruye. Restaura los archivos ausentes desde un respaldo.');
+  if(exists(root,'.pulso/work')||exists(root,'.pulso/history.jsonl'))throw incomplete('sin estado actual verificable');
   const records=legacyRecords(root);
   if(records){
     const result=migrateLegacy(root,records,{legacyState,identity,options});

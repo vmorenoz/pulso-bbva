@@ -9,7 +9,7 @@ import {prepareDelegation,acceptResult,acceptDelivery} from './acceptance.mjs';
 import {bindContinuity,checkContext,getContinuity,updateIntent} from './continuity.mjs';
 import {getDelegation,reconcileDelegation} from './delegation-registry.mjs';
 import * as memory from './memory.mjs';
-import {prepareWorkspace,recoverWorkspaceMigration} from './workspace.mjs';
+import {prepareWorkspace,recoverWorkspaceMigration,workspacePreparation} from './workspace.mjs';
 import {exists,readJSON,withWorkspaceLock} from './fs.mjs';
 import {formatReceipt} from './receipts.mjs';
 import {pagination,pageItems} from './pagination.mjs';
@@ -85,10 +85,11 @@ const handlers={
         return ok('recuperación','Recuperación completada. Consulta status para revisar el índice; no se reanudaron sesiones nativas.',data);
       }
       case 'status':{
+        const preparation=workspacePreparation(root);
         const continuity=args.continuityId?getContinuity(root,args,options):null;
         if(!exists(root,'.pulso/state.json')){
           const works=pageItems([],{kind:'status',binding:{projectRoot:root,status:args.status||null},snapshot:null,limit:args.limit||20,cursor:args.cursor});
-          return ok('estado','Sin estado Pulso disponible en este workspace.',{prepared:false,works});
+          return ok('estado','Sin estado Pulso disponible en este workspace.',{...(exists(root,'.pulso')?preparation:{}),prepared:false,works});
         }
         let value;
         try{value=mutations.readStatus(root);}catch(error){
@@ -100,7 +101,7 @@ const handlers={
           throw error;
         }
         const works=pageItems(value.works.filter(work=>!args.status||work.status===args.status),{kind:'status',binding:{projectRoot:root,status:args.status||null},snapshot:value,limit:args.limit||20,cursor:args.cursor});
-        return ok('estado',continuity?`${continuity.continuityId} · intención ${continuity.intentRevision} · ${continuity.objective}`:`${value.works.length} trabajos abiertos · sin continuidad seleccionada`,{...value,prepared:true,works,navigationFocusWorkId:value.focusWorkId,focusWorkId:continuity?.workId??null,...(continuity?{continuity}:{})});
+        return ok('estado',continuity?`${continuity.continuityId} · intención ${continuity.intentRevision} · ${continuity.objective}`:`${value.works.length} trabajos abiertos · sin continuidad seleccionada`,{...value,...preparation,works,navigationFocusWorkId:value.focusWorkId,focusWorkId:continuity?.workId??null,...(continuity?{continuity}:{})});
       }
       case 'validate':{
         const data=mutations.validateWorkspace(root,{fresh:args.fresh||false});
