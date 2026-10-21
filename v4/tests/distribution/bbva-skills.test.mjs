@@ -15,37 +15,40 @@ function temporary(t) {
   return root;
 }
 
-test('reviewed BBVA corpus retains conditional APX/CELLS recipes without fixed environment assumptions', () => {
+test('consolidated BBVA guidance requires documentation and change-appropriate engineering', () => {
   verifyBBVA(coreRoot);
-  const apx = skill('bbva-apx-testing'), cells = skill('bbva-cells-testing');
-  for (const anchor of ['SpringJUnit4ClassRunner', 'elara-test.xml', 'DummyBundleContext', 'initialize and start', 'JobLauncherTestUtils', 'JobParameters', 'named step', 'feature-flag/decider']) assert.ok(apx.includes(anchor), anchor);
-  for (const anchor of ['fixtureCleanup', 'subscribe', 'unsubscribe', 'publish', 'navigate', 'global/context/flow/session', 'beforeEach', 'window.location', 'locale requests', 'timers', 'storage']) assert.ok(cells.includes(anchor), anchor);
-  assert.match(apx, /patterns to confirm in the repository/);
-  assert.match(cells, /diagnostic checklist, not a list of patches to add by default/);
-  assert.match(skill('bbva-apx'), /do not assume a CLI version/);
-  assert.match(skill('bbva-cells'), /do not assume a fixed CLI version/);
-  for (const name of ['bbva-apx', 'bbva-apx-testing', 'bbva-cells', 'bbva-cells-testing']) assert.doesNotMatch(skill(name), /1\.22\.0|4\.9\.3|0\.80|pulso_delivery|PULSO_TASK_ID/);
+  const text = skill('bbva-engineering');
+  assert.deepEqual(Object.keys(integrity), ['bbva-engineering/SKILL.md']);
+  for (const anchor of ['knowledge_technologies', 'knowledge_read', 'CELLS', 'APX', 'ASO', 'Do not weaken assertions', 'end-to-end', 'bubbling/composition', 'subscriptions', 'accessibility', 'restart after partial failure', 'idempotency', 'partial output', 'synthetic data']) assert.ok(text.includes(anchor), anchor);
+  assert.doesNotMatch(text, /bbva-(apx|cells)|SpringJUnit4ClassRunner|JobLauncherTestUtils|1\.22\.0|4\.9\.3|pulso_delivery|PULSO_TASK_ID/);
 });
 
 test('BBVA integrity still rejects edited bytes and missing or unexpected files', t => {
   const root = temporary(t);
   fs.cpSync(path.join(coreRoot, 'skills'), path.join(root, 'skills'), {recursive: true});
   verifyBBVA(root);
-  const file = path.join(root, 'skills/bbva-apx/SKILL.md'), original = fs.readFileSync(file);
+  const file = path.join(root, 'skills/bbva-engineering/SKILL.md'), original = fs.readFileSync(file);
   fs.appendFileSync(file, '\nUnreviewed change.\n');
   assert.throws(() => verifyBBVA(root), /BBVA bytes changed/);
   fs.writeFileSync(file, original);
   fs.unlinkSync(file);
   assert.throws(() => verifyBBVA(root), /BBVA file inventory changed/);
   fs.writeFileSync(file, original);
-  fs.writeFileSync(path.join(root, 'skills/bbva-apx/unexpected.md'), 'extra');
+  fs.writeFileSync(path.join(root, 'skills/bbva-engineering/unexpected.md'), 'extra');
   assert.throws(() => verifyBBVA(root), /BBVA file inventory changed/);
 });
 
-for (const target of ['opencode', 'vscode']) test(`${target}: all five packaged BBVA skills equal the enriched canonical bytes`, async t => {
+for (const target of ['opencode', 'vscode']) test(`${target}: only consolidated BBVA skill is packaged with canonical bytes`, async t => {
   const output = temporary(t);
   await build(target, {outputRoot: output});
   verifyPackage(target, output);
+  const skillsRoot = path.join(output, target === 'vscode' ? 'resources/skills' : 'skills');
+  assert.deepEqual(fs.readdirSync(skillsRoot).filter(name => name.startsWith('bbva-')), ['bbva-engineering']);
+  if (target === 'opencode') for (const file of fs.readdirSync(path.join(output, 'agents'))) {
+    const agent = fs.readFileSync(path.join(output, 'agents', file), 'utf8');
+    assert.doesNotMatch(agent, /bbva-(apx|cells)/);
+    if (file !== 'pulso.md') assert.match(agent, /"bbva-engineering":"allow"/);
+  }
   for (const file of Object.keys(integrity)) {
     const source = fs.readFileSync(path.join(coreRoot, 'skills', file));
     const destination = path.join(output, target === 'vscode' ? 'resources/skills' : 'skills', file);

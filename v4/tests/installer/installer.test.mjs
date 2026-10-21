@@ -10,11 +10,61 @@ import {readVSIX} from '../../installer/vscode.mjs';
 import {sha256,listFiles} from '../../installer/lib/fs.mjs';
 import {parseConfig} from '../../installer/lib/install-jsonc.mjs';
 import {parseArgs,resolvePackageDefaults} from '../../installer/cli.mjs';
+import {build} from '../../scripts/build.mjs';
 function write(root,p,value){const f=path.join(root,p);fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,value);return f;}
 function fixture(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'pulso-v4-install-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));const home=path.join(dir,'home');fs.mkdirSync(home);const pkg=path.join(dir,'package');write(pkg,'package.json',JSON.stringify({name:'pulso',version:'4.0.0'}));write(pkg,'plugin/index.mjs','export default {};');write(pkg,'resources/schemas/work.json','{}');write(pkg,'agents/pulso.md','[Schema](../resources/schemas/work.json)');write(pkg,'skills/bbva-example/SKILL.md','Exact BBVA bytes\n');return {dir,home,pkg};}
 function zip(file,version='4.0.0'){const name=Buffer.from('extension/package.json'),data=Buffer.from(JSON.stringify({publisher:'pulso-local',name:'pulso',version})),local=Buffer.alloc(30),central=Buffer.alloc(46),end=Buffer.alloc(22);local.writeUInt32LE(0x04034b50);local.writeUInt32LE(data.length,18);local.writeUInt32LE(data.length,22);local.writeUInt16LE(name.length,26);central.writeUInt32LE(0x02014b50);central.writeUInt32LE(data.length,20);central.writeUInt32LE(data.length,24);central.writeUInt16LE(name.length,28);end.writeUInt32LE(0x06054b50);end.writeUInt16LE(1,8);end.writeUInt16LE(1,10);end.writeUInt32LE(central.length+name.length,12);end.writeUInt32LE(local.length+name.length+data.length,16);fs.writeFileSync(file,Buffer.concat([local,name,data,central,name,end]));return file;}
 function cli(initial=null,{failInstall=false,misleading=false,failRecovery=false}={}){let version=initial;const calls=[];return {calls,get version(){return version;},runner(exe,args){calls.push([exe,...args]);if(args.includes('--version'))return '1.139.1\n';if(args.includes('--list-extensions'))return version?`pulso-local.pulso@${version}\nunrelated.extension@1.0.0\n`:'';if(args.includes('--uninstall-extension')){version=null;return '';}if(args.includes('--install-extension')){const v=readVSIX(args[args.indexOf('--install-extension')+1]).version;if(v==='4.0.0'&&failInstall){version='broken';throw new Error('simulated timeout');}if(v!=='4.0.0'&&failRecovery)throw new Error('recovery timeout');if(!misleading)version=v;return 'Successfully installed';}throw new Error('Unexpected command');}};}
 const options=f=>({home:f.home,packageRoot:f.pkg,env:{}});
+test('BBVA consolidation: fresh install and managed migration preserve ownership policy and rollback', async t => {
+  const f=fixture(t), next=path.join(f.dir,'next');
+  await build('opencode',{outputRoot:next});
+  const names=['bbva-apx','bbva-apx-testing','bbva-cells','bbva-cells-testing'];
+  const native=name=>`.config/opencode/skills/${name}/SKILL.md`;
+  const runtime=name=>`.pulso/runtimes/opencode-v1/skills/${name}/SKILL.md`;
+  for(const name of names) write(f.pkg,`skills/${name}/SKILL.md`,`old ${name}`);
+  // A matching pre-existing resource is borrowed, never acquired by the installer.
+  write(f.home,native(names[1]),`old ${names[1]}`);
+  executePlans([planOpenCode(options(f))]);
+  write(f.home,native(names[2]),'user modified managed');
+  write(f.home,'.agents/skills/bbva-cells/SKILL.md','shared user skill');
+  write(f.home,'.config/opencode/skills/bbva-custom/SKILL.md','foreign');
+  const opts={...options(f),packageRoot:next};
+  assert.throws(()=>planOpenCode(opts),/backup-replace/);
+  assert.equal(fs.readFileSync(path.join(f.home,native(names[2])),'utf8'),'user modified managed');
+  const p=planOpenCode({...opts,conflict:'backup-replace'});
+  executePlans([p],{dryRun:true});
+  assert.ok(fs.existsSync(path.join(f.home,native(names[0]))));
+  // Fail at publication after obsolete files have been removed, then restore them.
+  const rename=fs.renameSync;let injected=false;
+  fs.renameSync=(from,to)=>{if(!injected&&to===path.join(f.home,'.pulso/installations/opencode-v1.json')){injected=true;throw new Error('migration publication failure');}return rename(from,to);};
+  let result;try{result=executePlans([p]);}finally{fs.renameSync=rename;}
+  assert.equal(result.status,'failed');assert.equal(injected,true);
+  for(const name of names) assert.ok(fs.existsSync(path.join(f.home,runtime(name))));
+  assert.equal(fs.readFileSync(path.join(f.home,native(names[2])),'utf8'),'user modified managed');
+  const retry=planOpenCode({...opts,conflict:'backup-replace'});
+  assert.equal(executePlans([retry]).status,'complete');
+  assert.equal(fs.readFileSync(path.join(f.home,retry.backup,'files',native(names[2])),'utf8'),'user modified managed');
+  for(const name of names){assert.equal(fs.existsSync(path.join(f.home,runtime(name))),false);assert.equal(fs.existsSync(path.join(f.home,native(name))),name===names[1]);}
+  assert.equal(fs.readFileSync(path.join(f.home,native(names[1])),'utf8'),`old ${names[1]}`);
+  assert.equal(fs.readFileSync(path.join(f.home,'.agents/skills/bbva-cells/SKILL.md'),'utf8'),'shared user skill');
+  assert.equal(fs.readFileSync(path.join(f.home,'.config/opencode/skills/bbva-custom/SKILL.md'),'utf8'),'foreign');
+  assert.equal(planOpenCode(opts).changes.size,0);
+  const fresh=path.join(f.dir,'fresh');fs.mkdirSync(fresh);
+  assert.equal(executePlans([planOpenCode({...opts,home:fresh})]).status,'complete');
+  assert.deepEqual(fs.readdirSync(path.join(fresh,'.config/opencode/skills')).filter(x=>x.startsWith('bbva-')),['bbva-engineering']);
+  assert.equal(planOpenCode({...opts,home:fresh}).changes.size,0);
+});
+
+test('historical BBVA owned skills are removed but borrowed and unowned legacy names survive',t=>{
+  const f=fixture(t),oc='.config/opencode',owned=`${oc}/skills/bbva-apx/SKILL.md`,borrowed=`${oc}/skills/bbva-cells/SKILL.md`,foreign=`${oc}/skills/bbva-apx-testing/SKILL.md`;
+  for(const p of [owned,borrowed,foreign])write(f.home,p,p);
+  write(f.home,'.pulso/installation.json',JSON.stringify({schemaVersion:1,version:'3.0.0',scope:'global',runtimes:['opencode'],opencodeDir:oc,files:{[owned]:sha256(owned),[borrowed]:sha256(borrowed)},borrowed:[borrowed]}));
+  assert.equal(executePlans([planOpenCode(options(f))]).status,'complete');
+  assert.equal(fs.existsSync(path.join(f.home,owned)),false);
+  for(const p of [borrowed,foreign])assert.equal(fs.readFileSync(path.join(f.home,p),'utf8'),p);
+  assert.equal(planOpenCode(options(f)).changes.size,0);
+});
 test('global dry run creates no directories and package resources relocate',t=>{const f=fixture(t),p=planOpenCode(options(f));assert.deepEqual(fs.readdirSync(f.home),[]);executePlans([p],{dryRun:true});assert.deepEqual(fs.readdirSync(f.home),[]);assert.equal(executePlans([p]).status,'complete');assert.match(fs.readFileSync(path.join(f.home,'.config/opencode/agents/pulso.md'),'utf8'),/file:.*runtimes\/opencode-v1\/resources\/schemas/);assert.equal(fs.readFileSync(path.join(f.home,'.config/opencode/skills/bbva-example/SKILL.md'),'utf8'),'Exact BBVA bytes\n');assert.equal(planOpenCode(options(f)).changes.size,0);});
 test('XDG and additive CONFIG_DIR roots; CONFIG never a directory; relative and outside rejected',t=>{const f=fixture(t),r=resolveOpenCodeRoots(f.home,{XDG_CONFIG_HOME:path.join(f.home,'cfg'),OPENCODE_CONFIG_DIR:path.join(f.home,'extra')});assert.deepEqual(r.roots,['cfg/opencode','extra']);assert.throws(()=>resolveOpenCodeRoots(f.home,{OPENCODE_CONFIG_DIR:'relative'}),/absolute/);assert.throws(()=>resolveOpenCodeRoots(f.home,{OPENCODE_CONFIG_DIR:'/outside'}));const p=planOpenCode({...options(f),env:{OPENCODE_CONFIG:'/arbitrary/config.json'}});assert.ok(p.warnings.some(x=>x.includes('file override')));});
 test('foreign collision remains unchanged even with explicit backup choice',t=>{const f=fixture(t);write(f.home,'.pulso/runtimes/opencode-v1/plugin/index.mjs','foreign');assert.throws(()=>planOpenCode({...options(f),conflict:'backup-replace'}),/Foreign/);assert.equal(fs.readFileSync(path.join(f.home,'.pulso/runtimes/opencode-v1/plugin/index.mjs'),'utf8'),'foreign');});
@@ -47,4 +97,15 @@ test('reinstall preserves a user-selected default agent and original restoration
 test('VS Code receipt update uses a VS Code-labelled backup archive',t=>{const f=fixture(t),packagePath=zip(path.join(f.dir,'new.vsix')),c=cli();executePlans([planVSCode({home:f.home,packagePath,runner:c.runner})]);zip(packagePath,'4.0.1');const p=planVSCode({home:f.home,packagePath,runner:c.runner});assert.match(p.backup,/^\.pulso\/backups\/vscode-/);});
 test('unrelated historical ownership does not authorize unowned legacy plugin config cleanup',t=>{const f=fixture(t),oc='.config/opencode';write(f.home,`${oc}/opencode.jsonc`,'{"plugin":["./plugins/pulso-codegraph.mjs"]}');write(f.home,`${oc}/.pulso-install.json`,JSON.stringify({schema_version:1,managed_by:'pulso',files:{}}));assert.throws(()=>planOpenCode(options(f)),/Legacy config cleanup requires/);assert.equal(parseConfig(fs.readFileSync(path.join(f.home,oc,'opencode.jsonc'),'utf8')).plugin.length,1);});
 
-test('CLI defaults resolve existing local artifacts, explicit paths win and missing packages guide build',t=>{const f=fixture(t);write(f.dir,'dist/opencode/package.json','{}');zip(path.join(f.dir,'artifact.vsix'));fs.mkdirSync(path.join(f.dir,'artifacts'));fs.renameSync(path.join(f.dir,'artifact.vsix'),path.join(f.dir,'artifacts/pulso-4.0.0.vsix'));const both=resolvePackageDefaults({targets:'opencode,vscode'},{root:f.dir});assert.equal(both['opencode-package'],path.join(f.dir,'dist/opencode'));assert.equal(both.vsix,path.join(f.dir,'artifacts/pulso-4.0.0.vsix'));assert.equal(resolvePackageDefaults({targets:'opencode,vscode','opencode-package':'/chosen/oc',vsix:'/chosen/x.vsix'},{root:'/absent'}).vsix,'/chosen/x.vsix');assert.throws(()=>resolvePackageDefaults({targets:'opencode'},{root:'/absent'}),/build:opencode/);assert.throws(()=>resolvePackageDefaults({targets:'vscode'},{root:'/absent'}),/package:vscode/);});
+test('CLI defaults resolve existing local artifacts, explicit paths win and missing packages guide build',t=>{
+  const f=fixture(t),version=JSON.parse(fs.readFileSync(new URL('../../installer/package.json',import.meta.url))).version;
+  write(f.dir,'dist/opencode/package.json','{}');
+  fs.mkdirSync(path.join(f.dir,'artifacts'));
+  const artifact=zip(path.join(f.dir,`artifacts/pulso-${version}.vsix`),version);
+  const both=resolvePackageDefaults({targets:'opencode,vscode'},{root:f.dir});
+  assert.equal(both['opencode-package'],path.join(f.dir,'dist/opencode'));
+  assert.equal(both.vsix,artifact);
+  assert.equal(resolvePackageDefaults({targets:'opencode,vscode','opencode-package':'/chosen/oc',vsix:'/chosen/x.vsix'},{root:'/absent'}).vsix,'/chosen/x.vsix');
+  assert.throws(()=>resolvePackageDefaults({targets:'opencode'},{root:'/absent'}),/build:opencode/);
+  assert.throws(()=>resolvePackageDefaults({targets:'vscode'},{root:'/absent'}),/package:vscode/);
+});

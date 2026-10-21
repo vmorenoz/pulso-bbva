@@ -27,6 +27,14 @@ node install.mjs
 
 This installs OpenCode from the self-contained archive in `v4/artifacts/`, verifies its SHA-256 and asks for confirmation. It requires Node.js 22 or newer and standard macOS/Linux `tar`, but no npm installation or build. Use `--dry-run` to preview, `--conflict backup-replace` to authorize replacement of recognized modified Pulso files, or `--help` for options. Restart OpenCode afterward. VS Code users can install the prepared VSIX through “Extensions: Install from VSIX…”.
 
+## Documentation-first policy and skills
+
+The distribution contains six skills, with a single BBVA entry: [`core/skills/bbva-engineering/SKILL.md`](core/skills/bbva-engineering/SKILL.md). It replaces `bbva-apx`, `bbva-apx-testing`, `bbva-cells` and `bbva-cells-testing`.
+
+The `<technology_knowledge_policy>` blocks in [`core/agents/common.md`](core/agents/common.md) and [`core/agents/pulso.md`](core/agents/pulso.md), together with the consolidated skill, instruct relevant roles to study documentation before dependent CELLS/APX/ASO work: confirm stack and versions, consult the catalog, search in the original language, read original sources and verify applicability. Current accessible evidence can be reused; missing evidence blocks only the dependent decision or work. These are prompt instructions, not runtime-enforced MCP calls.
+
+For better documentation support, use the separate private [Pulso Knowledge utility](https://github.com/vmorenoz/pulso-knowledge). Its [README](https://github.com/vmorenoz/pulso-knowledge#readme) is the installation source of truth for authorized corpus preparation, embedding model/index and host MCP configuration. Pulso neither bundles nor installs it; installing the VSIX does not configure this MCP in VS Code.
+
 ## Developer build
 
 Node.js 22 or newer is required. From this directory:
@@ -41,7 +49,7 @@ node installer/cli.mjs --help
 ```
 
 - `core/lib`: persistence, identity, memory, recovery, evidence and semantic tool contracts.
-- `core/agents`, `core/skills`, `core/templates`, `core/schemas`: canonical authored content. The five BBVA skills are byte-identical to the reviewed baseline; `scripts/bbva-integrity.json` locks their hashes.
+- `core/agents`, `core/skills`, `core/templates`, `core/schemas`: canonical authored content. The consolidated BBVA skill is copied unchanged into each distribution; `scripts/bbva-integrity.json` pins its reviewed hash.
 - `adapters/opencode`: native tool registration, strict descriptor-to-Zod conversion, native permissions and passive observation.
 - `adapters/vscode`: public extension tool registration, native agent/skill contributions, workspace trust and window-scoped project binding.
 - `scripts`: rendering, positive package inventory, complete-payload checks, archives and an isolated real-core happy path.
@@ -117,11 +125,15 @@ OpenCode uses the official V1 XDG global directory plus optional additive `OPENC
 
 VS Code installation targets the exact executable/product, local user-data scope and profile selected. It does not install to every profile or a remote extension host. A clean reinstall cannot uninstall the existing version without a verified exact previous VSIX available for rollback. Missing CLI means manual installation pending, never successful installation. A named profile may be created by the native CLI; review the preview carefully.
 
+The BBVA consolidation migration removes only managed obsolete resources for the four retired APX/CELLS skills. Borrowed and foreign resources are preserved.
+
 All selected plans preflight before any writes. A failing target rolls itself back when recovery is available; an earlier successful target remains installed and the result reports the partial outcome. Verified backup archives are retained if restoration fails. These are bounded synchronous transactions, not a claim of crash-proof or concurrent-installer atomicity. No real user installation is run by the test suite: it uses temporary homes and CLI doubles.
 
 ## Verification gates
 
 `npm run verify` runs builds, static package checks and both real-core smokes (legacy and durable). It does not invoke `npm test`, installer doubles or global mock suites. `npm run test:continuity` selects the bounded core/process and adapter-contract regressions for 4.2.0; adapter doubles do not establish real-host behavior. Historical suite results in the changelog do not apply automatically to current changes.
+
+Current consolidation checks: distribution/installer tests **64 PASS, 1 skip**; explicit bootstrap tests **10 PASS**; `npm run verify`, package and staged verification **PASS**. OpenCode tar, VSIX and standalone archives were regenerated and verified at **4.2.0**. The global suite is **not green**: **455 tests, 408 PASS, 46 FAIL, 1 skip**. All 46 failures reproduced on baseline `a7351bf` (47 failures there, including one subsequently corrected fixture). These checks do not establish live-host installation or conversational acceptance.
 
 ```sh
 npm run build:opencode
@@ -151,10 +163,10 @@ Required manual host acceptance still includes agent/skill visibility, four call
 
 ## Reviewed baseline
 
-Source migration began at immutable main `16cc3aa86fc47de02afeac6336bc5545012a3945`, after the two preceding integration PRs were merged. Canonical artifacts and work mutations adopt the latest persistence/history corrections while retaining the complete hardened core. Five BBVA source and output hashes are asserted independently. Historical directories are preserved for reference and are not read by V4 builds.
+Source migration began at immutable main `16cc3aa86fc47de02afeac6336bc5545012a3945`, after the two preceding integration PRs were merged. Canonical artifacts and work mutations adopt the latest persistence/history corrections while retaining the complete hardened core. The original migration asserted five BBVA source and output hashes; the current distribution pins the single consolidated skill. Historical directories are preserved for reference and are not read by V4 builds.
 
 Historical build, smoke, installation and suite observations for 4.0.0–4.2.0 are consolidated in the [changelog](../CHANGELOG.md). They are not current verification results or package hashes to reuse. Verify the SHA-256 sidecar shipped with the exact archive being installed and run the appropriate gates for the current source revision.
 
-The four APX/CELLS skills were subsequently enriched on 2026-10-05; the reviewed current bytes, rather than an assertion of identity with every historical version, are pinned in `scripts/bbva-integrity.json`. See [BBVA provenance](scripts/bbva-provenance.md).
+The four APX/CELLS skills were enriched on 2026-10-05 and later retired in favor of `bbva-engineering`. Its reviewed current bytes, rather than an assertion of identity with every historical version, are pinned in `scripts/bbva-integrity.json`. See [BBVA provenance](scripts/bbva-provenance.md).
 
 The OpenCode payload includes the pinned SDK runtime tool helper and its Zod ESM dependency closure with licenses and a strict hash inventory. Installation performs no npm download or package script. The SDK helper's bare dependency import is the only relocated vendor statement; Zod runtime bytes are unchanged. Source licensing: [OpenCode MIT license](https://github.com/anomalyco/opencode/blob/v1.18.34/LICENSE); Zod's packaged MIT license is preserved alongside its runtime.

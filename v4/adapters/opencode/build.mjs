@@ -19,10 +19,7 @@ function permissions(primary, agent, catalog) {
     for (const specialist of catalog.specialists) value.task[specialist.id] = 'allow';
   } else {
     const skills = ['bbva-engineering'];
-    if (agent.id !== 'pulso-researcher') skills.push('bbva-cells');
-    if (!['pulso-researcher','pulso-ui-auditor'].includes(agent.id)) skills.push('bbva-apx');
-    if (['pulso-executor','pulso-qa-auditor','pulso-code-reviewer'].includes(agent.id)) skills.push('bbva-apx-testing','bbva-cells-testing','pulso-integration-verification');
-    if (agent.id === 'pulso-ui-auditor') skills.push('bbva-cells-testing');
+    if (['pulso-executor','pulso-qa-auditor','pulso-code-reviewer'].includes(agent.id)) skills.push('pulso-integration-verification');
     for (const skill of skills) value.skill[skill] = 'allow';
     if (!['pulso-executor','pulso-qa-auditor'].includes(agent.id)) value.edit['*'] = 'deny';
     for (const prefix of ['.pulso/','**/.pulso/']) {

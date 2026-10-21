@@ -16,6 +16,15 @@ OpenCode is the default target; interactive confirmation and the installer's con
 
 ## Developer CLI
 
+The BBVA distribution now supplies only `bbva-engineering`, complementary to
+documentation-first CELLS/APX/ASO work. Updating OpenCode removes obsolete skills
+recorded as managed, including their isolated runtime copies. Borrowed and
+unowned/shared skills remain user-owned. Modified managed files abort by default;
+`--conflict backup-replace` explicitly permits removal with their original bytes
+backed up. Review `node install.mjs --dry-run` before confirming the update and
+restart OpenCode afterwards. VS Code receives the consolidated skills through
+replacement of the extension package; it does not clean unrelated user skills.
+
 This is a separate orchestration package, never part of either runtime payload. It configures one or both selected integrations globally. For ready-to-install OpenCode packages, use the [self-contained installer archive](STANDALONE.md): it includes the runtime and pinned dependency and needs no npm installation or compilation. When developing from the checkout, run `npm ci` from `v4/` with its matching committed lock, then `node installer/cli.mjs --help`. This uses the dependency pinned by the V4 source package.
 
 From this installer directory, run interactively with `node cli.mjs`, or select explicitly with `--targets opencode,vscode`. Existing repository-local `../dist/opencode` and `../artifacts/pulso-<version>.vsix` matching the installer version are used by default. Explicit `--opencode-package /absolute/dist/opencode` and `--vsix /absolute/pulso.vsix` take priority; missing packages show the required build command. Use `--dry-run` to inspect the complete plan. `--yes` confirms that plan; it does not permit foreign collisions. Modified owned or exact known legacy resources need `--conflict backup-replace`; default is abort. Unknown files are never replaced. All selected targets are preflighted before mutation.

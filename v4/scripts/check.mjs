@@ -50,7 +50,9 @@ export function verifyPackage(target,root,{coreRoot=path.join(sourceRoot,'core')
   if(pkg.version!==releaseVersion||manifest.version!==releaseVersion)throw new Error('Wrong artifact version');
   if(target==='vscode') {
     if(pkg.enabledApiProposals?.length)throw new Error('Proposed API in native package');
-    if(pkg.contributes.chatAgents.length!==10||pkg.contributes.chatSkills.length!==10||pkg.contributes.languageModelTools.length!==4)throw new Error('Incomplete native contributions');
+    if(pkg.contributes.chatAgents.length!==10||pkg.contributes.chatSkills.length!==6||pkg.contributes.languageModelTools.length!==4)throw new Error('Incomplete native contributions');
+    const expectedSkills=listFiles(path.join(coreRoot,'skills')).filter(file=>file.endsWith('/SKILL.md')).map(file=>`resources/skills/${file}`).sort();
+    if(JSON.stringify(pkg.contributes.chatSkills.map(entry=>entry.path).sort())!==JSON.stringify(expectedSkills))throw new Error('Native skill contributions differ from canonical inventory');
     for(const entry of [...pkg.contributes.chatAgents,...pkg.contributes.chatSkills])if(!fs.existsSync(path.join(root,entry.path)))throw new Error('Missing contributed resource');
   }
   return {target,files:actual.length,bbvaFiles:Object.keys(integrity).length};

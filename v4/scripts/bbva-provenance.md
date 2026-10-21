@@ -1,38 +1,29 @@
 # BBVA skill content provenance
 
-The four APX/CELLS skills in `core/skills` were deliberately enriched on
-2026-10-05. They are no longer byte-for-byte copies of the earlier compact
-corpus. `bbva-engineering` remains unchanged.
+## Consolidation, 2026-10-20
 
-## Sources and scope
+The reviewed V4 corpus now contains only `bbva-engineering`. The former
+`bbva-apx`, `bbva-apx-testing`, `bbva-cells` and `bbva-cells-testing` recipes
+are retired from canonical sources, native permissions and generated packages.
+Their historical distributions remain untouched.
 
-- Starting V4 source: commit `507ee6888ce06bb4251fd41e9e91a0c77379e464`.
-- Recipe reference: the same commit's `v1/skills/bbva-apx`,
-  `bbva-apx-testing`, `bbva-cells`, and `bbva-cells-testing` `SKILL.md` files.
-- The starting V4 BBVA files were byte-identical to `v3-opencode-v1/skills`.
-  That historical corpus and the original `v1` files are not modified.
-
-Recovered guidance includes APX transaction lifecycle and test contexts,
-job/step setup, conditional helper names, CELLS runner examples, per-test
-state isolation, and the headless-browser diagnostic checklist. The base
-skills also make discovery, affected contracts, and validation explicit.
-
-Patterns apply only when confirmed in the target repository. No fixed CLI
-versions, universal coverage thresholds, obsolete orchestration contracts,
-or extra permissions are restored. Native tool/evidence contracts are
-unchanged.
+The previous enrichment (2026-10-05) used commit
+`507ee6888ce06bb4251fd41e9e91a0c77379e464` and its V1 recipe references.
+This revision replaces those version-sensitive recipes with durable guidance:
+documentation-first CELLS/APX/ASO discovery, contracts and flow verification,
+meaningful tests without weakened assertions, mock/integration/e2e distinctions,
+CELLS event/UI cleanup, and change-dependent Batch restart/idempotency/files.
+It retains the engineering scope, permissions and sensitive-data protections.
+It does not claim new authoritative BBVA API documentation or version compatibility.
 
 ## Integrity contract
 
-[bbva-integrity.json](bbva-integrity.json) pins the reviewed current bytes of all five BBVA
-skills. Its four APX/CELLS SHA-256 values were intentionally updated for this
-revision; the `bbva-engineering` digest is unchanged. The build still rejects
-unexpected inventory or byte changes. Both native outputs must contain the
-exact current canonical bytes, without adapter prose injected into BBVA
-skills. Distribution tests check preservation, recipe anchors, and rejection
-of tampered or incomplete inputs.
-
-This is source-maintenance provenance, not a runtime prerequisite. Builds consume
-the canonical V4 skills and their pinned hashes, not the historical directories
-listed above. Run `npm run check` from `v4/` after building to check the current
-outputs; a historical successful check is not evidence for a later artifact.
+[bbva-integrity.json](bbva-integrity.json) intentionally pins the newly reviewed
+`bbva-engineering/SKILL.md` bytes only.
+The description is quoted as a YAML string because it contains a colon followed
+by a space; the pinned digest includes this frontmatter correction.
+Build validation still rejects modified, missing and unexpected BBVA files;
+both adapters copy canonical bytes exactly.
+Distribution tests assert the sole BBVA inventory and removal of legacy permissions.
+Installer migration tests exercise ownership, conflicts, rollback and idempotency.
+Builds consume V4 canonical sources, not historical directories.

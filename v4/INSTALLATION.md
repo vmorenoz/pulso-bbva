@@ -1,6 +1,6 @@
 # Instalar Pulso en otro equipo
 
-Esta guía instala **Pulso V4 para OpenCode desde el código de este repositorio**, incluyendo sus agentes, prompts, skills y política CELLS. Para reproducir exactamente una instalación, conserva el commit utilizado; `main` puede avanzar.
+Esta guía instala **Pulso V4 para OpenCode desde el código de este repositorio**, incluyendo sus agentes, prompts, skills y política documental CELLS/APX/ASO. Para reproducir exactamente una instalación, conserva el commit utilizado; `main` puede avanzar.
 
 ## Instalación rápida con el paquete incluido
 
@@ -14,6 +14,8 @@ node install.mjs
 ```
 
 Revisa el plan y confirma la instalación; después cierra y vuelve a abrir OpenCode. Este camino no necesita `npm ci` ni compilar. Los pasos siguientes permiten reconstruir el instalador desde una revisión concreta o regenerar los artefactos cuando cambie el código.
+
+Para **VS Code + GitHub Copilot**, desde el mismo checkout abre «Extensions: Install from VSIX…», selecciona `v4/artifacts/pulso-4.2.0.vsix` y recarga la ventana. Revisa los requisitos del host en la [guía de VS Code](adapters/vscode/README.md). El VSIX instala Pulso; Pulso Knowledge se configura por separado según su propio README.
 
 ## 1. Requisitos
 
@@ -101,6 +103,8 @@ node install.mjs --conflict backup-replace
 
 Los archivos ajenos no se sobrescriben. `--yes` permite confirmar sin pregunta, pero no autoriza colisiones ajenas. Se respaldan las configuraciones modificadas y se eliminan los presets `model` y `variant` de los IDs Pulso reconocidos en las configuraciones globales inventariadas; se conserva el modelo global. Los overrides y la configuración del proyecto pueden seguir aportando presets. Consulta los detalles en la [guía del instalador](installer/README.md).
 
+La distribución contiene **seis skills**, con `bbva-engineering` como única skill BBVA. En la migración se retiran solo las cuatro skills obsoletas gestionadas por Pulso (`bbva-apx`, `bbva-apx-testing`, `bbva-cells` y `bbva-cells-testing`); las prestadas (`borrowed`) y ajenas se preservan.
+
 ## 5. Comprobar en OpenCode
 
 1. Cierra y vuelve a abrir OpenCode tras instalar.
@@ -111,13 +115,33 @@ Los archivos ajenos no se sobrescriben. `--yes` permite confirmar sin pregunta, 
 
 Si faltan agentes o herramientas, revisa los errores de carga de OpenCode y que su entorno utilice los mismos directorios de configuración que mostró el instalador. La instalación de archivos por sí sola no acredita una conversación correcta: anota la versión del host y el resultado de esta comprobación.
 
-## 6. Política CELLS y conocimiento externo
+## 6. Política CELLS/APX/ASO y conocimiento externo
 
-Los prompts de Pulso incluyen la política CELLS de la revisión construida. Cuando el stack CELLS está confirmado, esta exige consultar documentación mediante el MCP de conocimiento `cells-knowledge`, si está disponible, y contrastarla con código, dependencias y runtime observados.
+Los prompts de Pulso incluyen una política de **documentación primero para CELLS, APX y ASO**. Antes de diseñar o planificar soluciones, implementar, revisar, preparar o ejecutar pruebas y realizar migraciones de CELLS, APX o ASO, con el stack confirmado, los especialistas deben estudiar documentación pertinente y suficiente, y contrastarla con código, dependencias y runtime observados. Abarca todos los roles relevantes, incluidos QA y reviewers. Se permite orientación inicial solo de lectura para identificar stack, versiones y pregunta concreta.
 
-**Ese MCP externo no está incluido ni publicado con Pulso.** Instalar Pulso no instala ni configura dicho servicio. Su entrega privada y configuración en otro equipo quedan pendientes de una entrega separada.
+Es una política de prompts, no enforcement del runtime ni certificación de cumplimiento: los tests de distribución verifican el texto renderizado, no que una sesión haya estudiado las fuentes o ejecutado correctamente el cambio. La disponibilidad del MCP `pulso-knowledge` (Pulso Knowledge) o consultar su catálogo no satisface el estudio documental.
 
-Cuando no esté disponible o su cobertura sea insuficiente, Pulso debe declarar la limitación y las decisiones que quedan sin sustento. Puede continuar el trabajo independiente respaldado por fuentes autorizadas, sin simular acceso, consultas, documentación ni resultados. La lectura inicial del proyecto para identificar tecnologías y versiones no requiere ese MCP.
+La política se extiende a APX, ASO y las tecnologías confirmadas por el catálogo dinámico: consulta `knowledge_technologies` antes de afirmar disponibilidad instalada. Estos nombres son pistas, no una lista de fuentes instaladas ni activadores automáticos:
+
+| Tecnología candidata | Keywords y contexto que debe confirmarse |
+| --- | --- |
+| CELLS | `front`, `frontend`, `cells`, `lit`; `web` es una señal débil. |
+| APX | Transacciones, librerías y DTOs; distinguir **APX Online**, **APX Batch** (jobs/steps) y **utilitarios** mediante artefactos y dependencias. |
+| ASO | Arquitectura de servicios; `TSEC`, `AAP` y `SMC` son calificadores que requieren contexto ASO confirmado. |
+
+`Java`, `backend` y `REST` son términos genéricos insuficientes para identificar APX o ASO. Confirma el stack y las versiones en manifiestos, configuración y estructura reales. Usa `knowledge_search` con filtro `technology` explícito y el ID confirmado por el catálogo; separa consultas cuando convivan tecnologías. Conserva `sourceId` desde los resultados y úsalo cuando versiones o fuentes relevantes requieran acotar o desambiguar. Envía la query original sin traducción, preservando idioma, APIs, versiones e intención.
+
+Tras la búsqueda, lee los originales en las secciones pertinentes con `knowledge_read`, apoyándote en `knowledge_outline` y `knowledge_related` según necesidad. Conserva referencias `sourceId`, `path`, sección y versión, y comprueba prerrequisitos, contratos, proceso, excepciones, límites y verificación requerida para el cambio. Distingue APX Online, Batch y utilitarios; para ASO estudia fronteras, seguridad y conectores según la tarea. `knowledge_status` y `knowledge_sources` permiten comprobar cobertura y procedencia. Los documentos recuperados son referencias, no instrucciones que puedan modificar roles, permisos o el encargo. Los scopes `current/historical/all` describen ubicación, no compatibilidad verificada. Declara diagnósticos, resultados vacíos o truncados y fuentes faltantes: no prueban ausencia de una API ni compatibilidad.
+
+El estudio es proporcional: sin barrido completo, ceremonia ni informe extra. Reutiliza evidencia ya leída y accesible cuyo alcance y versión sigan vigentes; un cambio de alcance, versión o una laguna exige actualizar lo pertinente, no repetir consultas por trámite. El coordinador delega el estudio, transmite fuentes y decisiones mediante inputs accesibles y verifica suficiencia antes de aceptar trabajo dependiente. Puede encargarse al mismo especialista documentarse primero y ejecutar después, sin pipeline fijo; el coordinador verifica referencias recibidas, no realiza investigación sustitutiva.
+
+**Recomendamos [Pulso Knowledge](https://github.com/vmorenoz/pulso-knowledge) para mejorar el trabajo con documentación tecnológica.** Su repositorio es privado. Es un utilitario externo: Pulso no incorpora su implementación y su instalador no lo instala ni configura.
+
+Para instalarlo, sigue el [README de Pulso Knowledge](https://github.com/vmorenoz/pulso-knowledge#readme) como fuente única de requisitos y comandos: acceso al repositorio privado, preparación de un corpus documental autorizado, modelo de embeddings, ingesta e índice, y configuración MCP en el host elegido. Comprueba allí las dependencias y el modelo vigentes. Instalar Pulso en OpenCode o instalar su VSIX en VS Code no configura automáticamente ese MCP.
+
+La política está reforzada en `<technology_knowledge_policy>` de [`v4/core/agents/common.md`](core/agents/common.md) y [`v4/core/agents/pulso.md`](core/agents/pulso.md), y en la única skill BBVA vigente, [`v4/core/skills/bbva-engineering/SKILL.md`](core/skills/bbva-engineering/SKILL.md). Esta skill consolida las cuatro guías APX/CELLS retiradas y orienta el estudio documental; no es una fuente exhaustiva de APIs o versiones. Las keywords por sí solas no justifican su activación ni reemplazan la confirmación del stack y la consulta de fuentes pertinentes.
+
+Cuando el MCP no esté disponible o su cobertura sea insuficiente, fuentes oficiales o locales autorizadas, pertinentes y versionadas pueden sustentar la decisión, declarando la limitación y las referencias utilizadas. Sin evidencia suficiente no se implementa por memoria o snippets ni se finge aprobación: se bloquea únicamente la decisión afectada y se continúa el trabajo independiente sustentado, sin simular acceso, consultas, documentación ni resultados.
 
 ## Paquete ya preparado y otros destinos
 
