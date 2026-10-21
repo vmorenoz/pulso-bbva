@@ -44,7 +44,7 @@ Pulso aporta un coordinador, nueve especialistas, **seis skills** y cuatro herra
 
 Para mejorar el trabajo con documentación tecnológica, recomendamos **[Pulso Knowledge](https://github.com/vmorenoz/pulso-knowledge)**, repositorio privado que requiere acceso autorizado. Es un utilitario separado: **Pulso no lo incluye, instala ni configura**.
 
-Sigue su [README](https://github.com/vmorenoz/pulso-knowledge#readme) como fuente única de instalación: prepara el corpus autorizado, el modelo de embeddings y el índice, y configura el MCP en el host donde lo vayas a utilizar. Instalar el VSIX de Pulso no instala automáticamente ese MCP en VS Code. Más contexto en la [guía de instalación](v4/INSTALLATION.md#6-política-cellsapxaso-y-conocimiento-externo).
+Sigue su [README](https://github.com/vmorenoz/pulso-knowledge#readme) como fuente única de instalación: incluye el conocimiento CELLS/APX/ASO y sus vectores; descarga explícitamente el modelo y configura el MCP en el host donde lo vayas a utilizar. La ingesta sirve para añadir o actualizar conocimiento, no es requisito de la instalación inicial con la receta compatible. Instalar el VSIX de Pulso no instala automáticamente ese MCP en VS Code. Más contexto en la [guía de instalación](v4/INSTALLATION.md#6-política-cellsapxaso-y-conocimiento-externo).
 
 ## Versiones anteriores
 
