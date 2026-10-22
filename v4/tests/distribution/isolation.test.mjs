@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {assertRolePermissions} from './role-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -48,35 +49,9 @@ for(const target of ['opencode','vscode'])test(`${target}: builds independently,
     assert.match(specialist,/No encontrarlo en el índice no demuestra que esté ausente del disco/);
     assert.match(specialist,/git diff --check comprueba el diff, no el comportamiento/);
   }
-  const field = (body,name) => JSON.parse(body.match(new RegExp(`^${name}: (.+)$`,'m'))[1]);
-  if (target === 'opencode') {
-    assert.equal(field(primary,'permission').task['pulso-explorer'],'allow');
-    const permissions = field(explorer,'permission');
-    assert.equal(permissions.edit['.pulso/project.md'],'allow');
-    for (const key of ['*','.pulso/state.json','.pulso/history.jsonl','.pulso/work/**/work.json']) assert.equal(permissions.edit[key],'deny');
-    assert.equal(permissions.bash['*'],'deny');
-    assert.equal(permissions.task['*'],'deny');
-    assert.equal(permissions.pulso_work,'deny');
-    assert.equal(field(fs.readFileSync(agentPath('pulso-executor'),'utf8'),'permission').edit['.pulso/project.md'],'deny');
-  } else {
-    assert.ok(!listFiles(output).some(file=>file.endsWith('.prompt.md')),'no prompt tool-list override');
-    const catalog=JSON.parse(fs.readFileSync(path.join(output,'resources/agents/catalog.json')));
-    for(const role of [catalog.orchestrator,...catalog.specialists]) {
-      const tools=field(fs.readFileSync(agentPath(role.id),'utf8'),'tools');
-      assert.deepEqual(tools.filter(tool=>tool.startsWith('pulso-knowledge/')),
-        ['search','read','outline','related','status','sources','technologies'].map(name=>`pulso-knowledge/knowledge_${name}`));
-      assert.ok(!tools.some(tool=>tool.includes('*')));
-      if(role.id!==catalog.orchestrator.id) {
-        for(const tool of ['agent','pulso_workspace','pulso_work','pulso_history','pulso_context']) assert.ok(!tools.includes(tool));
-      }
-    }
-    assert.ok(field(primary,'tools').includes('agent'));
-    assert.ok(field(primary,'agents').includes('pulso-explorer'));
-    assert.ok(!field(primary,'tools').includes('edit'));
-    assert.ok(field(explorer,'tools').includes('edit'));
-    for (const tool of ['agent','execute','pulso_work','pulso_workspace']) assert.ok(!field(explorer,'tools').includes(tool));
-    assert.deepEqual(field(explorer,'agents'),[]);
-  }
+  const catalog=JSON.parse(fs.readFileSync(path.join(output,'resources/agents/catalog.json')));
+  for(const role of [catalog.orchestrator,...catalog.specialists])assertRolePermissions(target,fs.readFileSync(agentPath(role.id),'utf8'),role,catalog);
+  if(target==='vscode')assert.ok(!listFiles(output).some(file=>file.endsWith('.prompt.md')),'no prompt tool-list override');
   const core=await import(pathToFileURL(path.join(output,'resources/lib/semantic-tools.mjs')).href);assert.equal(typeof core.executeTool,'function');
   fs.writeFileSync(path.join(output,'unrelated.txt'),'accidental artifact');assert.throws(()=>verifyPackage(target,output,{coreRoot:path.join(root,'core')}),/inventory/);
 });

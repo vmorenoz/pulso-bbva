@@ -7,8 +7,20 @@ import {readAgentBody,renderPrompt,renderSkill} from '../../scripts/prompts.mjs'
 import {toolContracts,validateToolInput} from '../../core/lib/tool-contracts.mjs';
 
 const signature='update_intent(continuityId, expectedRevision, objective, constraints, repositories?, compatibleDelegationIds)';
-const selection='Selecciona explícitamente compatibleDelegationIds con IDs reales confirmados mediante get_continuity/get_delegation: conserva solo los encargos evaluados como compatibles con el steering vigente y envía [] cuando ninguno sea compatible.';
-const defaultPolicy='Omitir compatibleDelegationIds equivale a [] e invalida todos los encargos de la intención anterior; la compatibilidad no acredita actividad ni cese físico.';
+// Structural prompt checks only; actual compatibility/omission behavior lives
+// in core/continuity.test.mjs (two-delegation acceptance and capture flow).
+function assertSteeringInstructions(text){
+  const authored=/update_intent\(([^)]+)\)/.exec(text);
+  assert.ok(authored,'authored update_intent signature');
+  const fields=authored[1].split(',').map(name=>name.trim().replace(/\?$/,''));
+  const expected=Object.keys(toolContracts.pulso_workspace.actionSchemas.update_intent.properties).filter(name=>name!=='action');
+  assert.deepEqual(fields.sort(),expected.sort());
+  assert.match(text,/compatibleDelegationIds[^.\n]*get_continuity\/get_delegation/);
+  assert.match(text,/conserva solo[^.\n]*compatibles/);
+  assert.match(text,/envía \[\] cuando ninguno sea compatible/);
+  assert.match(text,/Omitir compatibleDelegationIds[^.\n]*\[\][^.\n]*invalida todos/);
+  assert.match(text,/compatibilidad no acredita actividad ni cese físico/);
+}
 
 for(const target of ['opencode','vscode']) test(`${target}: primary and resume render explicit steering compatibility`,async()=>{
   const {adapterConfig}=await import(`../../adapters/${target}/build.mjs`);
@@ -21,7 +33,7 @@ for(const target of ['opencode','vscode']) test(`${target}: primary and resume r
   const renderedPrimary=adapterConfig.renderAgent({agent:catalog.orchestrator,catalog,body});
   const renderedResume=renderSkill(resume,{boundary:adapterConfig.operationalSkillBoundary,destination:target==='vscode'?'resources/skills/pulso-resume/SKILL.md':'skills/pulso-resume/SKILL.md'});
   for(const text of [primary,resume,renderedPrimary,renderedResume]) {
-    for(const exact of [signature,selection,defaultPolicy]) assert.ok(text.includes(exact),`${target}: missing ${exact}`);
+    assertSteeringInstructions(text);
     assert.doesNotMatch(text,/update_intent\(continuityId, expectedRevision, objective, constraints, repositories\?\)/);
   }
 });
@@ -37,6 +49,6 @@ test('authored steering signature matches the shared schema without changing omi
   for(const selection of [{},{compatibleDelegationIds:[]},{compatibleDelegationIds:['DEL-schema']}]) {
     assert.doesNotThrow(()=>validateToolInput('pulso_workspace',{...input,...selection}));
   }
-  assert.throws(()=>validateToolInput('pulso_workspace',{...input,compatibleDelegationIds:'DEL-schema'}));
+  assert.throws(()=>validateToolInput('pulso_workspace',{...input,compatibleDelegationIds:'DEL-schema'}),{code:'SCHEMA_INVALID'});
   // The two-delegation acceptance/capture flow is exercised in core/continuity.test.mjs.
 });

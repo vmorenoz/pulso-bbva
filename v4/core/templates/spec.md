@@ -8,8 +8,8 @@ Base: {{work revision, referencias}} · autor: {{rol}}
 {{Flujos observables, reglas de negocio, invariantes y criterios AC-ID.}}
 ## Contratos e integración
 {{Entradas/salidas, tipos, errores, compatibilidad, productor/consumidor y helpers reales.
-Semántica confirmada de identificadores/importes; no interpretar póliza/polis como amount
-por el nombre. Para SQL, fuente/configuración activa y cardinalidad, sin descriptor de conexión.}}
+Semántica de los campos sustentada en tipos, usos y transformaciones.
+Para SQL, fuente/configuración activa y cardinalidad, sin descriptor de conexión.}}
 ## Casos límite y estados
 {{Vacío, inválido, concurrencia, fallos, carga y recuperación según el cambio.}}
 ## Datos y seguridad

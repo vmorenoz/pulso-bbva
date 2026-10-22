@@ -11,7 +11,7 @@ Guía para documento solicitado; omitir alternativas/tablas sin decisión real. 
 {{Opciones reales, coste, restricciones, reversibilidad y recomendación razonada.}}
 ## Preguntas para el usuario, vía Pulso
 {{Solo decisiones humanas necesarias; investigar antes imports, API, configuración y términos
-del dominio. No asumir que póliza/polis es amount ni que workaround demuestra reparación.}}
+del dominio. Un workaround no demuestra reparación de la causa.}}
 ## Confirmaciones recibidas
 {{Lo que el usuario ya respondió; no volver a preguntarlo.}}
 ## Conclusión y límites
