@@ -17,6 +17,33 @@ Especialistas: las cuatro tools requieren permiso nativo y prueba de sesión hij
 </specialist_tools>
 </native_boundary>`;
 export const operationalSkillBoundary = nativeBoundary;
+
+// Operational skills remain self-contained. Agent prompts already contain their
+// core protocols, so publish only the applicable native transport and authority.
+export const specialistBoundary = `<native_boundary>
+<specialist_tools>
+Las cuatro tools requieren permiso nativo y prueba de sesión hija/ToolPart/dispatch vigente; ask no concede acceso global. Primero get_assignment. Usa exclusivamente las acciones y alcance de tu asignación descritos en role_and_permissions; task permanece deny. La identidad proviene del host, nunca de IDs del prompt; no aportes raíz ni identidad nativa mediante argumentos Pulso. Sin prueba, informa el límite y retorna Markdown, sin editar owner ni metadata por filesystem.
+pulso_workspace, pulso_work y pulso_context reciben {request:{action,...}}; pulso_history recibe filtros planos. Respeta permisos de edit/bash/external_directory y de cada operación, incluidas lecturas; no cambies permisos ni configuración para evitarlos ni actives capacidades experimentales.
+El envelope nativo contiene el recibo JSON en output: retorno nativo no equivale a ok:true; ok:true confirma la operación, no aceptación ni cierre del objetivo. Sigue hasMore/nextCursor para completar las páginas pertinentes y conserva revisión/IDs confirmados ante persistence.partial. Para respuestas perdidas usa get_assignment_receipts según return_contract; no repitas efectos. Ni un estado terminal de tool ni un cambio administrativo acreditan cese físico de procesos externos.
+</specialist_tools>
+</native_boundary>`;
+
+export const coordinatorBoundary = `<native_boundary>
+<coordinator_only>
+Usa task para delegación nativa visible, skill para guías necesarias y question para decisiones de negocio o alcance. Pulso no edita producto ni usa bash. Aplica delegation_protocol: prepare_delegation → task → accept_result; la preparación autoriza metadata asociada al mismo padre nativo. Envía specialistPrompt exacto al rol preparado; no reconstruyas contratos, bases ni hashes. Usa delegación foreground por defecto y paraleliza frentes independientes cuando el host lo permita. No selecciones raíz ni aportes identidad nativa mediante argumentos Pulso.
+La excepción mode: project_initialization de pulso-init usa task directo, sin prepare_delegation, accept_result, Work ni continuidad: Explorer escribe solo .pulso/project.md autorizado; Executor aporta únicamente Git de lectura con cwd explícito y output conversation. Conserva recursos, restricciones y permisos efectivos de esa guía; no inventes IDs ni añadas QA, evidence/readiness o cierre a la inicialización.
+pulso_workspace, pulso_work y pulso_context reciben {request:{action,...}}; pulso_history recibe filtros planos. Cada operación solicita permiso nativo efectivo, incluidas lecturas. Respeta también task/edit/bash/external_directory; no cambies permisos ni configuración para evitarlos ni reintentes por otro rol una operación denegada. Especialistas: tools Pulso=ask sólo para acciones de asignación verificadas por sesión hija/ToolPart/dispatch; no autoridad global, aceptación, evidence.add, cierre ni delegación.
+El plugin aporta observación efímera mediante experimental.chat.messages.transform de la SDK fijada, sin activar configuración experimental. Aplica automatic_continuity_recovery: el hook observa sólo el proyecto seleccionado en turnos ordinarios del primario, nunca inicializa .pulso ni escribe una petición fingida. No actives capacidades experimentales para completar encargos. Un recibo automático perdido admite replay de la transición exacta bajo la misma petición nativa; ownerTransferred con capturePending conserva progreso, exige recuperar capturas y no redisparar.
+La captura nativa aparece separada en metadata.pulsoDurable o get_delegation y no equivale a aceptación. Sigue delegation_protocol con reportedReturn literal si falta captura, sin inventar host_capture. Un intento unresolved requiere replay terminal verificado o reconcile_delegation con resolution:explicitly_reconciled, reason y source.text sustentados (messageRef si existe); esa fuente no prueba cancelación ni cese físico. Running sigue pendiente; legacy conserva contrato/base originales.
+El envelope nativo contiene el recibo JSON en output: retorno nativo no equivale a ok:true; ok:true confirma operación, no objetivo terminado. En accept_delivery distingue data.acceptanceRecorded, data.closed, data.readiness y closeError/persistence; ante pérdida o respuesta parcial consulta Work antes de repetir. Sigue hasMore/nextCursor y usa revisiones confirmadas; persistence.partial exige conservar IDs/revisión y recuperar antes de reintentar. attempts/reconcile_attempts son telemetría pasiva: liveness=unknown, acceptance=not_assessed; no modifican Work ni acreditan agentes vivos. Mantén TODO nativo sólo como espejo de estado confirmado. El cierre explícito sigue explicit_user_closure, no una inferencia de estado.
+</coordinator_only>
+</native_boundary>`;
+
+export function boundaryForAgent({agent, catalog}) {
+  if (agent.id === catalog.orchestrator.id) return coordinatorBoundary;
+  if (catalog.specialists.some(role => role.id === agent.id)) return specialistBoundary;
+  throw new Error('Unknown agent boundary');
+}
 const names = ['pulso_workspace','pulso_work','pulso_history','pulso_context'];
 const runtimeFiles = Object.fromEntries(['plugin/index.mjs','plugin/schema-converter.mjs','plugin/attempt-contracts.mjs','plugin/delegation-observer.mjs','plugin/durable-hooks.mjs','plugin/assignment-authority.mjs','plugin/recovery-policy.mjs','README.md'].map(file => [file, file]));
 function permissions(primary, agent, catalog) {
@@ -59,5 +86,5 @@ export function packageManifest() {
   return {name: 'pulso-opencode', version: '4.2.0', private: true, type: 'module', description: 'Pulso: coordinación nativa y continuidad verificable.',
     engines: {node: '>=22'}, dependencies: {}};
 }
-export const adapterConfig = {runtimeFiles, packageManifest, renderAgent, renderCommand, boundary: nativeBoundary, operationalSkillBoundary,
+export const adapterConfig = {runtimeFiles, packageManifest, renderAgent, renderCommand, boundary: coordinatorBoundary, boundaryForAgent, operationalSkillBoundary,
   resourcePaths: destination => target => path.posix.relative(path.posix.dirname(destination), `resources/${target}`)};

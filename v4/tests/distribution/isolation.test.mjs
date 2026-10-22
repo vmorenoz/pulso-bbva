@@ -25,8 +25,8 @@ for(const target of ['opencode','vscode'])test(`${target}: builds independently,
   const init = fs.readFileSync(path.join(output,target === 'opencode' ? 'skills/pulso-init/SKILL.md' : 'resources/skills/pulso-init/SKILL.md'),'utf8');
   for (const resource of [primary,explorer,init]) {
     assert.match(resource,/mode: project_initialization/);
-    assert.match(resource,/sin prepare_delegation, accept_result, Work ni continuidad/);
-    assert.match(resource,/otras delegaciones persistentes/);
+    assert.match(resource,/sin (?:prepare_delegation, accept_result, Work ni continuidad|specialistPrompt preparado, Work, tareas ni continuidad)/);
+    assert.match(resource,/(?:otras|demás) delegaciones persistentes/);
   }
   assert.match(init,/esqueleto de prepare.*no es un mapa/);
   assert.doesNotMatch(init,/crea uno de mapeo|Registra tarea de Explorer|Cierra el Work exclusivo/);

@@ -3,7 +3,7 @@ import {field,assertRolePermissions} from './role-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import {readAgentBody,renderPrompt,renderSkill} from '../../scripts/prompts.mjs';
+import {readAgentBody,renderPrompt,renderSkill,agentBoundary} from '../../scripts/prompts.mjs';
 import {operationSkills} from '../../scripts/build.mjs';
 import {adapterConfig as opencode} from '../../adapters/opencode/build.mjs';
 import {adapterConfig as vscode} from '../../adapters/vscode/build.mjs';
@@ -18,7 +18,7 @@ for(const agent of [catalog.orchestrator,...catalog.specialists]) test(`${agent.
   const rendered={};
   for(const [target,config] of Object.entries({opencode,vscode})) {
     const destination=target==='vscode'?`resources/agents/${agent.id}.agent.md`:`agents/${agent.id}.md`;
-    const body=renderPrompt(readAgentBody(coreRoot,agent.id),{boundary:config.boundary,destination});
+    const body=renderPrompt(readAgentBody(coreRoot,agent.id),{boundary:agentBoundary(config,agent,catalog),destination});
     rendered[target]=config.renderAgent({agent,catalog,body});
     assert.ok(rendered[target].includes(body),'canonical body preserved verbatim');
     assert.equal((rendered[target].match(/<technology_knowledge_policy>/g)||[]).length,1);

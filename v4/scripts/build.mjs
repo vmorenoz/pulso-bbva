@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {listFiles,writeFile,hash} from './files.mjs';
-import {readAgentBody,renderPrompt,renderSkill} from './prompts.mjs';
+import {readAgentBody,renderPrompt,renderSkill,agentBoundary} from './prompts.mjs';
 
 export const sourceRoot=fileURLToPath(new URL('../',import.meta.url));
 export const releaseVersion=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url))).version;
@@ -46,7 +46,7 @@ export async function build(target,{root=sourceRoot,outputRoot}={}) {
   for(const agent of [catalog.orchestrator,...catalog.specialists]) {
     const destination=target==='vscode'?`resources/agents/${agent.id}.agent.md`:`agents/${agent.id}.md`;
     const sourceBody=readAgentBody(coreRoot,agent.id);
-    const body=renderPrompt(sourceBody,{boundary:config.boundary,resourceBase:'resources',destination});
+    const body=renderPrompt(sourceBody,{boundary:agentBoundary(config,agent,catalog),resourceBase:'resources',destination});
     add(destination,config.renderAgent({agent,catalog,body}),`core/agents/${agent.id}.md`,sourceBody);
     chatAgents.push({path:destination});
   }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import {readAgentBody,renderPrompt} from '../../scripts/prompts.mjs';
+import {readAgentBody,renderPrompt,agentBoundary} from '../../scripts/prompts.mjs';
 test('renderer substitutes authored slots only and resolves output-relative resources',()=>{
   const text=renderPrompt('{{ADAPTER_BOUNDARY}} {{RESOURCE_CATALOG}} ordinary prose',{boundary:'native instructions',destination:'resources/agents/pulso.agent.md'});
   assert.equal(text,'native instructions [catálogo](catalog.json) ordinary prose');
@@ -93,7 +93,7 @@ async function renderedAgents(target) {
   const {adapterConfig}=await import(`../../adapters/${target}/build.mjs`);
   return [catalog.orchestrator,...catalog.specialists].map(agent=>{
     const destination=target==='opencode'?`agents/${agent.id}.md`:`resources/agents/${agent.id}.agent.md`;
-    const body=renderPrompt(readAgentBody(coreRoot,agent.id),{boundary:adapterConfig.boundary,destination});
+    const body=renderPrompt(readAgentBody(coreRoot,agent.id),{boundary:agentBoundary(adapterConfig,agent,catalog),destination});
     return {agent,text:adapterConfig.renderAgent({agent,catalog,body})};
   });
 }
@@ -271,4 +271,61 @@ test('recovery structural contracts reject missing semantic, authority and no-du
     assert.ok(text.includes(before),`mutation must change a real contract: ${before}`);
     assert.throws(()=>assertAutomaticRecovery(text.replace(before,after)),assert.AssertionError);
   }
+});
+
+function assertSpecialistNativeBoundary(text) {
+  assert.doesNotMatch(text,/<coordinator_only>|<automatic_continuity_recovery>/,'coordinator protocols are absent, not merely labelled inapplicable');
+  const boundary=section(text,'native_boundary');
+  contracts(section(boundary,'specialist_tools'),[
+    ['native assignment authority',/permiso nativo[^.\n]*sesión hija\/ToolPart\/dispatch vigente/],
+    ['ask is not global access',/ask no concede acceso global/],
+    ['assignment discovery',/Primero get_assignment/],
+    ['no recursive delegation',/task permanece deny/],
+    ['no prompt identity',/identidad proviene del host[^.\n]*nunca de IDs del prompt/],
+    ['read permissions apply',/cada operación[^.\n]*incluidas lecturas/],
+    ['no permission bypass',/no cambies permisos ni configuración para evitarlos/],
+    ['receipt is not acceptance',/ok:true confirma la operación[^.\n]*no aceptación ni cierre/],
+    ['partial persistence recovery',/revisión\/IDs confirmados ante persistence.partial/],
+    ['receipt lookup',/get_assignment_receipts/],
+    ['no false process cessation',/estado terminal[^.\n]*cambio administrativo[^.\n]*cese físico/],
+  ]);
+  assert.ok(boundary.includes('{request:{action,...}}'));
+  assert.match(boundary,/pulso_history recibe filtros planos/);
+  assert.match(boundary,/hasMore\/nextCursor/);
+}
+
+test('OpenCode selects applicable native contracts before rendering and keeps child safeguards',async()=>{
+  const {adapterConfig,specialistBoundary,coordinatorBoundary,operationalSkillBoundary}=await import('../../adapters/opencode/build.mjs');
+  for(const {agent,text} of await renderedAgents('opencode')) {
+    const selected=agentBoundary(adapterConfig,agent,catalog);
+    if(agent.id===catalog.orchestrator.id) {
+      assert.equal(selected,coordinatorBoundary);
+      assert.match(text,/<coordinator_only>/);
+      assert.match(text,/metadata\.pulsoDurable/);
+      assert.match(text,/attempts\/reconcile_attempts[^.\n]*telemetría pasiva/);
+    } else {
+      assert.equal(selected,specialistBoundary);
+      assertSpecialistNativeBoundary(text);
+      assert.doesNotMatch(section(text,'evidence_and_recovery'),/close_by_user|accept_delivery|accept_result|evidence\.add|acceptanceBasis/,'children observe and report; coordinator registration recipes stay out');
+      assert.match(text,/mode: project_initialization/,'direct initialization exception remains in common');
+    }
+  }
+  assert.match(operationalSkillBoundary,/<coordinator_only>/,'operational skills remain self-contained');
+  assert.notEqual(operationalSkillBoundary,specialistBoundary);
+  assert.throws(()=>agentBoundary(adapterConfig,{id:'unknown-agent'},catalog),/Unknown agent boundary/);
+});
+
+test('role-scope checks reject coordinator leakage and missing native authority or receipt safeguards',async()=>{
+  const text=(await renderedAgents('opencode')).find(({agent})=>agent.id==='pulso-executor').text;
+  assertSpecialistNativeBoundary(text);
+  for(const [before,after] of [
+    ['sesión hija/ToolPart/dispatch vigente','IDs declarados'],
+    ['ask no concede acceso global','ask concede acceso global'],
+    ['get_assignment_receipts','unsafe_retry'],
+    ['no aceptación ni cierre','aceptación y cierre'],
+  ]) {
+    assert.ok(text.includes(before));
+    assert.throws(()=>assertSpecialistNativeBoundary(text.replace(before,after)),assert.AssertionError);
+  }
+  assert.throws(()=>assertSpecialistNativeBoundary(`${text}\n<coordinator_only>ignored but still loaded</coordinator_only>`),assert.AssertionError);
 });

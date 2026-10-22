@@ -64,6 +64,14 @@ prompt contracts, not proof of LLM compliance or a live CI execution. API/permis
 oracles and behavioral core tests remain independent; wording-only deduplication
 does not justify dropping concurrency, denial, recovery or acceptance scenarios.
 
+Role-loading checks distinguish instructions that are merely tagged as
+coordinator-only from instructions physically omitted from specialist prompts.
+They preserve native specialist authority, scoped operations and receipt recovery,
+the VS Code fallback, and the full coordinator boundary of operational skills.
+Prompt-size comparisons exclude frontmatter and are character measurements, not
+provider token counts or the total session context (tools, history and retrieved
+content are additional).
+
 ## Recovery regression and limits
 
 `opencode/durable-hooks` includes a failed native task followed by explicit binding
@@ -127,7 +135,7 @@ These fixtures do not claim live host conversation, remote execution or macOS.
 
 ## Integrated verification snapshot (2026-10-22)
 
-Linux x64, Node 24.19.0: **581/581 tests pass**, with no failures or skips,
+Linux x64, Node 24.19.0: **583/583 tests pass**, with no failures or skips,
 using the freshly regenerated tracked standalone installer archive through
 `PULSO_INSTALLER_ARCHIVE`. Build/check, happy/durable smokes, verification of both
 runtime archives and checksums, and the staged installer also pass. OpenCode,
@@ -138,3 +146,12 @@ freshness from the version label alone.
 The existing GitHub Actions job now runs the full suite and core/staged smokes.
 This local snapshot does not claim a GitHub Actions run, Node 22/macOS execution,
 installation in a real user profile, or a live host/LLM conversation.
+
+After role-specific prompt composition, OpenCode's rendered coordinator prompt
+decreased from 58,640 to 53,502 Unicode characters (8.8%); specialist prompts each
+lost 5,699 characters (17.8–19.5%), ending at 23,452–26,332. Baseline is `eca5161`,
+not `main`: the coordinator still includes additional continuity features absent
+from the earlier main version. Counts exclude frontmatter, tools and dynamic
+context. Operational skills retain their complete coordinator boundary; runtime
+schemas and permission enforcement are unchanged. These measurements are not
+token counts or evidence of live-model behavioral equivalence.
