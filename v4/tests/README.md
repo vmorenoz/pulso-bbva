@@ -124,3 +124,17 @@ changed-key conflict, output/symlink limits and partial projection repair.
 Existing plugin/package fixtures now supply realistic mandatory ToolContext
 identity and public SDK reads; they no longer omit session/agent metadata.
 These fixtures do not claim live host conversation, remote execution or macOS.
+
+## Integrated verification snapshot (2026-10-22)
+
+Linux x64, Node 24.19.0: **581/581 tests pass**, with no failures or skips,
+using the freshly regenerated tracked standalone installer archive through
+`PULSO_INSTALLER_ARCHIVE`. Build/check, happy/durable smokes, verification of both
+runtime archives and checksums, and the staged installer also pass. OpenCode,
+VSIX and standalone installer artifacts were rebuilt from the integrated source;
+the package version remains 4.2.0, so verify content/checksums rather than infer
+freshness from the version label alone.
+
+The existing GitHub Actions job now runs the full suite and core/staged smokes.
+This local snapshot does not claim a GitHub Actions run, Node 22/macOS execution,
+installation in a real user profile, or a live host/LLM conversation.
