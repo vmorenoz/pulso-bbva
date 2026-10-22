@@ -10,8 +10,8 @@ Guía para documento solicitado, sin tabla obligatoria. El retorno en conversaci
 ## Contratos y dependencias
 {{Productores, consumidores, helpers, persistencia, eventos y fronteras relevantes.
 SQL: método→clave→recurso activo→versión/configuración; separar suministrada, checkout y
-despliegue conocido. Póliza/polis: verificar identificador frente a importe. Consulta sin
-descriptor de conexión; alias claros, unidad de conteo, IDs deduplicados y cardinalidad.}}
+despliegue conocido. Consulta sin descriptor de conexión; alias claros, unidad de conteo,
+IDs deduplicados y cardinalidad.}}
 ## Patrones, comandos y pruebas existentes
 {{Lo observado, su fuente y qué se ejecutó realmente; no suponer comandos estándar.}}
 ## Impacto, limitaciones y siguiente paso

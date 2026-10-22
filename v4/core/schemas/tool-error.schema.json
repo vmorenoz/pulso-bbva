@@ -9,6 +9,27 @@
     "message":{"type":"string","maxLength":500},
     "revision":{"type":"integer","minimum":1},
     "issueCount":{"type":"integer","minimum":1},
+    "recovery":{"anyOf":[{"type":"object","additionalProperties":false,"properties":{
+      "workId":{"type":"string","minLength":1,"maxLength":80},
+      "continuityId":{"type":"string","minLength":1,"maxLength":80},
+      "delegationId":{"type":"string","minLength":1,"maxLength":80},
+      "readWith":{"type":"object","additionalProperties":false,"properties":{
+        "tool":{"enum":["pulso_workspace","pulso_work"]},
+        "action":{"enum":["inspect_continuities","get_delegation"]},
+        "workId":{"type":"string","minLength":1,"maxLength":80},
+        "continuityId":{"type":"string","minLength":1,"maxLength":80},
+        "delegationId":{"type":"string","minLength":1,"maxLength":80}
+      },"required":["tool","action","workId","continuityId"]},
+      "nextActions":{"type":"array","maxItems":4,"items":{"enum":["resume_continuity","get_continuity","accept_result","reconcile_delegation"]}},
+      "reservationResolved":{"type":"boolean"},"nativeCessation":{"const":"unknown"},
+      "note":{"type":"string","minLength":1,"maxLength":1000}
+    },"required":["workId","continuityId","readWith","nextActions","note"]},
+    {"type":"object","additionalProperties":false,"properties":{
+      "root":{"type":"string","minLength":1,"maxLength":4096},
+      "lockPath":{"const":".pulso-write.lock"},
+      "ownerPath":{"const":".pulso-write.lock/owner.json"},
+      "manualOnly":{"const":true}
+    },"required":["root","lockPath","ownerPath","manualOnly"]}]},
     "issues":{"type":"array","items":{
       "type":"object","additionalProperties":false,
       "properties":{"code":{"type":"string","minLength":1},"entity":{"type":"string","minLength":1},"message":{"type":"string","minLength":1}},

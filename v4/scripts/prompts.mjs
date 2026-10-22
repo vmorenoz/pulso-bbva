@@ -32,3 +32,8 @@ export function readAgentBody(coreRoot, id) {
 }
 
 export function renderSkill(text, options) { return renderPrompt(text, options); }
+
+/** Choose an authored role boundary before slot expansion; labels do not filter context. */
+export function agentBoundary(config, agent, catalog) {
+  return config.boundaryForAgent ? config.boundaryForAgent({agent, catalog}) : config.boundary;
+}

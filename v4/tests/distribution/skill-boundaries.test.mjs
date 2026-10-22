@@ -11,6 +11,14 @@ for(const target of ['opencode','vscode']) test(`${target}: coordinator boundary
   t.after(()=>fs.rmSync(temp,{recursive:true,force:true}));
   await build(target,{outputRoot:temp});
   const {adapterConfig}=await import(`../../adapters/${target}/build.mjs`);
+  const catalog=JSON.parse(fs.readFileSync(path.join(sourceRoot,'core/agents/catalog.json')));
+  if(target==='opencode') for(const agent of [catalog.orchestrator,...catalog.specialists]) {
+    const text=fs.readFileSync(path.join(temp,`agents/${agent.id}.md`),'utf8');
+    const primary=agent.id===catalog.orchestrator.id;
+    assert.equal(text.includes('<coordinator_only>'),primary,`${agent.id}: built role boundary`);
+    assert.equal(text.includes('<specialist_tools>'),!primary,`${agent.id}: built specialist boundary`);
+    assert.ok(text.includes(adapterConfig.boundaryForAgent({agent,catalog})),`${agent.id}: build selects authored role contract`);
+  }
   assert.deepEqual(operationSkills,['pulso-init','pulso-status','pulso-recap','pulso-resume']);
   for(const name of [...operationSkills,'pulso-integration-verification']) {
     const file=`${name}/SKILL.md`;

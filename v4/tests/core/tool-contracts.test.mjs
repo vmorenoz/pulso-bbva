@@ -1,4 +1,6 @@
 import test from 'node:test';
+import {objectVariants,template,legacyResult} from './contract-fixtures.mjs';
+import {schemaIssue} from './assertions.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {toolDefinitions,toolContracts,validateToolInput,isMutating,mutationSchema} from '../../core/lib/tool-contracts.mjs';
@@ -16,7 +18,7 @@ test('exactly four flat advertised descriptors derive all fields from action sch
     assert.equal(def.toolReferenceName,def.name);assert.equal(def.inputSchema.additionalProperties,false);
     assert.equal(Object.hasOwn(def.inputSchema.properties,'request'),false);
     if(toolContracts[def.name].actionSchemas){
-      const fields=new Set(Object.values(toolContracts[def.name].actionSchemas).flatMap(shape=>Object.keys(shape.properties)));
+      const fields=new Set(Object.values(toolContracts[def.name].actionSchemas).flatMap(objectVariants).flatMap(shape=>Object.keys(shape.properties)));
       assert.deepEqual(Object.keys(def.inputSchema.properties).sort(),[...fields].sort());
     }
     for(const key of ['projectRoot','root','homeDir','resourceRoot','expectedBindingId','bindingId','sessionID','offset'])assert.equal(Object.hasOwn(def.inputSchema.properties,key),false);
@@ -29,11 +31,11 @@ for(const [name,actions] of Object.entries(fixtures))for(const [action,input] of
   test(`${name}/${action} has action-specific required fields and rejects extras`,()=>{
     assert.equal(validateToolInput(name,input),input);
     const descriptor=toolContracts[name];
-    for(const key of descriptor.actionSchemas[action].required){const missing={...input};delete missing[key];assert.throws(()=>validateToolInput(name,missing));}
-    for(const field of ['root','projectRoot','homeDir','expectedBindingId','request','offset','arbitrary'])assert.throws(()=>validateToolInput(name,{...input,[field]:1}));
+    for(const key of descriptor.actionSchemas[action].required){const missing={...input};delete missing[key];assert.throws(()=>validateToolInput(name,missing),schemaIssue(`$.${key}`,/requerido/));}
+    for(const field of ['root','projectRoot','homeDir','expectedBindingId','request','offset','arbitrary'])assert.throws(()=>validateToolInput(name,{...input,[field]:1}),schemaIssue(`$.${field}`,/desconocido/));
     for(const field of Object.keys(descriptor.inputSchema.properties).filter(key=>!Object.hasOwn(descriptor.actionSchemas[action].properties,key))){
       const alternate=Object.values(actions).find(value=>Object.hasOwn(value,field));
-      if(alternate)assert.throws(()=>validateToolInput(name,{...input,[field]:alternate[field]}));
+      if(alternate)assert.throws(()=>validateToolInput(name,{...input,[field]:alternate[field]}),schemaIssue(`$.${field}`,/desconocido/));
     }
     assert.equal(isMutating(name,input),descriptor.mutatingActions.includes(action));
   });
@@ -55,20 +57,29 @@ test('advertised evidence rules reject static exit codes and invalid execution P
     for(const exitCode of [0,1]){
       const invalid=request({kind,command:'shasum -a 256 .pulso/project.md',exitCode});
       assert.ok(validateSchema(advertised,invalid).length);
-      assert.throws(()=>validateToolInput('pulso_work',invalid));
+      assert.throws(()=>validateToolInput('pulso_work',invalid),{code:'SCHEMA_INVALID'});
     }
   }
   for(const status of ['pass','fail']){
     const invalid=request({kind:'not_run',status,command:null,exitCode:null});
     assert.ok(validateSchema(advertised,invalid).length);
-    assert.throws(()=>validateToolInput('pulso_work',invalid));
+    assert.throws(()=>validateToolInput('pulso_work',invalid),{code:'SCHEMA_INVALID'});
   }
-  assert.doesNotThrow(()=>validateToolInput('pulso_work',request({kind:'executed',status:'pass',command:'node --test',exitCode:0})));
-  for(const patch of [{command:null,exitCode:0},{command:'   ',exitCode:0},{command:'node --test',exitCode:null},{command:'node --test',exitCode:1}]){
-    assert.throws(()=>validateToolInput('pulso_work',request({kind:'executed',status:'pass',...patch})));
+  const executed=request({kind:'executed',status:'pass',command:'node --test',exitCode:0});
+  assert.deepEqual(validateSchema(advertised,executed),[]);
+  assert.equal(validateToolInput('pulso_work',executed),executed);
+  for(const patch of [{command:null,exitCode:0},{command:'',exitCode:0},{command:'   ',exitCode:0},{command:'node --test',exitCode:null},{command:'node --test',exitCode:1},{command:null,exitCode:1},{command:'x'.repeat(4001),exitCode:0}]){
+    const invalid=request({kind:'executed',status:'pass',...patch});
+    // Public flattened inputSchema and actionSchemas.update are separate surfaces.
+    // Both must reject; validating the invocation alone cannot protect advertising.
+    assert.ok(validateSchema(advertised,invalid).length);
+    assert.throws(()=>validateToolInput('pulso_work',invalid),{code:'SCHEMA_INVALID'});
   }
-  assert.throws(()=>validateToolInput('pulso_work',request({kind:'executed',status:'pass',command:'x'.repeat(4001),exitCode:0})));
-  for(const status of ['fail','blocked','not_run'])assert.doesNotThrow(()=>validateToolInput('pulso_work',request({kind:'executed',status,command:null,exitCode:null})));
+  for(const status of ['fail','blocked','not_run']){
+    const valid=request({kind:'executed',status,command:null,exitCode:null});
+    assert.deepEqual(validateSchema(advertised,valid),[]);
+    assert.equal(validateToolInput('pulso_work',valid),valid);
+  }
 });
 test('invalid semantic inputs and model-selected roots fail closed',()=>{
   for(const action of ['complete_map','attempts','reconcile_attempts','arbitrary'])assert.throws(()=>validateToolInput('pulso_workspace',{action}));
@@ -102,11 +113,10 @@ for(const kind of ['static','manual'])test(`anyOf evidencia ${kind}: hash63 diag
     return true;
   });
 });
-test('anyOf evidencia executed/pass conserva invariantes de comando y salida',()=>{
-  const evidence={...JSON.parse(fs.readFileSync(new URL('../../core/templates/evidence.json',import.meta.url),'utf8')),kind:'executed',status:'pass',command:'node --test',exitCode:0};
-  for(const patch of [{command:null},{command:''},{exitCode:null},{exitCode:1},{command:null,exitCode:1}]){
-    const request={...fixtures.pulso_work.update,actions:[{type:'evidence.add',evidence:{...evidence,...patch}}]};
-    assert.ok(validateSchema(toolContracts.pulso_work.inputSchema,request).length);
-    assert.throws(()=>validateToolInput('pulso_work',request),{code:'SCHEMA_INVALID'});
-  }
+test('compact authored return and legacy persisted envelope have distinct supported entrypoints',()=>{
+  const result=template('result');
+  const request={action:'accept_result',workId:'EXAMPLE-1',expectedRevision:1,delegation:template('delegation'),acceptanceBasis:template('evidence').acceptanceBasis,summary:'Review required'};
+  for(const value of [result,legacyResult()])assert.equal(validateToolInput('pulso_work',{...request,result:value}).result,value);
+  assert.equal(validateToolInput('pulso_work',{action:'validate_result',delegation:request.delegation,result:legacyResult()}).result.schemaVersion,1);
+  assert.throws(()=>validateToolInput('pulso_work',{action:'validate_result',delegation:request.delegation,result}),schemaIssue('$.result.schemaVersion',/requerido/));
 });

@@ -75,7 +75,7 @@ test('repair survives directory and registry failures and obeys the workspace lo
   fs.mkdirSync=(target,...args)=>{if(target===path.join(root,'.pulso/work'))throw new Error('directory interrupted');return mkdir(target,...args);};
   try{assert.throws(()=>prepareWorkspace(root,{homeDir}),/directory interrupted/);}finally{fs.mkdirSync=mkdir;}
   const rename=fs.renameSync;
-  fs.renameSync=(source,dest)=>{if(dest.startsWith(homeDir+path.sep))throw new Error('registry interrupted');return rename(source,dest);};
+  fs.renameSync=(source,dest)=>{if(path.dirname(dest)===path.join(homeDir,'.pulso/projects'))throw new Error('registry interrupted');return rename(source,dest);};
   try{assert.throws(()=>prepareWorkspace(root,{homeDir}),/registry interrupted/);}finally{fs.renameSync=rename;}
   const identity=JSON.parse(fs.readFileSync(path.join(root,'.pulso/project.json')));
   assert.equal(prepareWorkspace(root,{homeDir}).projectId,identity.projectId);

@@ -15,12 +15,36 @@ function temporary(t) {
   return root;
 }
 
+// Editorial wording may change; prohibitions and observable restart obligations
+// must not. These are text sentinels, separate from byte-integrity/package tests.
+function assertTestingSafeguards(text) {
+  assert.match(text,/\b(?:Do not|Never) (?:weaken|relax) assertions\b/,'assertions must not be weakened');
+  assert.match(text,/\b(?:Test|Verify) restart (?:after|following) partial failure and idempotenc(?:ia|y)\b/,'restart and repeated processing are tested together');
+}
+
 test('consolidated BBVA guidance requires documentation and change-appropriate engineering', () => {
   verifyBBVA(coreRoot);
   const text = skill('bbva-engineering');
   assert.deepEqual(Object.keys(integrity), ['bbva-engineering/SKILL.md']);
-  for (const anchor of ['knowledge_technologies', 'knowledge_read', 'CELLS', 'APX', 'ASO', 'Do not weaken assertions', 'end-to-end', 'bubbling/composition', 'subscriptions', 'accessibility', 'restart after partial failure', 'idempotency', 'partial output', 'synthetic data']) assert.ok(text.includes(anchor), anchor);
+  for (const anchor of ['knowledge_technologies', 'knowledge_read', 'CELLS', 'APX', 'ASO', 'end-to-end', 'bubbling/composition', 'subscriptions', 'accessibility', 'idempotency', 'partial output', 'synthetic data']) assert.ok(text.includes(anchor), anchor);
   assert.doesNotMatch(text, /bbva-(apx|cells)|SpringJUnit4ClassRunner|JobLauncherTestUtils|1\.22\.0|4\.9\.3|pulso_delivery|PULSO_TASK_ID/);
+  assertTestingSafeguards(text);
+  for(const [before,after] of [
+    ['Do not weaken assertions','Never relax assertions'],
+    ['Test restart after partial failure','Verify restart following partial failure'],
+  ]) {
+    const editorial=text.replace(before,after);
+    assert.notEqual(editorial,text,before);
+    assertTestingSafeguards(editorial);
+  }
+  for(const [before,after] of [
+    ['Do not weaken assertions','Weaken assertions'],
+    ['Test restart after partial failure','Skip restart after partial failure'],
+    ['and idempotencia (idempotency)','without idempotency'],
+  ]) {
+    assert.ok(text.includes(before),'mutation must alter an existing safeguard');
+    assert.throws(()=>assertTestingSafeguards(text.replace(before,after)),assert.AssertionError);
+  }
 });
 
 test('BBVA integrity still rejects edited bytes and missing or unexpected files', t => {

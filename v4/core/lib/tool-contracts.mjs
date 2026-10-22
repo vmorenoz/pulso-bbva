@@ -61,10 +61,17 @@ export function validateDecision(value){
   if(value.status!=='completed'&&value.acceptedTaskIds?.length)throw new Error('Sólo completed admite acceptedTaskIds no vacío');
   return value;
 }
+const assignmentActions={type:'array',minItems:1,maxItems:20,items:{anyOf:[
+  atLeastOne(object({type:{const:'task.progress'},taskId:id,status:enumeration(['pending','in_progress','blocked','paused']),summary:text(2000)},['type','taskId']),['status','summary']),
+  object({type:{const:'document.register'},document:clone(persistedSchema('work').properties.documents.items)},['type','document'])
+]}};
 const workspaceActions = {
+  get_assignment:action('get_assignment'),
   prepare:action('prepare'),
   bind_continuity:action('bind_continuity',{workId:id,requestKey:id,continuityId:id,objective:text(),repositories:strings,constraints:strings,sourceText:text(8000)},['workId','requestKey','objective','repositories','constraints']),
   get_continuity:action('get_continuity',{continuityId:id},['continuityId']),
+  inspect_continuities:action('inspect_continuities',{workId:id,continuityId:id,...readPage},['workId']),
+  resume_continuity:action('resume_continuity',{workId:id,continuityId:id,expectedResumeBasis:{type:'string',pattern:'^[a-f0-9]{64}$'},resumeMode:enumeration(['explicit','automatic'])},['workId','continuityId','expectedResumeBasis']),
   update_intent:action('update_intent',{continuityId:id,expectedRevision:integer(1),objective:text(),constraints:strings,repositories:strings,compatibleDelegationIds:ids},['continuityId','expectedRevision','objective','constraints']),
   status:action('status',{...readPage,continuityId:id,status:enumeration(['pending','in_progress','blocked','paused'])}),
   validate:action('validate',{fresh:{type:'boolean'}}),
@@ -72,7 +79,9 @@ const workspaceActions = {
   recover:action('recover')
 };
 const workActions = {
-  get:action('get',{workId:id,section:enumeration(['overview','tasks','criteria','evidence','results','documents','blockers','decisions','acceptanceChanges','all']),...readPage},['workId']),
+  update_assignment:action('update_assignment',{...workRef,delegationId:id,operationId:id,actions:assignmentActions},['workId','expectedRevision','delegationId','operationId','actions']),
+  get_assignment_receipts:action('get_assignment_receipts',{workId:id,delegationId:id,operationId:id,...readPage},['workId','delegationId']),
+  get:action('get',{workId:id,section:enumeration(['overview','tasks','criteria','evidence','results','documents','blockers','decisions','acceptanceChanges','assignmentOperations','evidenceSupersessions','all']),...readPage},['workId']),
   get_delegation:action('get_delegation',{workId:id,delegationId:id,continuityId:id},['workId','delegationId']),
   reconcile_delegation:action('reconcile_delegation',{workId:id,delegationId:id,...continuityRef,reason:text(2000),source:object({text:text(8000),messageRef:text(2000)},['text']),resolution:enumeration(['not_dispatched','reported_terminal','retired','explicitly_reconciled'])},['workId','delegationId','continuityId','intentRevision','reason','resolution']),
   prepare_delegation:action('prepare_delegation',{
@@ -88,6 +97,9 @@ const workActions = {
     ...workRef,operationId:id,summary:text(2000),criterionIds:{type:'array',items:id,minItems:1,maxItems:50},
     source:object({text:text(8000),messageRef:text(2000)},['text']),limitations:{type:'array',items:text(1000),maxItems:30}
   },['workId','expectedRevision','summary','criterionIds','source','limitations']),
+  supersede_evidence:action('supersede_evidence',{
+    ...workRef,operationId:id,evidenceId:id,replacementEvidenceId:id,criterionIds:{type:'array',items:id,minItems:1,maxItems:50},reason:text(2000)
+  },['workId','expectedRevision','operationId','evidenceId','replacementEvidenceId','criterionIds','reason']),
   validate_result:action('validate_result',{delegation:clone(persistedSchema('delegation')),result:clone(persistedSchema('result'))},['delegation','result']),
   create:action('create',clone(createInput.properties),clone(createInput.required)),
   update:action('update',mutationInput.properties,mutationInput.required),
@@ -136,12 +148,16 @@ function descriptor(name,displayName,modelDescription,actions,mutatingActions=[]
   return {name,displayName:`Pulso · ${displayName}`,modelDescription,canBeReferencedInPrompt:true,toolReferenceName:name,inputSchema:inputSchema||flatSchema(actions),actionSchemas:actions,mutatingActions};
 }
 export const toolContracts={
-  pulso_workspace:descriptor('pulso_workspace','Workspace','Prepara, consulta, valida, sincroniza o recupera metadatos Pulso. bind_continuity vincula un objetivo; continuityId explícito permite retomar en otra sesión. get_continuity devuelve la cápsula; update_intent preserva sólo compatibleDelegationIds explícitos. status admite continuityId sin adoptar foco global. status devuelve data.works con items completos y nextCursor; sigue hasMore.',workspaceActions,['prepare','sync','recover','bind_continuity','update_intent']),
+  pulso_workspace:descriptor('pulso_workspace','Workspace','Prepara, consulta, valida, sincroniza o recupera metadatos Pulso. bind_continuity vincula un objetivo; continuityId explícito permite retomar con intención confirmada. Si otra sesión perdió contexto: inspect_continuities requiere workId seleccionado y pagina cápsulas vigentes sin adoptar; resume_continuity con workId/continuityId/expectedResumeBasis transfiere dueño con permiso e identidad nativos actuales, sin cambiar intención ni liberar reservas. El hash es precondición, no credencial. get_continuity devuelve la cápsula; update_intent preserva sólo compatibleDelegationIds explícitos. status admite continuityId sin adoptar foco global. Sigue hasMore/nextCursor.',workspaceActions,['prepare','sync','recover','bind_continuity','resume_continuity','update_intent']),
   pulso_work:descriptor('pulso_work','Trabajo','Consulta o actualiza un objetivo. get devuelve readiness, páginas y acceptanceBasis. prepare_delegation es mutación: contractVersion:2 conserva snapshot/base/prompt por requestKey y devuelve delegationId y specialistPrompt. get_delegation recupera contrato, retornos e intentos. accept_result v2 recibe IDs, operationId y returnId XOR reportedReturn; captura Markdown antes de validar decision. decision contiene status, summary, acceptedTaskIds explícitos para completed y detalles result opcionales. reportedTerminal resuelve sólo una reserva reportada; no prueba cese físico. reconcile_delegation no detiene agentes. Legacy sigue admitido. accept_delivery conserva aceptación manual declarada e intenta cierre; no completa tareas. validate_result valida sin escribir. Ningún retorno satisface criterios automáticamente ni prueba ejecución.',workActions,['create','update','block','close','reopen','prepare_delegation','reconcile_delegation','accept_result','accept_delivery']),
   pulso_history:descriptor('pulso_history','Historial','Consulta cierres con fechas, ciclos, resumen completo, limitaciones y referencias. data.items se pagina con limit/cursor; sigue hasMore y nextCursor. Cambiar historial o filtros invalida el cursor.',null,[],historySchema),
   pulso_context:descriptor('pulso_context','Contexto','Consulta o registra contexto, preferencias y aprendizajes. read devuelve entradas completas, revisions y nextCursor. Las escrituras exigen scope y expectedRevision; preferencias y aprendizajes requieren source explícito. summary es una vista limitada a 8000 caracteres.',contextActions,['set_context','set_preference','remove_preference','add_learning'])
 };
-toolContracts.pulso_work.mutatingActions.push('close_by_user');
+toolContracts.pulso_work.mutatingActions.push('close_by_user','update_assignment','supersede_evidence');
+toolContracts.pulso_workspace.modelDescription+=' get_assignment obtiene identidad y capacidades acotadas del hijo probado por el adaptador; no acepta credenciales del modelo.';
+toolContracts.pulso_workspace.modelDescription+=' El adaptador, si soporta la capacidad, puede detectar continuidad interrumpida al recibir una petición real del primario. resumeMode:automatic expresa que el coordinador revisó objetivo y consentimiento auténticos y encontró compatibilidad; no es autorización ni detector semántico. Requiere prueba privada fresca del adaptador, candidato único activo y señales nativas seguras. Omisión/explicit conserva retoma deliberada existente. No retomar ante objetivo nuevo, pausa/cancelación ni hijo ocupado/unknown. Informa al usuario, conserva reservas y distingue owner transfer de cese físico.';
+toolContracts.pulso_work.modelDescription+=' update_assignment sólo permite al hijo nativo probado progreso no terminal de sus tareas y registrar su output exacto; operationId estable y expectedRevision. get_assignment_receipts confirma acciones ya aplicadas para no repetirlas. No concede aceptación, evidence.add, cierre ni delegación.';
+toolContracts.pulso_work.modelDescription+=' supersede_evidence es decisión del coordinador: reemplaza solo vínculos criterionIds de un intento not_run/blocked por evidencia PASS ordinaria ya vinculada y vigente, con operationId y reason. Conserva observación histórica, tareas y requisitos; no retira FAIL reales ni acepta origin:user_acceptance como comprobación técnica. get section:evidenceSupersessions pagina el historial del coordinador.';
 toolContracts.pulso_work.modelDescription+=' close_by_user cierra done con verificación user_approved: todos los criterios y tareas no canceladas revisados y aprobados por usuario, readiness true y sin bloqueos pendientes. Conserva diagnóstico anterior como histórico, evidencia/resultados intactos y cancelaciones legítimas. No acredita ejecución de tests ni cese de agentes. Requiere source declarada por el host (core no autentica el texto), operationId y revisión; no inferir petición desde evidencia. Encargos pendientes requieren reconciliación previa.';
 function freeze(value){if(value&&typeof value==='object'){for(const child of Object.values(value))freeze(child);Object.freeze(value);}return value;}
 for(const descriptor of Object.values(toolContracts)){

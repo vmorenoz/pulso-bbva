@@ -20,6 +20,8 @@ gestionan snapshots v2. No hay migración ni recreación de bases históricas.
 bind_continuity {workId, requestKey, objective, repositories: string[],
                  constraints: string[], sourceText?, continuityId?}
 get_continuity {continuityId}
+inspect_continuities {workId, continuityId?, limit?, cursor?}
+resume_continuity {workId, continuityId, expectedResumeBasis}
 update_intent {continuityId, expectedRevision, objective, constraints,
                repositories?, compatibleDelegationIds?}
 status {continuityId?, ...paginación existente}
@@ -39,9 +41,41 @@ handle. Otra carga con esa clave falla. `nativeContext:{sessionID,messageID,call
 se recibe exclusivamente en el tercer argumento de `executeTool`, desde el
 adaptador; esos campos no se admiten en JSON del modelo. Si hay owner session,
 consultas y mutaciones dirigidas exigen esa sesión. **Retomar deliberadamente**
-desde otra sesión exige `bind_continuity` con `continuityId` explícito y los datos
-de intención actuales; cambia el owner, no el snapshot ni la intención. Sin
-identidad nativa, el handle sólo asegura coherencia: no autentica conversaciones.
+desde otra sesión admite `bind_continuity` con `continuityId` explícito e intención
+actual confirmada, o la receta de recuperación siguiente. Cambia el owner, no el
+snapshot ni la intención. Sin identidad nativa, el handle legacy sólo asegura
+coherencia: no autentica conversaciones.
+
+Si la nueva sesión perdió esos campos, `inspect_continuities` lee únicamente el
+Work seleccionado: devuelve `items`, `total`, `hasMore`, `nextCursor` y la intención
+completa vigente de cada candidato, con `resumeBasis` y `resumable`. Un
+`continuityId` opcional selecciona exactamente ese candidato. No busca ni adopta
+un foco global, no escribe y no adquiere el mutex escritor. Varios candidatos no
+autorizan elegir el más reciente. Sigue la paginación y selecciona deliberadamente.
+
+`resume_continuity` recibe ese Work/CONT y `expectedResumeBasis`, solicita permiso
+nativo actual en el adaptador y exige identidad de sesión real. Bajo lock valida
+raíz/proyecto, Work/ciclo abierto y cápsula íntegra (intención, dueño e historia).
+La base es CAS, **no credencial**. No se aceptan IDs nativos en JSON. Cambiar
+progreso del Work no invalida la base; cambiar intención/dueño/ciclo/cierre sí.
+La misma retoma confirmada puede recuperarse tras perder su respuesta: mismo
+dueño/base/identidad/intención y último evento coincidente devuelven `duplicate:true`
+sin otra escritura. No se reutiliza un hash viejo ante cambios posteriores.
+
+El recibo compacto conserva `readWith:get_continuity`; no reescribe intención,
+crea CONT, cambia foco ni libera reservas. `error.recovery` da IDs, lectura y
+siguientes acciones para dueño ajeno, base obsoleta y reservas. Una reserva resuelta
+puede seguir pendiente de incorporación/retirada (`DELEGATION_AWAITING_INCORPORATION`);
+un intento nativo irresuelto sigue bloqueado (`DELEGATION_NATIVE_UNRESOLVED`).
+Ninguna de estas acciones acredita cancelación/cese físico ni autoriza redispatch.
+El cambio de sesión no exige liberación administrativa; un bloqueo real
+`METADATA_BUSY` con `recovery.manualOnly` conserva su recuperación manual
+documentada, sin retirar locks por edad ni robarlos.
+
+La transferencia nueva está disponible donde el adaptador proporciona sessionID
+nativo actual. Los adaptadores que sólo exponen binding conservan su flujo legacy;
+un binding de ventana no se convierte en identidad de chat. Sin sessionID, resume
+falla con `NATIVE_SESSION_IDENTITY_UNAVAILABLE`, sin degradar un dueño a null.
 
 Las respuestas de herramienta de `bind_continuity` y `update_intent` son recibos
 compactos con identidad, ciclo, propietario y revisiones confirmadas; no repiten
@@ -552,6 +586,63 @@ o Work cerrado; no repite el cierre. Otra carga con la misma clave falla. El rec
 se recupera desde la evidencia canónica del Work, no de una proyección. Sin operationId
 no hay idempotencia implícita: confirmar evidenceId antes de repetir.
 
+## `supersede_evidence` — sustitución selectiva de vínculos
+
+```text
+action: "supersede_evidence"
+workId: ID
+expectedRevision: entero positivo actual
+operationId: ID
+evidenceId: ID del intento anterior
+replacementEvidenceId: ID de la observación posterior
+criterionIds: ID[1..50], sin duplicados
+reason: texto no vacío, máximo 2000
+```
+
+Sólo el coordinador puede sustituir vínculos de un intento con status
+`not_run`/`blocked`. No retira un FAIL real. La evidencia posterior debe ser PASS
+ordinaria (`executed`, `static` o `manual`, nunca `origin:user_acceptance`), estar
+ya vinculada a cada criterio seleccionado y conservar informe íntegro, archivos
+vigentes y acceptanceBasis pertinente al Work/ciclo actual. La operación no
+interpreta prosa: el coordinador decide y documenta en reason la equivalencia
+entre métodos para ese resultado, sin dispensar un requisito local explícito.
+
+Un «pasó en CI/workflow/ambientes previos» referido claramente al cambio actual
+se registra con `update` → `evidence.add`: observación ordinaria `manual/pass`,
+`command:null`, `exitCode:null`, reporte y basis con procedencia `user_reported`
+declarada en texto. No requiere acceso de Pulso a CI ni URL/runID/SHA remoto cuando
+el contexto basta. Obtener la base vigente antes de observar y documentar esa
+correspondencia; checkedAt es la incorporación, no una fecha de ejecución remota
+inventada. El fingerprint real del reporte acredita sus bytes, no una ejecución.
+Un reporte genérico no cubre por sí mismo otros criterios o tareas, ni renueva
+evidencia anterior para un cambio distinto. Ante ambigüedad, aclarar sólo el alcance
+incierto. `accept_delivery` es aceptación del usuario, no este tipo de observación.
+
+Sólo se retira evidenceId de `criterion.evidenceIds` para criterionIds. Se
+conservan íntegros el intento local, sus vínculos históricos en la observación,
+otros criterios, tareas, requisitos, modo de aceptación, bloqueos y decisiones.
+No completa una tarea blocked ni limpia blockers: si el reporte cubre también
+su aceptación y taskIds, el coordinador reconcilia después esa tarea y el bloqueo
+resuelto mediante `task.set_status`/`work.set_overview` existentes. No toca tareas
+ajenas. Consultar readiness real y cerrar normalmente sólo cuando todo el alcance
+esté resuelto; ni silencio ni antigüedad constituyen finalización.
+
+`Work.evidenceSupersessions` es opcional, append-only y se persiste en la misma
+revisión que los vínculos. Registra operación, Work/ciclo, criterios, evidencias,
+motivo, base histórica y appliedRevision. `get section:evidenceSupersessions`
+devuelve páginas completas para el coordinador; la proyección child no expone
+este historial global, ni siquiera con section:all.
+
+CAS y mutex protegen la primera escritura; el adaptador conserva ask y su guarda
+de cancelación. Mismo operationId/carga/ciclo recupera el recibo sin repetir ni
+renovar bases, incluso después de cambiar criterios o cerrar. Otro contenido o
+un ciclo reabierto rechaza. El recibo indica applied/duplicate, appliedRevision,
+currentRevision y readiness actual; confirmar una decisión histórica no acredita
+aceptación vigente. Tras fallo de proyección, el retry exacto repara sin duplicar
+la decisión. Errores usan `EVIDENCE_SUPERSESSION_INVALID` con issues estructurados
+code/entity (por ejemplo `REPLACEMENT_STALE`, `SOURCE_NOT_LINKED`,
+`OPERATION_CONFLICT`); CAS usa `REVISION_CONFLICT`.
+
 ## Modo de aceptación y bases compatibles
 
 Cada criterio admite `acceptanceMode?: "evidence" | "user" | "both"`:
@@ -635,3 +726,48 @@ reintento ciego. La recuperación existente no borra documentos huérfanos.
 El contrato durable usa los mutexes breves de metadatos descritos arriba; no son
 locks sobre la ejecución de especialistas ni un scheduler. No se garantiza que
 runtimes antiguos acepten los campos nuevos.
+
+
+## Herramientas acotadas del especialista
+
+El adaptador entrega `authorization` confiable fuera del JSON del modelo. Sólo un
+hijo con sesión/mensaje/rol y ToolPart padre correlacionados con un dispatch
+canónico obtiene capacidades; IDs copiados del prompt no son credenciales.
+`get_assignment` expone selección y límites, sin robar el owner. Cada llamada
+revalida owner actual, ciclo, intención (o compatibilidad explícita), asignación,
+base de aceptación y estado durable. Transferir owner revoca las tools del hijo
+anterior; su retorno aún puede capturarse, sin afirmar que el proceso terminó.
+
+| Tool | Especialista probado | Denegado |
+| --- | --- | --- |
+| workspace | `get_assignment` | status/global, bind/resume/update_intent, prepare/recover/sync, telemetría |
+| work | `get` del Work propio (projection:assignment, completeWork:false), `get_delegation` propio, `get_assignment_receipts` propio, `update_assignment` propio | otro Work/encargo, update general, preparar/reconciliar delegación, aceptar, evidence.add, supersede_evidence, cierre/reapertura |
+| history | filtro obligatorio de Work propio | global/otro Work |
+| context | read/summary con scope:project explícito | user/all o cualquier escritura |
+
+`update_assignment {workId,delegationId,operationId,expectedRevision,actions}`
+admite sólo `task.progress {taskId,status?,summary?}` (pending/in_progress/blocked/
+paused; tareas del encargo no realizadas/canceladas) y `document.register
+{document:{kind,path,templateVersion}}` (output exacto, dentro de writeScope, archivo
+existente sin symlinks). No escribe el documento, crea evidencia ni enlaza criterios.
+Los permisos de archivo/ejecución del rol se conservan; las tools no son un sandbox
+para comandos externos ni autorización para editar metadata directamente.
+
+La mutación y `Work.assignmentOperations[]` se guardan en el mismo commit atómico:
+operationId, hash de carga lógica, identidad de encargo/sesión, intención vigente,
+revisión aplicada, fecha y cambios (hash real del documento si se registra).
+Misma clave/carga recupera ese recibo sin repetir cambios, aunque la revisión
+original ya no sea actual; otra carga falla. expectedRevision no forma parte del
+hash pero exige CAS hasta el primer commit. Hermanos concurrentes releen tras
+REVISION_STALE, sin sobrescribir. El historial de recibos es append-only y opcional
+para Works legacy. `get_assignment_receipts {workId,delegationId,operationId?,limit?,
+cursor?}` devuelve páginas completas; el coordinador verifica lo aplicado antes de
+incorporar el reporte, nunca vuelve a emitir acciones que ya constan.
+
+Fallo después del commit del Work conserva receipt y `persistence.applied`; recuperar
+el recibo y reparar proyecciones desde el coordinador, sin repetir efectos. Status,
+summary, documentos y recibos no cambian la base semántica de aceptación. Cambios
+de criterio, rol, alcance o dependencias siguen invalidándola; no se recalculan
+bases para aceptar trabajo antiguo. Sólo el coordinador incorpora observaciones,
+acepta tareas y cierra. Si el adaptador no acredita hijos, prepare devuelve
+assignmentCapabilities.available:false y el especialista conserva retorno Markdown.

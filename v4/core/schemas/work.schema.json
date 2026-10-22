@@ -537,6 +537,174 @@
         "required":["id","cycle","registeredAt","delegationId","requestHash","report","sha256","acceptedTaskIds","acceptanceBasis"]
       }
     },
+    "assignmentOperations": {
+      "type": "array",
+      "description": "Append-only atomic receipts for scoped assignment operations; absent in legacy Work.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+          },
+          "workId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+          },
+          "delegationId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+          },
+          "continuityId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+          },
+          "cycle": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "intentRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "appliedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sessionID": {
+            "type": "string",
+            "minLength": 1
+          },
+          "parentSessionID": {
+            "type": "string",
+            "minLength": 1
+          },
+          "parentCallID": {
+            "type": "string",
+            "minLength": 1
+          },
+          "agent": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requestHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "changes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "type": {
+                      "const": "task.progress"
+                    },
+                    "taskId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "in_progress",
+                        "blocked",
+                        "paused"
+                      ]
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "taskId"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "type": {
+                      "const": "document.register"
+                    },
+                    "document": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "kind": {
+                          "enum": [
+                            "work",
+                            "spec",
+                            "plan",
+                            "research",
+                            "review",
+                            "decision",
+                            "delivery",
+                            "evidence",
+                            "project"
+                          ]
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?![A-Za-z]:)[^\\u0000]+$"
+                        },
+                        "templateVersion": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "path",
+                        "templateVersion"
+                      ]
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "document",
+                    "sha256"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "operationId",
+          "workId",
+          "delegationId",
+          "continuityId",
+          "cycle",
+          "intentRevision",
+          "appliedRevision",
+          "sessionID",
+          "parentSessionID",
+          "parentCallID",
+          "agent",
+          "requestHash",
+          "recordedAt",
+          "changes"
+        ]
+      }
+    },
     "closure": {
       "anyOf": [
         {
@@ -830,6 +998,131 @@
         ]
       },
       "minItems": 0
+    },
+    "evidenceSupersessions": {
+      "type": "array",
+      "description": "Append-only, cycle-scoped decisions replacing selected criterion acceptance links; observations remain immutable.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+          },
+          "operationId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+          },
+          "evidenceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+          },
+          "replacementEvidenceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+          },
+          "criterionIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+            }
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "pattern": "\\S"
+          },
+          "requestHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "cycle": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "appliedRevision": {
+            "type": "integer",
+            "minimum": 2
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "acceptanceBasis": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "criteria": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "sha256"
+                  ]
+                }
+              },
+              "tasks": {
+                "type": "array",
+                "maxItems": 0,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "sha256"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "criteria",
+              "tasks"
+            ]
+          }
+        },
+        "required": [
+          "workId",
+          "operationId",
+          "evidenceId",
+          "replacementEvidenceId",
+          "criterionIds",
+          "reason",
+          "requestHash",
+          "cycle",
+          "appliedRevision",
+          "at",
+          "acceptanceBasis"
+        ]
+      }
     }
   },
   "required": [

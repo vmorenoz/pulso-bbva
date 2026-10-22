@@ -29,6 +29,9 @@ function specialistPrompt(root,delegation,resourcePaths){
     paths('Alcance de escritura (relativo al workspace)',delegation.writeScope)||'Alcance de escritura: ninguno.',
     '## Condiciones',
     conditions.length?conditions.map(value=>`- ${value}`).join('\n'):'Sin condiciones adicionales.',
+    '## Herramientas de la asignación',
+    'Si el adaptador confirma tu sesión hija, usa pulso_workspace.get_assignment para consultar capacidades: lectura del Work/encargo propio, historial de ese Work y contexto project; pulso_work.update_assignment sólo registra progreso no terminal propio y el output exacto. Usa operationId estable y revisión actual; ante respuesta perdida consulta get_assignment_receipts, no repitas efectos. No habilita evidence.add, aceptación, cierre, delegación ni ediciones directas de metadata. Si falta prueba nativa, informa el límite y devuelve el reporte sin mutar metadata.',
+    'Incluye en «Comprobación y pendientes» las acciones Pulso ya aplicadas con operationId, delegationId y appliedRevision para que el coordinador verifique el recibo y no las repita.',
     '## Entrega',
     delegation.output==='conversation'?null:`Archivo de salida (relativo al workspace): ${delegation.output}`,
     'Responde en Markdown con las secciones «## Resultado», «## Cambios o hallazgos» y «## Comprobación y pendientes». Describe el estado en lenguaje natural, los cambios o hallazgos, las comprobaciones realizadas y sus resultados, y las limitaciones o preguntas pendientes.'

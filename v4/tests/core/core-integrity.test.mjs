@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {closureIssue} from './assertions.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -28,10 +29,11 @@ function evidence(root,id='E-1',criterionIds=['AC-1'],taskIds=['T-1']){
 }
 function ready(root){
   update(root,[
-    {type:'task.add',task:{id:'T-1',title:'Implementar',criterionIds:['AC-1'],agent:'pulso-executor',status:'done',dependsOn:[],writeScope:['source.txt'],resources:[],acceptance:['Aceptación inicial'],evidenceIds:[],summary:'Completada'}}
+    {type:'task.add',task:{id:'T-1',title:'Implementar',criterionIds:['AC-1'],agent:'pulso-executor',status:'pending',dependsOn:[],writeScope:['source.txt'],resources:[],acceptance:['Aceptación inicial'],evidenceIds:[],summary:'Completada'}}
   ]);
   update(root,[
     {type:'evidence.add',evidence:evidence(root)},
+    {type:'task.set_status',taskId:'T-1',status:'done'},
     {type:'document.register',document:{kind:'evidence',path:'report.txt',templateVersion:'qa@1.0'}}
   ]);
   return readWork(root,workId);
@@ -52,45 +54,8 @@ function expectPartial(callback,revision){
   });
 }
 
-for(const field of ['description','verification'])test(`criterion ${field} changes invalidate prior acceptance and persist reason and canonical acceptance snapshots`,t=>{
-  const root=fixture(t),before=ready(root);
-  update(root,[{type:'criterion.update',criterionId:'AC-1',[field]:'Nuevo requisito',reason:'Cambio solicitado por el usuario'}]);
-  const changed=readWork(root,workId);
-  assert.deepEqual(changed.objective.criteria[0].evidenceIds,[]);
-  assert.deepEqual(changed.tasks[0].evidenceIds,[]);
-  assert.equal(changed.tasks[0].status,'pending');
-  assert.deepEqual(changed.evidence,before.evidence);
-  const record=changed.acceptanceChanges[0];
-  assert.equal(record.reason,'Cambio solicitado por el usuario');
-  assert.equal(record.entity,'criterion');
-  assert.deepEqual(record.before,{description:before.objective.criteria[0].description,verification:before.objective.criteria[0].verification});
-  assert.deepEqual(record.after,{description:changed.objective.criteria[0].description,verification:changed.objective.criteria[0].verification});
-  assert.ok(Number.isFinite(Date.parse(record.at)));
-  assert.throws(()=>closeWork(root,workId,{summary:'No debe cerrar'}),/tareas abiertas/);
-  update(root,[{type:'task.set_status',taskId:'T-1',status:'done'}]);
-  assert.throws(()=>closeWork(root,workId,{summary:'Tampoco debe cerrar'}),/Falta evidencia positiva/);
-  update(root,[{type:'evidence.add',evidence:evidence(root,'E-2')}]);
-  assert.equal(closeWork(root,workId,{summary:'Aceptación nueva explícita'}).status,'done');
-});
-
-test('task acceptance changes invalidate task and objective evidence; metadata-only updates preserve acceptance',t=>{
-  const root=fixture(t),before=ready(root);
-  update(root,[{type:'task.update',taskId:'T-1',patch:{title:'Título corregido'}}]);
-  let work=readWork(root,workId);
-  assert.equal(work.tasks[0].status,'done');
-  assert.deepEqual(work.tasks[0].evidenceIds,['E-1']);
-  assert.deepEqual(work.acceptanceChanges,[]);
-  update(root,[{type:'task.update',taskId:'T-1',reason:'Cambio de aceptación solicitado',patch:{acceptance:['Aceptación más estricta']}}]);
-  work=readWork(root,workId);
-  assert.equal(work.tasks[0].status,'pending');
-  assert.deepEqual(work.tasks[0].evidenceIds,[]);
-  assert.deepEqual(work.objective.criteria[0].evidenceIds,[]);
-  assert.deepEqual(work.evidence,before.evidence);
-  assert.deepEqual(work.acceptanceChanges[0].before.acceptance,['Aceptación inicial']);
-  assert.deepEqual(work.acceptanceChanges[0].after.acceptance,['Aceptación más estricta']);
-  assert.match(work.acceptanceChanges[0].reason,/Cambio de aceptación/);
-  assert.throws(()=>closeWork(root,workId,{summary:'No debe cerrar'}),/tareas abiertas/);
-});
+// Acceptance-change matrices live in work-mutations.test.mjs. This file keeps
+// cross-document integrity, historical observations and partial persistence.
 
 test('changing a task criterion reopens it and clears acceptance links on old and new criteria',t=>{
   const root=fixture(t);ready(root);
@@ -201,9 +166,9 @@ test('active missing reports and stale evidence remain rejected, while cancellat
   const root=fixture(t);ready(root);
   fs.unlinkSync(path.join(root,'report.txt'));
   assert.throws(()=>update(root,[{type:'work.set_overview',summary:'No debe guardar'}]),/Documento no existe|Informe no existe/);
-  assert.throws(()=>closeWork(root,workId,{summary:'No debe cerrar'}),/Evidencia obsoleta.*report.txt/);
+  assert.throws(()=>closeWork(root,workId,{summary:'No debe cerrar'}),closureIssue('EVIDENCE_STALE','AC-1',/report.txt/));
   fs.writeFileSync(path.join(root,'report.txt'),'PASS');fs.writeFileSync(path.join(root,'source.txt'),'changed');
-  assert.throws(()=>closeWork(root,workId,{summary:'Tampoco debe cerrar'}),/Evidencia obsoleta/);
+  assert.throws(()=>closeWork(root,workId,{summary:'Tampoco debe cerrar'}),closureIssue('EVIDENCE_STALE','AC-1',/source.txt/));
   fs.unlinkSync(path.join(root,'report.txt'));
   assert.equal(closeWork(root,workId,{outcome:'cancelled',summary:'Cancelado sin evidencia vigente'}).status,'cancelled');
 });

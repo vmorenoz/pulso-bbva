@@ -54,7 +54,7 @@ test('identidad rechaza symlinks del registro sin escribir al destino',t=>{
 });
 test('fallo al registrar conserva UUID local para reintento estable',t=>{
   const root=temp(t),homeDir=temp(t),rename=fs.renameSync;
-  fs.renameSync=(source,dest)=>{if(String(dest).startsWith(homeDir+path.sep))throw new Error('Registro no disponible');return rename(source,dest);};
+  fs.renameSync=(source,dest)=>{if(path.dirname(dest)===path.join(homeDir,'.pulso/projects'))throw new Error('Registro no disponible');return rename(source,dest);};
   try{assert.throws(()=>prepareWorkspace(root,{homeDir}),/no disponible/);}finally{fs.renameSync=rename;}
   const local=JSON.parse(fs.readFileSync(path.join(root,'.pulso/project.json')));
   assert.equal(prepareWorkspace(root,{homeDir}).projectId,local.projectId);

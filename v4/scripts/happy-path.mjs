@@ -44,7 +44,7 @@ export async function happyPath({resourceRoot=fileURLToPath(new URL('../core',im
     assert.deepEqual(prepared.hostContext.paths.writeScope,[path.join(projectRoot,'fixture')]);
     assert.deepEqual(prepared.hostContext.paths.readScope,['fixture','request.md'].map(p=>path.join(projectRoot,p)));
     assert.deepEqual(prepared.delegation.resources,resources);
-    assert.deepEqual(prepared.specialistPrompt.match(/^## .+$/gm),['## Objetivo','## Alcance','## Condiciones','## Entrega']);
+    assert.deepEqual(prepared.specialistPrompt.match(/^## .+$/gm),['## Objetivo','## Alcance','## Condiciones','## Herramientas de la asignación','## Entrega']);
     assert.ok(prepared.specialistPrompt.includes(`Workspace: ${projectRoot}`));
     assert.ok(prepared.specialistPrompt.includes('- request.md'));
     assert.doesNotMatch(prepared.specialistPrompt,/acceptanceBasis|sha256|schemaVersion|workRevision|resourceRoot|\.schema\.json|Local Node execution|```json|"(?:delegation|hostContext)"/);

@@ -1,4 +1,6 @@
+import {primaryClient} from '../opencode/native-fixture.mjs';
 import test from 'node:test';
+import {assertRolePermissions} from './role-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,8 +25,8 @@ for(const target of ['opencode','vscode'])test(`${target}: builds independently,
   const init = fs.readFileSync(path.join(output,target === 'opencode' ? 'skills/pulso-init/SKILL.md' : 'resources/skills/pulso-init/SKILL.md'),'utf8');
   for (const resource of [primary,explorer,init]) {
     assert.match(resource,/mode: project_initialization/);
-    assert.match(resource,/sin prepare_delegation, accept_result, Work ni continuidad/);
-    assert.match(resource,/otras delegaciones persistentes/);
+    assert.match(resource,/sin (?:prepare_delegation, accept_result, Work ni continuidad|specialistPrompt preparado, Work, tareas ni continuidad)/);
+    assert.match(resource,/(?:otras|demás) delegaciones persistentes/);
   }
   assert.match(init,/esqueleto de prepare.*no es un mapa/);
   assert.doesNotMatch(init,/crea uno de mapeo|Registra tarea de Explorer|Cierra el Work exclusivo/);
@@ -48,35 +50,9 @@ for(const target of ['opencode','vscode'])test(`${target}: builds independently,
     assert.match(specialist,/No encontrarlo en el índice no demuestra que esté ausente del disco/);
     assert.match(specialist,/git diff --check comprueba el diff, no el comportamiento/);
   }
-  const field = (body,name) => JSON.parse(body.match(new RegExp(`^${name}: (.+)$`,'m'))[1]);
-  if (target === 'opencode') {
-    assert.equal(field(primary,'permission').task['pulso-explorer'],'allow');
-    const permissions = field(explorer,'permission');
-    assert.equal(permissions.edit['.pulso/project.md'],'allow');
-    for (const key of ['*','.pulso/state.json','.pulso/history.jsonl','.pulso/work/**/work.json']) assert.equal(permissions.edit[key],'deny');
-    assert.equal(permissions.bash['*'],'deny');
-    assert.equal(permissions.task['*'],'deny');
-    assert.equal(permissions.pulso_work,'deny');
-    assert.equal(field(fs.readFileSync(agentPath('pulso-executor'),'utf8'),'permission').edit['.pulso/project.md'],'deny');
-  } else {
-    assert.ok(!listFiles(output).some(file=>file.endsWith('.prompt.md')),'no prompt tool-list override');
-    const catalog=JSON.parse(fs.readFileSync(path.join(output,'resources/agents/catalog.json')));
-    for(const role of [catalog.orchestrator,...catalog.specialists]) {
-      const tools=field(fs.readFileSync(agentPath(role.id),'utf8'),'tools');
-      assert.deepEqual(tools.filter(tool=>tool.startsWith('pulso-knowledge/')),
-        ['search','read','outline','related','status','sources','technologies'].map(name=>`pulso-knowledge/knowledge_${name}`));
-      assert.ok(!tools.some(tool=>tool.includes('*')));
-      if(role.id!==catalog.orchestrator.id) {
-        for(const tool of ['agent','pulso_workspace','pulso_work','pulso_history','pulso_context']) assert.ok(!tools.includes(tool));
-      }
-    }
-    assert.ok(field(primary,'tools').includes('agent'));
-    assert.ok(field(primary,'agents').includes('pulso-explorer'));
-    assert.ok(!field(primary,'tools').includes('edit'));
-    assert.ok(field(explorer,'tools').includes('edit'));
-    for (const tool of ['agent','execute','pulso_work','pulso_workspace']) assert.ok(!field(explorer,'tools').includes(tool));
-    assert.deepEqual(field(explorer,'agents'),[]);
-  }
+  const catalog=JSON.parse(fs.readFileSync(path.join(output,'resources/agents/catalog.json')));
+  for(const role of [catalog.orchestrator,...catalog.specialists])assertRolePermissions(target,fs.readFileSync(agentPath(role.id),'utf8'),role,catalog);
+  if(target==='vscode')assert.ok(!listFiles(output).some(file=>file.endsWith('.prompt.md')),'no prompt tool-list override');
   const core=await import(pathToFileURL(path.join(output,'resources/lib/semantic-tools.mjs')).href);assert.equal(typeof core.executeTool,'function');
   fs.writeFileSync(path.join(output,'unrelated.txt'),'accidental artifact');assert.throws(()=>verifyPackage(target,output,{coreRoot:path.join(root,'core')}),/inventory/);
 });
@@ -103,9 +79,9 @@ for(const target of ['opencode','vscode'])test(`${target}: actual extracted arch
   if(target==='opencode') {
     const {PulsoPlugin}=await import(pathToFileURL(path.join(payload,'plugin/index.mjs')).href);
     const workspace=path.join(root,'workspace'),home=path.join(root,'home');fs.mkdirSync(workspace);fs.mkdirSync(home);
-    const plugin=await PulsoPlugin({directory:workspace,homeDir:home});
+    const plugin=await PulsoPlugin({directory:workspace,homeDir:home,client:primaryClient(workspace)});
     assert.deepEqual(Object.keys(plugin.tool).sort(),['pulso_context','pulso_history','pulso_work','pulso_workspace']);
-    const receipt=await plugin.tool.pulso_workspace.execute({request:{action:'status'}},{directory:workspace,ask:async()=>{},abort:new AbortController().signal});
+    const receipt=await plugin.tool.pulso_workspace.execute({request:{action:'status'}},{directory:workspace,sessionID:'ses_primary',messageID:'msg_primary',agent:'pulso',ask:async()=>{},abort:new AbortController().signal});
     assert.equal(JSON.parse(receipt.output).ok,true);
     assert.equal(fs.existsSync(path.join(workspace,'.pulso')),false);
   } else {

@@ -98,8 +98,8 @@ con enlace oficial y fecha. Los IDs de tarea/criterio apuntan al work canónico.
 
 Describe hechos frente a hipótesis y límites del rol frente a capacidades globales.
 Para diagnósticos sigue helpers y fuente activa/configuración; SQL suministrada, checkout
-y desplegada no son intercambiables. Póliza/polis requiere comprobar identificador frente
-a importe; SQL sin descriptor de conexión, alias claros, IDs deduplicados y cardinalidad.
+y desplegada no son intercambiables. SQL sin descriptor de conexión, alias claros,
+IDs deduplicados y cardinalidad.
 Verificación con scope/base/versión y métricas con objeto/denominador; pruebas textuales
 nombradas como tales. Git indica cwd, rama/upstream/destino y frescura remota; Maven,
 reactor/módulos/perfiles pertinentes. Reintentar requiere información nueva, no limpieza
