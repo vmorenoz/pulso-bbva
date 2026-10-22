@@ -12,7 +12,8 @@ import {assertSchema} from '../../core/lib/schema.mjs';
 
 const snapshot=root=>Object.fromEntries(fs.readdirSync(root,{recursive:true}).sort().filter(p=>fs.statSync(path.join(root,p)).isFile()).map(p=>[p,fs.readFileSync(path.join(root,p),'utf8')]));
 async function fixture(t){
-  const base=fs.mkdtempSync(path.join(os.tmpdir(),'pulso-session-recovery-'));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
+  // Match canonical runtime roots when the OS temporary directory is a symlink (macOS).
+  const base=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'pulso-session-recovery-')));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
   const projectRoot=path.join(base,'project'),homeDir=path.join(base,'home');fs.mkdirSync(projectRoot);fs.mkdirSync(homeDir);
   const context={projectRoot,homeDir,resourceRoot:fileURLToPath(new URL('../../core',import.meta.url))};
   const invoke=(name,args,sessionID='old-session',extra={})=>executeTool(name,args,{...context,...extra,...(sessionID?{nativeContext:{sessionID}}:{})});

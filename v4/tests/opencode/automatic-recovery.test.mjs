@@ -16,7 +16,8 @@ function assistant(sessionID, id, parentID, extra = {}) {
   return {info: {id, sessionID, role: 'assistant', mode: 'pulso', parentID, time: {created: 2, completed: 3}, ...extra}, parts: []};
 }
 async function fixture(t, {prepare = true} = {}) {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'pulso-auto-recovery-'));
+  // Match canonical runtime roots when the OS temporary directory is a symlink (macOS).
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pulso-auto-recovery-')));
   t.after(() => fs.rmSync(base, {recursive: true, force: true}));
   const runtime = path.join(base, 'runtime'), root = path.join(base, 'project');
   fs.mkdirSync(root);fs.mkdirSync(path.join(runtime, 'plugin'), {recursive: true});

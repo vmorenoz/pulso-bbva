@@ -8,7 +8,8 @@ import {adapterConfig} from '../../adapters/opencode/build.mjs';
 const source=fileURLToPath(new URL('../../',import.meta.url));
 const snapshot=root=>Object.fromEntries(fs.readdirSync(root,{recursive:true}).sort().filter(p=>fs.statSync(path.join(root,p)).isFile()).map(p=>[p,fs.readFileSync(path.join(root,p),'utf8')]));
 async function fixture(t,{editedPrompt=false}={}){
-  const base=fs.mkdtempSync(path.join(os.tmpdir(),'pulso-scoped-tools-'));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
+  // Match canonical runtime roots when the OS temporary directory is a symlink (macOS).
+  const base=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'pulso-scoped-tools-')));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
   const project=path.join(base,'project'),runtime=path.join(base,'runtime'),home=path.join(base,'home');for(const p of [project,runtime,home])fs.mkdirSync(p);
   fs.cpSync(path.join(source,'core'),path.join(runtime,'resources'),{recursive:true});
   for(const [from,to] of Object.entries(adapterConfig.runtimeFiles)){fs.mkdirSync(path.dirname(path.join(runtime,to)),{recursive:true});fs.copyFileSync(path.join(source,'adapters/opencode',from),path.join(runtime,to));}
