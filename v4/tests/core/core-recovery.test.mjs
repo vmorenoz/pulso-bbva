@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {prepareWorkspace} from '../../core/lib/workspace.mjs';
+import {listFiles,sha256} from '../../core/lib/fs.mjs';
 import {syncWorkOperation,recoverWorkspaceOperation} from '../../core/lib/work-mutations.mjs';
 import {status,history,closeWork,validateProject} from '../../core/lib/artifacts.mjs';
 import {temp,repo,create,ready,readWork,writeJSON,atomicWrite} from './helpers.mjs';
 
+const snapshot=root=>listFiles(root).map(file=>[file,sha256(fs.readFileSync(path.join(root,file)))]);
 const legacy={id:'PULSO-001',title:'Entrega anterior',objective:'Conservar alcance',status:'implemented',acceptance_criteria:['Resultado revisado','Alcance conservado'],execution:{summary:'Implementación',verification_gaps:['Falta verificar']}};
 function legacyRepo(t){const root=temp(t);writeJSON(root,'.pulso/tasks/PULSO-001.json',legacy);return root;}
 test('migración reconoce legacy, conserva IDs/docs y deja backup íntegro',t=>{
@@ -28,17 +30,34 @@ test('legacy corrupto o no reconocido impide toda migración',t=>{
     assert.equal(fs.existsSync(path.join(root,'.pulso/state.json')),false);assert.deepEqual(fs.readdirSync(homeDir),[]);
   }
 });
-test('fallo al persistir un Work en staging conserva fuente y limpia staging',t=>{
+test('fallo previo al intent conserva fuente y staging sin publicar; reintento migra una sola vez',t=>{
   const root=legacyRepo(t),homeDir=temp(t),rename=fs.renameSync;
   fs.renameSync=(source,dest)=>{if(String(dest).includes('.pulso-migration-')&&dest.endsWith('/work.json'))throw new Error('Fallo staging inyectado');return rename(source,dest);};
   try{assert.throws(()=>prepareWorkspace(root,{homeDir}),/inyectado/);}finally{fs.renameSync=rename;}
-  assert.deepEqual(fs.readdirSync(root),['.pulso']);assert.equal(fs.existsSync(path.join(root,'.pulso/tasks/PULSO-001.json')),true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root,'.pulso/tasks/PULSO-001.json'))),legacy);
+  const [stage]=fs.readdirSync(root).filter(name=>name.startsWith('.pulso-migration-'));
+  assert.ok(stage);assert.equal(fs.existsSync(path.join(root,'.pulso-migration.json')),false);
+  const before=snapshot(path.join(root,stage));
+  const recovered=prepareWorkspace(root,{homeDir});
+  assert.equal(recovered.migratedWorks,1);assert.equal(validateProject(root).valid,true);
+  assert.deepEqual(snapshot(path.join(root,stage)),before,'unowned partial stage bytes are preserved');
+  assert.equal(prepareWorkspace(root,{homeDir}).projectId,recovered.projectId);
+  assert.equal(status(root).works.length,1);
 });
-test('fallo al publicar staging restaura backup mediante rollback',t=>{
+test('fallo al publicar staging conserva intent y backup; reintento completa sin duplicar',t=>{
   const root=legacyRepo(t),homeDir=temp(t),rename=fs.renameSync;
   fs.renameSync=(source,dest)=>{if(String(source).includes('.pulso-migration-')&&source.endsWith('/.pulso'))throw new Error('Fallo de publicación inyectado');return rename(source,dest);};
   try{assert.throws(()=>prepareWorkspace(root,{homeDir}),/inyectado/);}finally{fs.renameSync=rename;}
-  assert.deepEqual(fs.readdirSync(root),['.pulso']);assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root,'.pulso/tasks/PULSO-001.json'))),legacy);
+  const marker=JSON.parse(fs.readFileSync(path.join(root,'.pulso-migration.json')));
+  assert.equal(fs.existsSync(path.join(root,'.pulso')),false);
+  const backup=path.join(root,marker.backupPath,'tasks/PULSO-001.json');
+  const original=fs.readFileSync(backup,'utf8');assert.deepEqual(JSON.parse(original),legacy);
+  const recovered=prepareWorkspace(root,{homeDir});
+  assert.equal(recovered.migrationRecovered,true);assert.equal(recovered.projectId,marker.projectId);
+  assert.equal(fs.readFileSync(backup,'utf8'),original);assert.equal(validateProject(root).valid,true);
+  assert.equal(fs.existsSync(path.join(root,'.pulso-migration.json')),false);
+  assert.equal(prepareWorkspace(root,{homeDir}).projectId,marker.projectId);
+  assert.equal(status(root).works.length,1);
 });
 test('prepare nunca interpreta corrupción actual como legacy aunque haya tasks',t=>{
   const root=legacyRepo(t),homeDir=temp(t);atomicWrite(root,'.pulso/state.json','{broken');atomicWrite(root,'.pulso/custom.md','Conservar');
@@ -66,7 +85,7 @@ test('bootstrap resumes across directory and identity registration failures whil
   atomicWrite(root,'.pulso/project.md','Contexto confirmado');atomicWrite(root,'.pulso/decisions.md','Decisión previa');
   fs.mkdirSync=(target,...options)=>{if(target===path.join(root,'.pulso/work'))throw new Error('work directory interrupted');return mkdir(target,...options);};
   try{assert.throws(()=>prepareWorkspace(root,{homeDir}),/work directory interrupted/);}finally{fs.mkdirSync=mkdir;}
-  const rename=fs.renameSync;fs.renameSync=(source,dest)=>{if(dest.startsWith(homeDir+path.sep))throw new Error('registry interrupted');return rename(source,dest);};
+  const rename=fs.renameSync;fs.renameSync=(source,dest)=>{if(path.dirname(dest)===path.join(homeDir,'.pulso/projects'))throw new Error('registry interrupted');return rename(source,dest);};
   try{assert.throws(()=>prepareWorkspace(root,{homeDir}),/registry interrupted/);}finally{fs.renameSync=rename;}
   const identity=JSON.parse(fs.readFileSync(path.join(root,'.pulso/project.json')));
   assert.equal(prepareWorkspace(root,{homeDir}).projectId,identity.projectId);

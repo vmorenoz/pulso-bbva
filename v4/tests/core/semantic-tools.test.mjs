@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {legacyResult} from './contract-fixtures.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -171,9 +172,9 @@ test('observed evidence stays immutable, complete, and required for positive clo
 });
 test('validate_result uses neutral resource catalog and preserves read-only semantic acceptance',async t=>{
   const f=await prepared(t),output='.pulso/work/WORK-1/plan.md';
-  await f.success('pulso_work',{action:'update',workId:'WORK-1',expectedRevision:1,actions:[{type:'task.add',task:{id:'T-1',title:'Plan',criterionIds:['AC-1'],agent:'pulso-planner',status:'pending',dependsOn:[],writeScope:[output],resources:[],acceptance:['Plan reviewed'],evidenceIds:[],summary:''}}]});
-  const delegation={...JSON.parse(fs.readFileSync(path.join(resourceRoot,'templates/delegation.json'),'utf8')),workId:'WORK-1',workRevision:2,inputs:['.pulso/work/WORK-1/work.json'],output,writeScope:[output]};
-  const result={...JSON.parse(fs.readFileSync(path.join(resourceRoot,'templates/result.json'),'utf8')),workId:'WORK-1',workRevision:2};
+  await f.success('pulso_work',{action:'update',workId:'WORK-1',expectedRevision:1,actions:[{type:'task.add',task:{id:'T-1',title:'Plan',criterionIds:['AC-1'],agent:'pulso-planner',status:'pending',dependsOn:[],writeScope:[output],resources:['.pulso/work/WORK-1/work.json'],acceptance:['Plan reviewed'],evidenceIds:[],summary:''}}]});
+  const delegation={...JSON.parse(fs.readFileSync(path.join(resourceRoot,'templates/delegation.json'),'utf8')),workId:'WORK-1',workRevision:2,inputs:['.pulso/work/WORK-1/work.json'],resources:['.pulso/work/WORK-1/work.json'],output,writeScope:[output]};
+  const result=legacyResult({workId:'WORK-1',workRevision:2});
   const before=snapshot(f.projectRoot),homeBefore=snapshot(f.homeDir);
   const validated=await f.success('pulso_work',{action:'validate_result',delegation,result});
   assert.equal(validated.data.valid,true);assert.equal(validated.data.semanticAcceptance,'PENDING_REVIEW');

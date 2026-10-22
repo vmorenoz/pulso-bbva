@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {closureIssue,schemaIssue} from './assertions.mjs';
 import assert from 'node:assert/strict';
 import {repo,create,readWork,atomicWrite,fingerprint,ready,writeJSON} from './helpers.mjs';
 import {applyWorkMutation,createWorkOperation,closeWorkOperation,reopenWorkOperation,readStatus} from '../../core/lib/work-mutations.mjs';
@@ -22,9 +23,9 @@ test('Lote semántico guarda una vez, crea recibo compacto y exige revisión vig
 test('Rechaza acciones fuera de vocabulario, lotes vacíos y rutas absolutas',t=>{
   const root=repo(t);create(root,'CORE-3');
   assert.throws(()=>applyWorkMutation(root,{workId:'CORE-3',expectedRevision:1,actions:[]}),/faltan elementos/);
-  assert.throws(()=>applyWorkMutation(root,{workId:'CORE-3',expectedRevision:1,actions:[{type:'work.patch',pointer:'/status',value:'done'}]}),/no coincide|no admitida/);
-  assert.throws(()=>applyWorkMutation(root,{workId:'CORE-3',expectedRevision:1,actions:[{type:'work.set_overview',summary:'Ignorar',root:'/tmp'}]}),/no coincide|Campo de acción no admitido/);
-  assert.throws(()=>applyWorkMutation(root,{workId:'CORE-3',expectedRevision:1,actions:[{type:'document.register',document:{kind:'spec',path:'/etc/passwd',templateVersion:'spec@1.0'}}]}),/no coincide|Ruta relativa inválida/);
+  assert.throws(()=>applyWorkMutation(root,{workId:'CORE-3',expectedRevision:1,actions:[{type:'work.patch',pointer:'/status',value:'done'}]}),schemaIssue('$.actions[0].type'));
+  assert.throws(()=>applyWorkMutation(root,{workId:'CORE-3',expectedRevision:1,actions:[{type:'work.set_overview',summary:'Ignorar',root:'/tmp'}]}),schemaIssue('$.actions[0].root',/desconocido/));
+  assert.throws(()=>applyWorkMutation(root,{workId:'CORE-3',expectedRevision:1,actions:[{type:'document.register',document:{kind:'spec',path:'/etc/passwd',templateVersion:'spec@1.0'}}]}),schemaIssue('$.actions[0].document.path',/patrón/));
 });
 
 test('Evidencia compara hashes observados, liga tarea y criterio y permite cierre positivo',t=>{
@@ -36,7 +37,7 @@ test('Evidencia compara hashes observados, liga tarea y criterio y permite cierr
   const closed=closeWorkOperation(root,{workId:'CORE-4',expectedRevision:r.revision,outcome:'done',summary:'Criterio verificado.'});assert.equal(closed.status,'done');assert.equal(closed.revision,5);
 });
 
-test('No permite quitar criterio o tarea con referencias; evidencia archivada no es editable',t=>{
+test('No permite quitar criterio o tarea con referencias',t=>{
   const root=repo(t);create(root,'CORE-5');
   applyWorkMutation(root,{workId:'CORE-5',expectedRevision:1,actions:[{type:'task.add',task:{id:'T-1',title:'Investigar',criterionIds:['AC-1'],agent:'pulso-explorer',status:'pending',dependsOn:[],writeScope:['project.md'],resources:[],acceptance:['Resultado'],evidenceIds:[],summary:''}},{type:'task.add',task:{id:'T-2',title:'Continuar',criterionIds:['AC-1'],agent:'pulso-executor',status:'pending',dependsOn:['T-1'],writeScope:['src/next.mjs'],resources:[],acceptance:['Continuación'],evidenceIds:[],summary:''}}]});
   assert.throws(()=>applyWorkMutation(root,{workId:'CORE-5',expectedRevision:2,actions:[{type:'criterion.remove',criterionId:'AC-1'}]}),/tiene dependencias/);
@@ -65,15 +66,15 @@ test('Editar resumen no rejuvenece checkedAt y no permite editar observación',t
   update(root,work.id,[{type:'evidence.update',evidenceId:'E-1',patch:{summary:'Aclaración editorial'}}]);
   const edited=readWork(root,work.id).evidence[0];assert.equal(edited.checkedAt,before.checkedAt);assert.ok(edited.editedAt);assert.deepEqual(edited.files,before.files);assert.deepEqual(edited.acceptanceBasis,before.acceptanceBasis);
   for(const patch of [{files:before.files},{checkedAt:now()},{status:'pass'},{command:'npm test'},{criterionIds:[]},{acceptanceBasis:before.acceptanceBasis}]){
-    const unchanged=snapshot(root,work.id);assert.throws(()=>update(root,work.id,[{type:'evidence.update',evidenceId:'E-1',patch:{summary:'Intento',...patch}}]),/no coincide/);assert.equal(snapshot(root,work.id),unchanged);
+    const unchanged=snapshot(root,work.id);assert.throws(()=>update(root,work.id,[{type:'evidence.update',evidenceId:'E-1',patch:{summary:'Intento',...patch}}]),schemaIssue(`$.actions[0].patch.${Object.keys(patch)[0]}`,/desconocido/));assert.equal(snapshot(root,work.id),unchanged);
   }
-  atomicWrite(root,'src/value.mjs','otra versión');assert.throws(()=>closeWork(root,work.id,{summary:'Listo'}),/obsoleta/);
+  atomicWrite(root,'src/value.mjs','otra versión');assert.throws(()=>closeWork(root,work.id,{summary:'Listo'}),closureIssue('EVIDENCE_STALE','AC-1',/src\/value.mjs/));
 });
 
 test('Observación antigua permanece legible pero no permite un cierre nuevo',t=>{
   const root=repo(t),work=ready(root,'OLD-1');delete work.evidence[0].acceptanceBasis;
   writeJSON(root,'.pulso/work/OLD-1/work.json',work);assert.doesNotThrow(()=>readWork(root,work.id));
-  const before=snapshot(root,work.id);assert.throws(()=>closeWork(root,work.id,{summary:'Listo'}),/sin base observada/);assert.equal(snapshot(root,work.id),before);
+  const before=snapshot(root,work.id);assert.throws(()=>closeWork(root,work.id,{summary:'Listo'}),closureIssue('EVIDENCE_STALE','AC-1',/sin base observada/));assert.equal(snapshot(root,work.id),before);
 });
 
 test('Cierre histórico sin base observada conserva su lectura sin reescribirlo',t=>{
@@ -81,29 +82,38 @@ test('Cierre histórico sin base observada conserva su lectura sin reescribirlo'
   writeJSON(root,'.pulso/work/OLD-CLOSED/work.json',work);assert.equal(readWork(root,work.id,{fresh:true}).closure.summary,'Cierre histórico');
 });
 
-test('Cambiar criterio guarda motivo e invalida aceptación y tareas afectadas',t=>{
+for(const field of ['description','verification'])test(`Cambiar criterio ${field} guarda motivo, invalida aceptación y exige nueva observación`,t=>{
   const root=repo(t),work=ready(root,'CHANGE-1'),originalEvidence=structuredClone(work.evidence);
-  update(root,work.id,[{type:'criterion.update',criterionId:'AC-1',description:'Además rechazar valores vacíos',reason:'Nuevo requisito acordado',decisionRef:'D-7'}]);
+  update(root,work.id,[{type:'criterion.update',criterionId:'AC-1',[field]:'Nuevo requisito acordado',reason:'Nuevo requisito acordado',decisionRef:'D-7'}]);
   let changed=readWork(root,work.id);assert.deepEqual(changed.evidence,originalEvidence);assert.deepEqual(changed.objective.criteria[0].evidenceIds,[]);assert.equal(changed.tasks[0].status,'pending');assert.deepEqual(changed.tasks[0].evidenceIds,[]);
-  assert.equal(changed.acceptanceChanges[0].reason,'Nuevo requisito acordado');assert.equal(changed.acceptanceChanges[0].decisionRef,'D-7');assert.equal(changed.acceptanceChanges[0].before.description,work.objective.criteria[0].description);assert.equal(changed.acceptanceChanges[0].after.description,'Además rechazar valores vacíos');
-  assert.throws(()=>closeWork(root,work.id,{summary:'Listo'}),/tareas abiertas/);
+  assert.equal(changed.acceptanceChanges[0].entity,'criterion');
+  assert.equal(changed.acceptanceChanges[0].reason,'Nuevo requisito acordado');assert.equal(changed.acceptanceChanges[0].decisionRef,'D-7');assert.deepEqual(changed.acceptanceChanges[0].before,{description:work.objective.criteria[0].description,verification:work.objective.criteria[0].verification,acceptanceMode:'evidence'});assert.deepEqual(changed.acceptanceChanges[0].after,{...changed.acceptanceChanges[0].before,[field]:'Nuevo requisito acordado'});assert.ok(Number.isFinite(Date.parse(changed.acceptanceChanges[0].at)));
+  assert.throws(()=>closeWork(root,work.id,{summary:'Listo'}),closureIssue('TASK_OPEN','T-1'));
+  const invalidated=snapshot(root,work.id);
+  assert.throws(()=>update(root,work.id,[{type:'task.set_status',taskId:'T-1',status:'done'}]),{code:'TASK_ACCEPTANCE_REQUIRED'});
+  assert.equal(snapshot(root,work.id),invalidated);
   const copied={...originalEvidence[0],id:'E-OLD'};assert.throws(()=>update(root,work.id,[{type:'evidence.add',evidence:copied}]),/Aceptación obsoleta/);
-  update(root,work.id,[{type:'criterion.update',criterionId:'AC-1',description:work.objective.criteria[0].description,reason:'Se restaura el texto anterior'}]);
+  update(root,work.id,[{type:'criterion.update',criterionId:'AC-1',[field]:work.objective.criteria[0][field],reason:'Se restaura el texto anterior'}]);
   assert.throws(()=>update(root,work.id,[{type:'evidence.add',evidence:copied}]),/Aceptación obsoleta/);
   changed=readWork(root,work.id);const renewed=evidenceCopy(changed);update(root,work.id,[{type:'evidence.add',evidence:renewed},{type:'task.set_status',taskId:'T-1',status:'done'}]);assert.equal(closeWork(root,work.id,{summary:'Aceptación nueva revisada'}).status,'done');
 });
 
-test('Cambiar scope de tarea requiere motivo, persiste historia y retira aceptación',t=>{
+for(const [field,value] of Object.entries({writeScope:['src/extra.mjs'],acceptance:['Aceptación nueva'],title:'Título corregido'}))test(`Cambiar tarea ${field} requiere motivo, persiste historia y retira aceptación`,t=>{
   const root=repo(t),work=ready(root,'SCOPE-1'),before=snapshot(root,work.id);
-  assert.throws(()=>update(root,work.id,[{type:'task.update',taskId:'T-1',patch:{writeScope:['src/extra.mjs']}}]),/reason/);assert.equal(snapshot(root,work.id),before);
-  update(root,work.id,[{type:'task.update',taskId:'T-1',reason:'Ampliación autorizada',patch:{writeScope:['src/extra.mjs']}}]);
+  assert.throws(()=>update(root,work.id,[{type:'task.update',taskId:'T-1',patch:{[field]:value}}]),/reason/);assert.equal(snapshot(root,work.id),before);
+  update(root,work.id,[{type:'task.update',taskId:'T-1',reason:'Ampliación autorizada',patch:{[field]:value}}]);
   const changed=readWork(root,work.id);assert.equal(changed.tasks[0].status,'pending');assert.deepEqual(changed.tasks[0].evidenceIds,[]);assert.deepEqual(changed.objective.criteria[0].evidenceIds,[]);assert.equal(changed.acceptanceChanges[0].entity,'task');assert.equal(changed.acceptanceChanges[0].reason,'Ampliación autorizada');
+  assert.deepEqual(changed.evidence,work.evidence);
+  assert.deepEqual(changed.acceptanceChanges[0].before[field],work.tasks[0][field]);
+  assert.deepEqual(changed.acceptanceChanges[0].after,{...changed.acceptanceChanges[0].before,[field]:value});
+  assert.ok(Number.isFinite(Date.parse(changed.acceptanceChanges[0].at)));
+  assert.throws(()=>closeWork(root,work.id,{summary:'No debe cerrar'}),closureIssue('TASK_OPEN','T-1'));
   assert.throws(()=>update(root,work.id,[{type:'evidence.add',evidence:{...work.evidence[0],id:'E-OLD'}}]),/Aceptación obsoleta/);
 });
 
-test('Título y resumen conservan aceptación; cambio editorial de criterio la invalida',t=>{
+test('Resumen editorial conserva aceptación; texto de criterio modificado la invalida',t=>{
   const root=repo(t),work=ready(root,'EDITORIAL');
-  update(root,work.id,[{type:'task.update',taskId:'T-1',patch:{title:'Título corregido',summary:'Resumen corregido'}}]);
+  update(root,work.id,[{type:'task.update',taskId:'T-1',patch:{summary:'Resumen corregido'}}]);
   const changed=readWork(root,work.id);assert.equal(changed.tasks[0].status,'done');assert.deepEqual(changed.tasks[0].evidenceIds,['E-1']);assert.deepEqual(acceptanceBasis(changed),acceptanceBasis(work));assert.deepEqual(changed.acceptanceChanges,[]);
   update(root,work.id,[{type:'criterion.update',criterionId:'AC-1',description:work.objective.criteria[0].description+'.',reason:'Puntuación'}]);assert.deepEqual(readWork(root,work.id).objective.criteria[0].evidenceIds,[]);
 });
@@ -133,18 +143,18 @@ test('Observación de archivo ausente se contrasta al añadir y al cerrar',t=>{
   const root=repo(t),work=ready(root,'ABSENT');update(root,work.id,[{type:'evidence.remove',evidenceId:'E-1'}]);
   const evidence=evidenceCopy(readWork(root,work.id));evidence.files.push({path:'src/deleted.mjs',absent:true});
   update(root,work.id,[{type:'evidence.add',evidence},{type:'task.set_status',taskId:'T-1',status:'done'}]);atomicWrite(root,'src/deleted.mjs','ha vuelto');
-  assert.throws(()=>closeWork(root,work.id,{summary:'Listo'}),/ya no está ausente/);
+  assert.throws(()=>closeWork(root,work.id,{summary:'Listo'}),closureIssue('EVIDENCE_STALE','AC-1',/ya no está ausente/));
 });
 
 test('Report y checkedAt son observados y obligatorios, nunca generados al añadir',t=>{
   const root=repo(t),work=ready(root,'REPORT'),before=snapshot(root,work.id);
-  const noDate=evidenceCopy(work);delete noDate.checkedAt;assert.throws(()=>update(root,work.id,[{type:'evidence.add',evidence:noDate}]),/no coincide/);
+  const noDate=evidenceCopy(work);delete noDate.checkedAt;assert.throws(()=>update(root,work.id,[{type:'evidence.add',evidence:noDate}]),schemaIssue('$.actions[0].evidence.checkedAt',/requerido/));
   const noReport=evidenceCopy(work);noReport.files=noReport.files.filter(file=>file.path!==noReport.report);assert.throws(()=>update(root,work.id,[{type:'evidence.add',evidence:noReport}]),/informe\/salida/);assert.equal(snapshot(root,work.id),before);
 });
 
 test('complete_map no es una acción y el mapa de plantilla no cierra un objetivo',t=>{
   const root=repo(t);create(root,'PRODUCT');atomicWrite(root,'.pulso/project.md','<!-- template: project@1.0 -->\nMapa anterior');const before=snapshot(root,'PRODUCT');
-  assert.throws(()=>update(root,'PRODUCT',[{type:'complete_map',summary:'Mapa ya disponible'}]),/no coincide/);assert.throws(()=>closeWork(root,'PRODUCT',{summary:'Objetivo terminado'}),/evidencia positiva/);assert.equal(snapshot(root,'PRODUCT'),before);
+  assert.throws(()=>update(root,'PRODUCT',[{type:'complete_map',summary:'Mapa ya disponible'}]),schemaIssue('$.actions[0].type'));assert.throws(()=>closeWork(root,'PRODUCT',{summary:'Objetivo terminado'}),closureIssue('CRITERION_UNSUPPORTED','AC-1'));assert.equal(snapshot(root,'PRODUCT'),before);
 });
 
 for(const priority of ['low','normal','high','critical'])test(`Prioridad ${priority} válida en create/update/read`,t=>{
@@ -154,7 +164,7 @@ for(const priority of ['low','normal','high','critical'])test(`Prioridad ${prior
 
 test('urgent y propiedades desconocidas se rechazan antes de escribir',t=>{
   const root=repo(t);create(root,'STRICT');const before=snapshot(root,'STRICT');
-  assert.throws(()=>update(root,'STRICT',[{type:'work.set_overview',priority:'urgent'}]));assert.throws(()=>update(root,'STRICT',[{type:'task.add',task:{id:'T-1'}}]));assert.throws(()=>update(root,'STRICT',[{type:'evidence.add',evidence:{id:'E-1'}}]));assert.equal(snapshot(root,'STRICT'),before);
+  assert.throws(()=>update(root,'STRICT',[{type:'work.set_overview',priority:'urgent'}]),/priority.*urgent no está admitido/);assert.throws(()=>update(root,'STRICT',[{type:'task.add',task:{id:'T-1'}}]),schemaIssue('$.actions[0].task.title',/requerido/));assert.throws(()=>update(root,'STRICT',[{type:'evidence.add',evidence:{id:'E-1'}}]),schemaIssue('$.actions[0].evidence.kind',/requerido/));assert.equal(snapshot(root,'STRICT'),before);
 });
 
 test('Mapeo exclusivo aceptado usa tareas, evidencia observada y cierre ordinarios',t=>{

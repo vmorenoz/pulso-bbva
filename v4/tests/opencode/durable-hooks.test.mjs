@@ -361,3 +361,66 @@ test('explicit resumption transfers dispatch ownership without changing the prep
   assert.equal((await f.read()).returns[0].sessionID,resumedCall.sessionID);
   assert.equal(fs.readFileSync(snapshotPath,'utf8'),originalSnapshot);
 });
+
+test('failed native task can resume in a new session with confirmed continuity, without duplicate same-task dispatch',async t => {
+  const f = await fixture(t);
+  // Preconditions are deliberately known before the session is lost. This covers
+  // the supported recovery path, not discovery of an inaccessible old capsule.
+  const capsule = await f.invoke('pulso_workspace',f.bound.readWith);
+  await f.before();
+  const failed = nativeOutput('Network connection lost; no verified terminal return',{status:'error'});
+  const diagnosis = await f.plugin.event(nativeEvent(f,failed,'error'));
+  assert.equal(diagnosis.capture,'pending');
+  let original = await f.read();
+  assert.equal(original.attempts[0].resolution,'unresolved');
+  assert.equal(original.reservationResolved,false);
+  assert.equal(original.returns.length,0);
+  assert.equal(original.accepted,null);
+
+  Object.assign(f.context,{sessionID:'ses_after_network_failure',messageID:'msg_resume',callID:'call_resume'});
+  const resumed = await f.invoke('pulso_workspace',{action:'bind_continuity',workId:'W',continuityId:capsule.continuityId,requestKey:'resume_after_failure',objective:capsule.objective,repositories:capsule.repositories,constraints:capsule.constraints});
+  assert.equal(resumed.continuityId,capsule.continuityId);
+  assert.equal(resumed.intentRevision,capsule.intentRevision);
+  assert.equal(resumed.ownerSessionID,f.context.sessionID);
+  assert.equal((await f.invoke('pulso_workspace',f.bound.readWith)).pending[0].delegationId,original.delegationId);
+  await assert.rejects(f.before(f.args,{...f.call,sessionID:f.context.sessionID}),/already dispatched/);
+
+  const prepare={action:'prepare_delegation',contractVersion:2,workId:'W',expectedRevision:2,continuityId:capsule.continuityId,intentRevision:capsule.intentRevision,requestKey:'replacement_after_failure',taskIds:['T1','T2'],objective:'Report findings',inputs:[],output:'conversation',constraints:[],templateId:'exploration'};
+  const attempt=async request=>JSON.parse((await f.plugin.tool.pulso_work.execute({request},f.context)).output);
+  const assertReserved=async()=>{
+    const receipt=await attempt(prepare);
+    assert.equal(receipt.ok,false);
+    assert.match(receipt.error.message,/Reserva incompatible/);
+    assert.ok(receipt.error.message.includes(original.delegationId));
+  };
+  await assertReserved();
+  const reconcile={action:'reconcile_delegation',workId:'W',delegationId:original.delegationId,continuityId:capsule.continuityId,intentRevision:capsule.intentRevision,reason:'Explicit recovery after the previous session lost network access'};
+  await f.invoke('pulso_work',{...reconcile,resolution:'retired'});
+  assert.equal((await f.read()).reservationResolved,false,'retirement alone cannot claim native termination');
+  await assertReserved();
+  await f.invoke('pulso_work',{...reconcile,resolution:'explicitly_reconciled',source:{text:'Retire the previous attempt and continue in this session; physical termination was not observed.'}});
+  original=await f.read();
+  assert.equal(original.retired,true);
+  assert.equal(original.reservationResolved,true);
+  assert.equal(original.attempts[0].resolution,'explicitly_reconciled');
+  assert.equal(original.returns.length,0);
+  assert.equal(original.accepted,null);
+  assert.match(original.reconciliations.at(-1).limitations.join(' '),/no certifica.*cese físico/);
+
+  const replacement=await f.invoke('pulso_work',prepare);
+  assert.notEqual(replacement.delegationId,original.delegationId);
+  assert.equal((await f.invoke('pulso_work',prepare)).delegationId,replacement.delegationId,'retry uses the same request key');
+  const args={subagent_type:replacement.agent,prompt:replacement.specialistPrompt,description:'Recovery contract fixture'};
+  const call={tool:'task',sessionID:f.context.sessionID,callID:'replacement_dispatch'};
+  await f.before(args,call);
+  await assert.rejects(f.before(args,{...call,callID:'duplicate_dispatch'}),/already dispatched/);
+  const replacementRecord=await f.invoke('pulso_work',replacement.readWith);
+  assert.equal(replacementRecord.attempts.length,1);
+  assert.equal(replacementRecord.attempts[0].sessionID,f.context.sessionID);
+  assert.deepEqual((await f.read()).nativeContext,f.record.nativeContext);
+  const work=await f.invoke('pulso_work',{action:'get',workId:'W',section:'all'});
+  assert.equal(work.revision,2);
+  assert.ok(work.tasks.items.every(task=>task.status==='pending'));
+  assert.equal(work.results.total,0);
+  assert.equal(work.evidence.total,0);
+});
