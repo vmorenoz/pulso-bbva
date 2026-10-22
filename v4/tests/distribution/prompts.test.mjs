@@ -212,3 +212,63 @@ for(const target of ['opencode','vscode']) test(`${target}: reported verificatio
     ['no age-based or cross-Work closure',/No cierres por antigüedad o silencio[^.\n]*Work[^.\n]*demás/],
   ]);
 });
+
+function assertAutomaticRecovery(text) {
+  contracts(section(text,'turn_intent_gate'),[
+    ['read-only detection exception',/Excepción[^.\n]*detección[^.\n]*observación nativa[^.\n]*solo lectura[^.\n]*saludo[^.\n]*sin inicializar ni escribir/],
+    ['greeting is not recovery authority',/saludo y la observación no autorizan[^.\n]*retoma/],
+    ['normal intent gate still prevails',/Salvo esa detección[^.\n]*puerta prevalece/],
+  ]);
+  contracts(section(text,'automatic_continuity_recovery'),[
+    ['conditional host capability',/Solo cuando el adaptador publique esta capacidad/],
+    ['ephemeral selected-root discovery',/observación efímera[^.\n]*raíz seleccionada/],
+    ['no discovery mutation or child/compaction/synthetic entry',/detección no adopta[^.\n]*inicializa[^.\n]*migra[^.\n]*repara[^.\n]*especialistas[^.\n]*títulos[^.\n]*compactaciones[^.\n]*sintéticos/],
+    ['observation is data, not authority',/datos[^.\n]*no[^.\n]*instrucción del usuario ni prueba de aprobación/],
+    ['do not broaden an incomplete discovery',/no busques otros proyectos[^.\n]*observación ausente o incompleta/],
+    ['coordinator semantic comparison with authentic historical context',/Decide tú[^.\n]*última petición real[^.\n]*compatible[^.\n]*objetivo previamente aprobado[^.\n]*histórico nativo auténtico[^.\n]*legacy/],
+    ['source provenance is not semantic consent',/intentSource[^.\n]*referencias\/hash[^.\n]*no consentimiento semántico/],
+    ['no full personal-history persistence',/no[^.\n]*persistas conversaciones personales completas/],
+    ['single active candidate, never recency or focus',/único candidato activo[^.\n]*no selecciones por antigüedad[^.\n]*foco[^.\n]*cercanía textual/],
+    ['paused, cancelled, closed and incompatible latest goals excluded',/No retomes[^.\n]*pausados[^.\n]*cancelados[^.\n]*cerrados[^.\n]*objetivo nuevo[^.\n]*consulta exclusivamente de estado/],
+    ['natural continuation of authorized goal',/mismo objetivo[^.\n]*autorizado e inequívoco[^.\n]*informa naturalmente[^.\n]*sin exigir[^.\n]*continúa/],
+    ['terminal non-abort parent or exact child interruption',/error terminal[^.\n]*no causado por cancelación[^.\n]*padre idle[^.\n]*error terminal del hijo exactamente correlacionado[^.\n]*padre e hijo idle/],
+    ['busy, retry and unknown child veto',/Busy, retry o estado desconocido de cualquier hijo impiden/],
+    ['idle is not failure or success',/idle por sí solo no prueba interrupción ni éxito/],
+    ['failed read is unknown',/fallo de lectura o 404[^.\n]*desconocido, no idle/],
+    ['cancel or superseding message forces reevaluation',/cancelación del usuario o una petición posterior[^.\n]*invalide[^.\n]*reevaluar/],
+    ['automatic API with exact current basis',/pulso_workspace resume_continuity[^.\n]*workId[^.\n]*continuityId[^.\n]*expectedResumeBasis[^.\n]*resumeMode:'automatic'/],
+    ['semantic mode does not replace private proof, native permission or CAS',/modo[^.\n]*decisión semántica, no una autorización[^.\n]*prueba privada vigente[^.\n]*identidad nativa[^.\n]*permiso efectivo y CAS/],
+    ['stale observations do not authorize coercive retries',/observación obsoleta exige releer[^.\n]*no cambiar claves/],
+    ['explicit fallback when capability is absent',/Sin esta capacidad, hook o API nativa[^.\n]*recuperación explícita[^.\n]*first_context_and_continuity/],
+    ['no activity without the host',/ni prometas actividad con el host cerrado/],
+    ['ownership is not execution, cessation or acceptance',/dueño lógico[^.\n]*no relanza procesos ni acredita cese físico ni acepta tareas/],
+    ['terminal replay only after approved confirmed resume',/replay[^.\n]*terminales persistidos y validados[^.\n]*solo después[^.\n]*retoma aprobada y confirmada/],
+    ['partial capture is not rollback or redispatch authority',/ownerTransferred[^.\n]*captura pendiente[^.\n]*parcial[^.\n]*no rollback ni permiso para repetir/],
+    ['unresolved reservations survive',/Conserva reservas unresolved/],
+    ['grounded reconciliation only',/explicitly_reconciled[^.\n]*reason y source[^.\n]*hechos justifican[^.\n]*sin riesgo de duplicar efectos/],
+    ['ask only about the concrete uncertain command or effect',/comando, efecto o estado incierto[^.\n]*dato o acción necesarios[^.\n]*no una liberación administrativa genérica/],
+    ['no duplicate implementation, commands or publication',/No repitas implementación, comandos o publicaciones/],
+  ]);
+}
+
+for(const target of ['opencode','vscode']) test(`${target}: rendered automatic recovery is conditional, semantically scoped and permissioned`,async()=>{
+  const rendered=await renderedAgents(target);
+  assertAutomaticRecovery(rendered.find(({agent})=>agent.id==='pulso').text);
+  for(const {agent,text} of rendered.filter(({agent})=>agent.id!=='pulso')) {
+    assert.doesNotMatch(text,/<automatic_continuity_recovery>/,`${agent.id} is not the recovery coordinator`);
+  }
+});
+
+test('recovery structural contracts reject missing semantic, authority and no-duplicate guardrails',async()=>{
+  const text=(await renderedAgents('opencode')).find(({agent})=>agent.id==='pulso').text;
+  for(const [before,after] of [
+    ['Decide tú si la última petición real','Asume que la última petición real'],
+    ['un único candidato activo','un candidato activo'],
+    ['prueba privada vigente, identidad nativa, permiso efectivo y CAS','el modo solicitado'],
+    ['solo después de una retoma aprobada y confirmada','antes de una retoma'],
+    ['Conserva reservas unresolved','Libera reservas unresolved'],
+  ]) {
+    assert.ok(text.includes(before),`mutation must change a real contract: ${before}`);
+    assert.throws(()=>assertAutomaticRecovery(text.replace(before,after)),assert.AssertionError);
+  }
+});

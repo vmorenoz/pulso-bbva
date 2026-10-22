@@ -20,7 +20,7 @@ export function verifyPackage(target,root,{coreRoot=path.join(sourceRoot,'core')
   const catalog=JSON.parse(fs.readFileSync(path.join(coreRoot,'agents/catalog.json')));
   for(const agent of [catalog.orchestrator,...catalog.specialists]) allow.add(target==='vscode'?`resources/agents/${agent.id}.agent.md`:`agents/${agent.id}.md`);
   for(const file of listFiles(path.join(coreRoot,'skills'))) allow.add(target==='vscode'?`resources/skills/${file}`:`skills/${file}`);
-  const native=target==='vscode'?['src/extension.cjs','src/workspace.mjs','src/native-contracts.mjs','assets/pulso.svg','assets/pulso-128.png','assets/pulso-256.png','assets/pulso-512.png']:['plugin/index.mjs','plugin/schema-converter.mjs','plugin/attempt-contracts.mjs','plugin/delegation-observer.mjs','plugin/durable-hooks.mjs','plugin/assignment-authority.mjs',...['init','status','recap','resume'].map(name=>`commands/pulso-${name}.md`)];
+  const native=target==='vscode'?['src/extension.cjs','src/workspace.mjs','src/native-contracts.mjs','assets/pulso.svg','assets/pulso-128.png','assets/pulso-256.png','assets/pulso-512.png']:['plugin/index.mjs','plugin/schema-converter.mjs','plugin/attempt-contracts.mjs','plugin/delegation-observer.mjs','plugin/durable-hooks.mjs','plugin/assignment-authority.mjs','plugin/recovery-policy.mjs',...['init','status','recap','resume'].map(name=>`commands/pulso-${name}.md`)];
   for(const file of native)allow.add(file);
   if(target==='opencode')for(const file of Object.keys(JSON.parse(fs.readFileSync(new URL('./vendor-integrity.json',import.meta.url)))))allow.add(`plugin/vendor/${file}`);
   for(const file of actual) {

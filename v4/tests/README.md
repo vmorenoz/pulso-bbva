@@ -79,9 +79,21 @@ root/cycle/owner races, absent native identity, lost-response replay and unresol
 versus awaiting-incorporation diagnostics. `opencode/plugin` verifies current native
 permission, denial, cancellation and root revocation for this new flow.
 
+`opencode/automatic-recovery` checks bounded read-only discovery from an ordinary
+primary message hook, authentic current/historical native context, legacy without
+source references, a single active candidate, real empty-idle status-map semantics,
+terminal parent/child errors, and busy/retry/unknown/abort vetoes. It also covers
+missing APIs, changed messages/history/root/owner, private proof, permissioned CAS
+and terminal-return replay without accepting tasks or releasing unresolved work.
+`distribution/prompts` checks the coordinator's semantic compatibility obligation,
+the narrow greeting/detection exception and explicit fallback in rendered prompts.
+
 These are adapter contract fixtures using real disk/core, **not** a live network
-failure or conversational acceptance test. Administrative reconciliation does not
-prove the old process stopped. Autonomous adoption policy is separate; recovery primitives require explicit selected-Work recovery.
+failure, conversational acceptance test or proof of an LLM's semantic decision.
+Administrative reconciliation does not prove the old process stopped. Automatic
+recovery is conditional on the pinned host capability and approved existing goal;
+without it, explicit selected-Work recovery remains supported. Neither path implies
+a daemon, background agent service or activity while the host is closed.
 
 ## Cleanup baseline (2026-10-22)
 

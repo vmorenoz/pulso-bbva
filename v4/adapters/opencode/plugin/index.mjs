@@ -14,6 +14,7 @@ import {createDelegationObserver, readDelegationAttempts, correlation} from './d
 import {nativeAuthority} from './assignment-authority.mjs';
 import {authorizeTool} from '../resources/lib/assignment-tools.mjs';
 import {createDurableHooks, nativeContext} from './durable-hooks.mjs';
+import {createRecoveryPolicy, nativePrimaryRequest} from './recovery-policy.mjs';
 
 const resourceRoot = fileURLToPath(new URL('../resources/', import.meta.url));
 // Read the manifest beside the loaded runtime, never the checkout or a build constant.
@@ -60,6 +61,8 @@ export async function PulsoPlugin({directory, client, homeDir = os.homedir()}, n
   const validator = {checkSchemaVocabulary, validateSchema};
   const schemas = nativeToolSchemas(toolContracts, z, validator, {pulso_workspace: attemptActionSchemas});
   const registered = {};
+  const recovery = createRecoveryPolicy({directory, client});
+  const durable = createDurableHooks({directory});
   for (const definition of toolDefinitions) {
     const wrapped = definition.name !== 'pulso_history';
     const args = wrapped ? {request: schemas[definition.name]} : Object.fromEntries(Object.entries(definition.inputSchema.properties).map(([name, descriptor]) => {
@@ -90,16 +93,34 @@ export async function PulsoPlugin({directory, client, homeDir = os.homedir()}, n
         // Denial/cancellation remains a host rejection, never normal success.
         await context.ask({permission: definition.name, patterns: [`${action}:${resource}`], always: [`${action}:${resource}`], metadata: {action, resource, mutating: isMutating(definition.name, semantic)}});
         assertContext();
-        let receipt,authorization;
+        let receipt,authorization,automaticRecovery,intentSource,automaticProof;
         try{
           authorization=await nativeAuthority(client,context,root);
           assertContext();
           authorizeTool(root,definition.name,semantic,{authorization,nativeContext:nativeContext(context),assertContext});
+          if(definition.name==='pulso_workspace'&&['bind_continuity','update_intent'].includes(semantic.action)){
+            // Optional provenance enriches new intent snapshots; unavailable legacy
+            // source APIs do not become a new requirement for explicit operations.
+            try{const {request}=await nativePrimaryRequest(client,context,root);const {text,...reference}=request;intentSource={provenance:'native_user_request',...reference};}catch{/* No fabricated source. */}
+            assertContext();
+          }
+          if(definition.name==='pulso_workspace'&&semantic.action==='resume_continuity'&&semantic.resumeMode==='automatic'){
+            // The model selects this mode after semantic review; it is not authority.
+            // ask has already completed. Do not await again before synchronous core CAS.
+            automaticProof=await recovery.proveAutomaticResume(context,semantic,{disposition:'compatible'});
+            automaticRecovery={proof:automaticProof,assertProof:(proof,args)=>recovery.assertProof(proof,args,context)};
+          }
         }catch(error){return respond(failure(error));}
         if (definition.name === 'pulso_workspace' && attemptActionSchemas[semantic.action]) {
           receipt = {title: 'Pulso · Intentos', output: 'Telemetría pasiva; no confirma actividad ni aceptación.', ok: true,
             data: {items: readDelegationAttempts(root, semantic), liveness: 'unknown', acceptance: 'not_assessed'}};
-        } else receipt = await executeTool(definition.name, semantic, {projectRoot: root, homeDir, resourceRoot, assertContext, nativeContext: nativeContext(context), authorization});
+        } else receipt = await executeTool(definition.name, semantic, {projectRoot: root, homeDir, resourceRoot, assertContext, nativeContext: nativeContext(context), authorization, automaticRecovery, intentSource});
+        if(automaticProof&&receipt.ok){
+          try{
+            const captures=await recovery.replayStoredReturns(automaticProof,receipt,part=>durable.event({event:{type:'message.part.updated',properties:{part}}}));
+            receipt={...receipt,data:{...receipt.data,recovery:{...captures,capturePending:captures.pending.length>0}},output:`${receipt.output} ${captures.pending.length?'Captura pendiente: inspeccionar efectos y señales concretas antes de reconciliar; no redisparar ni pedir liberación genérica de administrador.':'Capturas históricas comprobadas; aún requieren revisión y aceptación.'}`};
+          }catch(error){receipt={...receipt,data:{...receipt.data,recovery:{ownerTransferred:true,capturePending:true,stored:[],pending:[{reason:error.code||'CAPTURE_PENDING'}],physicalCessation:'unknown'}},output:`${receipt.output} Owner aplicado; captura pendiente. Recuperar por IDs, no repetir ejecución.`};}
+        }
         try { assertContext(); } catch (error) {
           receipt = {...receipt, ok: false, contextChanged: true, output: `${receipt.output}\nContext changed after invocation: ${error.message}`};
         }
@@ -127,8 +148,8 @@ export async function PulsoPlugin({directory, client, homeDir = os.homedir()}, n
     observer ??= createDelegationObserver(directory);
     await observer[hook](...args);
   } catch { /* Passive observation cannot prevent native task execution. */ }};
-  const durable = createDurableHooks({directory});
   return {tool: registered,
+    'experimental.chat.messages.transform': recovery['experimental.chat.messages.transform'],
     'tool.execute.before': async (input, output) => {await durable['tool.execute.before'](input, output); await observe('tool.execute.before')(input, output);},
     'tool.execute.after': async (input, output) => {await durable['tool.execute.after'](input, output); await observe('tool.execute.after')(input, output);},
     event: async input => {const receipt = await durable.event(input); await observe('event')(input); return receipt;}};

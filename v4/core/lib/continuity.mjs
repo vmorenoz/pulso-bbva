@@ -7,6 +7,7 @@ import {readWork} from './artifacts.mjs';
 import {validateToolInput} from './tool-contracts.mjs';
 import {listDelegations} from './delegation-registry.mjs';
 import {pageItems} from './pagination.mjs';
+import {discoverContinuities} from './continuity-discovery.mjs';
 
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 export const contentHash=value=>sha256(JSON.stringify(canonical(value)));
@@ -56,7 +57,20 @@ function validateRecord(root,value){
   assertID(value.continuityId);assertID(value.workId);
   if(value.contractVersion!==2||!Number.isSafeInteger(value.intentRevision)||value.intentRevision<1||value.revision!==value.intentRevision||!Array.isArray(value.compatibleDelegationIds)||!Array.isArray(value.history)||!Array.isArray(value.repositories)||!Array.isArray(value.constraints))throw new Error('Continuidad corrupta');
   for(const p of value.repositories)scopePath(root,p);
+  if(value.intentSource){validateIntentSource(value.intentSource);if(value.intentSource.intentRevision!==value.intentRevision)throw new Error('Fuente de intención obsoleta');}
   return value;
+}
+function validateIntentSource(value){
+  const keys=['provenance','sessionID','userMessageID','assistantMessageID','textHash','intentRevision'];
+  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!keys.includes(key))||value.provenance!=='native_user_request'||!['sessionID','userMessageID','assistantMessageID'].every(key=>typeof value[key]==='string'&&value[key].trim()&&value[key].length<=2000)||!/^[a-f0-9]{64}$/.test(value.textHash))throw new Error('Referencia nativa de intención inválida');
+  if(value.intentRevision!==undefined&&(!Number.isSafeInteger(value.intentRevision)||value.intentRevision<1))throw new Error('Revisión de fuente inválida');
+}
+function intentSource(options,revision){
+  if(options.intentSource===undefined)return undefined;
+  validateIntentSource(options.intentSource);
+  if(options.authorization?.kind!=='primary'||options.intentSource.sessionID!==options.nativeContext?.sessionID||options.intentSource.assistantMessageID!==options.nativeContext?.messageID)throw new Error('Fuente sin procedencia primaria nativa');
+  // Reference authenticity is not semantic approval. No personal source text is copied.
+  return {...options.intentSource,intentRevision:revision};
 }
 export function readContinuity(root,continuityId,options={}){
   assertID(continuityId);checkContext(options);
@@ -96,12 +110,28 @@ export function resumeContinuity(root,args,options={}){
     if(work.closure||value.cycle!==work.cycle)throw continuityRecoveryError(value,'CONTINUITY_RESUME_STALE','Continuidad de otro Work/ciclo o Work cerrado; volver a inspeccionar antes de retomar');
     const currentBasis=resumeBasis(root,store.projectId,work,value),last=value.history.at(-1);
     const resumeIdentity=contentHash({projectRoot:root,projectId:store.projectId,workId:work.id,cycle:work.cycle,intentId:value.intentId,intentRevision:value.intentRevision});
+    // Replaying an exact applied transition does not adopt another owner.
+    const replay=value.ownerSessionID===owner&&last?.type==='resumed'&&last.sessionID===owner&&last.fromResumeBasis===args.expectedResumeBasis&&last.resumeIdentity===resumeIdentity&&last.intentRevision===value.intentRevision;
+    let recoverySource;
+    if(args.resumeMode==='automatic'){
+      const recovery=options.automaticRecovery,proof=recovery?.proof;
+      if(options.authorization?.kind!=='primary'||typeof recovery?.assertProof!=='function'||proof?.kind!=='automatic_continuity_recovery'||proof.projectRoot!==root||proof.projectId!==store.projectId||proof.sessionID!==owner||proof.assistantMessageID!==options.nativeContext?.messageID||proof.workId!==work.id||proof.continuityId!==value.continuityId||proof.intentId!==value.intentId||proof.intentRevision!==value.intentRevision||proof.expectedResumeBasis!==args.expectedResumeBasis||proof.observedResumeBasis!==currentBasis||proof.replay!==Boolean(replay)||proof.owner?.sessionID!==(replay?last.previousSessionID:value.ownerSessionID)||proof.owner.status!=='idle'||!(replay?proof.owner.interruption==='applied_transition':['terminal_error','terminal_child_error'].includes(proof.owner.interruption)))throw continuityRecoveryError(value,'AUTOMATIC_RECOVERY_UNAVAILABLE','Retoma automática sin prueba privada vigente; inspeccionar o usar recuperación explícita sustentada');
+      let verified;checkContext({assertContext:()=>verified=recovery.assertProof(proof,args)});
+      if(verified!==true)throw continuityRecoveryError(value,'AUTOMATIC_RECOVERY_UNAVAILABLE','La prueba privada no fue validada por el adaptador');
+      if(!replay){
+        const discovered=discoverContinuities(root,{assertContext:options.assertContext});
+        if(!discovered.complete||discovered.candidates.length!==1||discovered.candidates[0].continuityId!==value.continuityId||discovered.candidates[0].resumeBasis!==proof.observedResumeBasis)throw continuityRecoveryError(value,'AUTOMATIC_RECOVERY_STALE','La selección automática dejó de ser única, activa o vigente');
+      }
+      validateIntentSource(proof.source);
+      if(proof.source.sessionID!==owner||proof.source.assistantMessageID!==options.nativeContext?.messageID)throw continuityRecoveryError(value,'AUTOMATIC_RECOVERY_STALE','La petición auténtica no corresponde a la invocación');
+      if(replay&&(last.resumeMode!=='automatic'||last.requestSource?.sessionID!==owner||last.requestSource.userMessageID!==proof.source.userMessageID||last.requestSource.textHash!==proof.source.textHash))throw continuityRecoveryError(value,'AUTOMATIC_RECOVERY_STALE','El recibo aplicado corresponde a otra petición nativa');
+      recoverySource={...proof.source};
+    }
     // A lost successful response may be replayed only against that exact last
     // transition and its still-current intention, never an arbitrary old hash.
-    const replay=value.ownerSessionID===owner&&last?.type==='resumed'&&last.sessionID===owner&&last.fromResumeBasis===args.expectedResumeBasis&&last.resumeIdentity===resumeIdentity&&last.intentRevision===value.intentRevision;
     if(currentBasis!==args.expectedResumeBasis&&!replay)throw continuityRecoveryError(value,'CONTINUITY_RESUME_STALE','La continuidad cambió desde la inspección; volver a inspeccionar, no sobrescribir intención ni dueño');
     if(value.ownerSessionID===owner)return {value,duplicate:true};
-    value.history.push({at:now(),type:'resumed',previousSessionID:value.ownerSessionID,sessionID:owner,fromResumeBasis:args.expectedResumeBasis,resumeIdentity,intentRevision:value.intentRevision});value.ownerSessionID=owner;
+    value.history.push({at:now(),type:'resumed',previousSessionID:value.ownerSessionID,sessionID:owner,fromResumeBasis:args.expectedResumeBasis,resumeIdentity,intentRevision:value.intentRevision,...(recoverySource?{resumeMode:'automatic',requestSource:recoverySource}: {})});value.ownerSessionID=owner;
     writeSidecar(root,'continuities',store,options);
     return {value,duplicate:false};
   });
@@ -136,6 +166,7 @@ export function bindContinuity(root,args,options={}){
     }else{
       if(work.closure)throw new Error('Trabajo cerrado');
       value={contractVersion:2,continuityId:`CONT-${randomUUID()}`,projectId:store.projectId,workId:work.id,cycle:work.cycle,requestKey:args.requestKey,requestHash,intentId:`INT-${randomUUID()}`,intentRevision:1,revision:1,objective:args.objective,repositories:args.repositories,constraints:args.constraints,sourceText:args.sourceText??null,ownerSessionID:options.nativeContext?.sessionID??null,compatibleDelegationIds:[],history:[],createdAt:now()};store.records.push(value);
+      const source=intentSource(options,value.intentRevision);if(source)value.intentSource=source;
     }
     writeSidecar(root,'continuities',store,options);return value;
   });
@@ -154,8 +185,9 @@ export function updateIntent(root,args,options={}){
     if(!repositories.length)throw new Error('repositories vacío');
     for(const p of repositories)scopePath(root,p);
     for(const id of compatible)assertRepositoryScopes(root,records.find(r=>r.delegationId===id),repositories);
-    value.history.push({at:now(),type:'intent',intentRevision:value.intentRevision,objective:value.objective,constraints:value.constraints,repositories:value.repositories,compatibleDelegationIds:compatible});
+    value.history.push({at:now(),type:'intent',intentRevision:value.intentRevision,objective:value.objective,constraints:value.constraints,repositories:value.repositories,compatibleDelegationIds:compatible,...(value.intentSource?{intentSource:value.intentSource}:{})});
     Object.assign(value,{objective:args.objective,constraints:args.constraints,repositories,compatibleDelegationIds:compatible,intentRevision:value.intentRevision+1,revision:value.revision+1});
+    const source=intentSource(options,value.intentRevision);if(source)value.intentSource=source;else delete value.intentSource;
     const store=readSidecar(root,'continuities');store.records[store.records.findIndex(v=>v.continuityId===value.continuityId)]=value;
     writeSidecar(root,'continuities',store,options);return value;
   });

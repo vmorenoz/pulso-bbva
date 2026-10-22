@@ -6,7 +6,7 @@ import {readAgentBody,renderPrompt,renderSkill} from './prompts.mjs';
 
 export const sourceRoot=fileURLToPath(new URL('../',import.meta.url));
 export const releaseVersion=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url))).version;
-export const runtimeModules=['artifacts','acceptance','continuity','delegation-registry','assignment-tools','evidence-supersession','fs','identity','memory','receipts','schema','work-mutations','workspace','semantic-tools','tool-contracts','pagination'];
+export const runtimeModules=['artifacts','acceptance','continuity','continuity-discovery','delegation-registry','assignment-tools','evidence-supersession','fs','identity','memory','receipts','schema','work-mutations','workspace','semantic-tools','tool-contracts','pagination'];
 export const operationSkills=['pulso-init','pulso-status','pulso-recap','pulso-resume'];
 const integrity=JSON.parse(fs.readFileSync(new URL('./bbva-integrity.json',import.meta.url)));
 

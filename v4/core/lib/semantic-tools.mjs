@@ -24,7 +24,7 @@ const receipt=(title,data)=>ok(title,formatReceipt(data),data);
 
 function continuityReceipt(value){
   const {contractVersion,continuityId,projectId,workId,cycle,intentId,intentRevision,revision,ownerSessionID}=value;
-  return {contractVersion,continuityId,projectId,workId,cycle,intentId,intentRevision,revision,ownerSessionID,readWith:{action:'get_continuity',continuityId}};
+  return {contractVersion,continuityId,projectId,workId,cycle,intentId,intentRevision,revision,ownerSessionID,...(value.intentSource?{intentSource:value.intentSource}:{}),readWith:{action:'get_continuity',continuityId}};
 }
 
 function memorySummary(project,user){
@@ -79,7 +79,7 @@ const handlers={
       case 'inspect_continuities':return ok('continuidades','Continuidades del Work seleccionado; lectura sin adopción.',inspectContinuities(root,args,options));
       case 'resume_continuity':{
         const {value,duplicate}=resumeContinuity(root,args,options);
-        return ok('continuidad','Continuidad retomada; intención y reservas conservadas.',{...continuityReceipt(value),duplicate});
+        return ok('continuidad',duplicate?'Retoma ya aplicada confirmada; intención y reservas conservadas.':'Continuidad retomada; intención y reservas conservadas.',{...continuityReceipt(value),duplicate,...(args.resumeMode==='automatic'?{resumeMode:'automatic',ownerTransferred:true,physicalCessation:'unknown'}:{})});
       }
       case 'update_intent':return ok('intención','Intención actualizada; no detiene agentes nativos.',continuityReceipt(updateIntent(root,args,options)));
       case 'prepare':{
@@ -184,7 +184,7 @@ const handlers={
 };
 
 /** All persistence is synchronous; there is no await between final check and write. */
-export async function executeTool(name,input,{projectRoot,homeDir=os.homedir(),resourceRoot=defaultResourceRoot,assertContext=()=>{},nativeContext,authorization}={}){
+export async function executeTool(name,input,{projectRoot,homeDir=os.homedir(),resourceRoot=defaultResourceRoot,assertContext=()=>{},nativeContext,authorization,automaticRecovery,intentSource}={}){
   const definition=toolDefinitions.find(item=>item.name===name);
   try{
     validateToolInput(name,input);
@@ -199,7 +199,7 @@ export async function executeTool(name,input,{projectRoot,homeDir=os.homedir(),r
     if(nativeContext!==undefined){
       if(!nativeContext||typeof nativeContext!=='object'||Object.keys(nativeContext).some(k=>!['sessionID','messageID','callID'].includes(k))||Object.values(nativeContext).some(v=>typeof v!=='string'||!v.trim()||v.length>2000))throw new Error('nativeContext confiable inválido');
     }
-    const options={projectRoot,homeDir,resourceRoot,assertContext,nativeContext,authorization};
+    const options={projectRoot,homeDir,resourceRoot,assertContext,nativeContext,authorization,automaticRecovery,intentSource};
     authorizeTool(projectRoot,name,input,options);
     return handlers[name](input,options);
   }catch(error){return fail(definition?.displayName.replace('Pulso · ','')||'herramienta',error);}
