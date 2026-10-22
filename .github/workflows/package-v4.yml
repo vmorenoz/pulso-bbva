@@ -62,10 +62,14 @@ jobs:
       - name: Verify runtime archives and checksums
         run: npm run verify:packages
 
-      # These tests install only into disposable fixture homes. The environment
-      # variable above makes both suites exercise this run's actual archive.
-      - name: Test standalone and bootstrap with the real archive
-        run: node --test tests/installer/standalone.test.mjs tests/installer/bootstrap.test.mjs tests/installer/agent-presets.test.mjs
+      # Exercise the core and both adapters, not only packaging. Installer tests
+      # use disposable fixture homes and this run's actual archive.
+      - name: Verify core flows and full regression suite
+        run: |
+          npm run smoke:happy
+          npm run smoke:durable
+          npm test
+          npm run verify:installer-staged
 
       - name: Upload verified installable packages
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

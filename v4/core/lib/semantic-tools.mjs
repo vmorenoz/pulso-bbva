@@ -6,6 +6,7 @@ import {toolDefinitions,validateToolInput} from './tool-contracts.mjs';
 import * as artifacts from './artifacts.mjs';
 import * as mutations from './work-mutations.mjs';
 import {prepareDelegation,acceptResult,acceptDelivery} from './acceptance.mjs';
+import {supersedeEvidence} from './evidence-supersession.mjs';
 import {bindContinuity,checkContext,getContinuity,inspectContinuities,resumeContinuity,updateIntent} from './continuity.mjs';
 import {getDelegation,reconcileDelegation,readDelegation} from './delegation-registry.mjs';
 import * as memory from './memory.mjs';
@@ -50,7 +51,7 @@ function memorySummary(project,user){
 function workRead(root,args,options){
   const stored=artifacts.readWork(root,args.workId,{files:false}),assignment=options.authorization?.kind==='assignment'?currentAssignment(root,options):null;
   const value=assignment?assignmentWorkProjection(stored,assignment.record):stored,section=args.section||'overview';
-  const arrays={tasks:value.tasks,criteria:value.objective.criteria,evidence:value.evidence,results:value.results||[],documents:value.documents,blockers:value.blockers,decisions:value.decisionsPending,acceptanceChanges:value.acceptanceChanges||[],assignmentOperations:value.assignmentOperations||[]};
+  const arrays={tasks:value.tasks,criteria:value.objective.criteria,evidence:value.evidence,results:value.results||[],documents:value.documents,blockers:value.blockers,decisions:value.decisionsPending,acceptanceChanges:value.acceptanceChanges||[],assignmentOperations:value.assignmentOperations||[],evidenceSupersessions:value.evidenceSupersessions||[]};
   const selected=section==='all'?Object.keys(arrays):section==='overview'?['blockers','decisions']:[section];
   const basisSections=section==='overview'?['criteria','tasks']:selected.filter(key=>['criteria','tasks'].includes(key));
   const page=pagination({kind:'work',binding:{projectRoot:root,workId:args.workId,section},snapshot:value,total:Math.max(0,...[...selected,...basisSections].map(key=>arrays[key].length)),limit:args.limit||20,cursor:args.cursor});
@@ -136,6 +137,10 @@ const handlers={
       case 'update_assignment':return ok('asignación','Acciones aplicadas; no acredita aceptación ni cierre.',updateAssignment(root,args,options));
       case 'accept_result':return receipt('resultado',acceptResult(root,args,options));
       case 'accept_delivery':return receipt('aceptación',acceptDelivery(root,args,options));
+      case 'supersede_evidence':{
+        const {action,...input}=args;
+        return receipt('sustitución de evidencia',supersedeEvidence(root,input,options));
+      }
       case 'close_by_user':return withWorkspaceLock(root,()=>{
         checkContext(options);
         return receipt('cierre por usuario',mutations.closeByUserOperation(root,args));

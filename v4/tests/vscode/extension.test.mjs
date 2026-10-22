@@ -141,6 +141,7 @@ test('binding is stripped and all mutations reject missing/stale opaque tokens',
       reconcile_delegation: {workId:'W',delegationId:'D',continuityId:'C',intentRevision:1,reason:'R',resolution:'not_dispatched'},
       accept_result: {contractVersion:2,workId:'W',expectedRevision:1,delegationId:'D',continuityId:'C',intentRevision:1,operationId:'accept',reportedReturn:{captureKey:'return',markdown:'Report'},decision:{}},
       accept_delivery: {workId:'W',expectedRevision:1,summary:'S',criterionIds:['AC-1'],source:{text:'Approved'},limitations:[]},
+      supersede_evidence: {workId:'W',expectedRevision:1,operationId:'supersede',evidenceId:'E-LOCAL',replacementEvidenceId:'E-REPORTED',criterionIds:['AC-1'],reason:'Scoped later report covers the same check'},
       close_by_user: {workId:'W',expectedRevision:1,operationId:'close-user',summary:'S',source:{text:'Approved'},limitations:[]},
       create: {title: 'T', objective: 'O', criterion: 'C', verification: 'V'},
       update: {workId: 'W', expectedRevision: 1, actions: [{type: 'work.set_overview', summary: 'S'}]},
@@ -151,6 +152,7 @@ test('binding is stripped and all mutations reject missing/stale opaque tokens',
       remove_preference: {scope: 'user', expectedRevision: 1, key: 'K'},
       add_learning: {scope: 'project', expectedRevision: 1, note: 'N', source: 'observed'},
     }[action];
+    assert.ok(fields, `Missing valid binding-test fixture for ${name}/${action}`);
     for (const expectedBindingId of [undefined, 'stale']) await assert.rejects(invoke(name, {action, ...fields, ...(expectedBindingId ? {expectedBindingId} : {})}), /binding changed or missing/);
   }
   for (const directory of [...projects, homeDir]) assert.deepEqual(fs.readdirSync(directory), []);

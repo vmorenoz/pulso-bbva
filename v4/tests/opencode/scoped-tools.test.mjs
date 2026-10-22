@@ -65,6 +65,35 @@ test('all four tools deny global, cross-work, cross-task, self-acceptance and ow
   const forged=await f.invoke('pulso_work',{...f.update(),authorization:{kind:'primary'},sessionID:'ses_parent'},f.child);assert.equal(forged.ok,false);assert.deepEqual(snapshot(f.project),before);
 });
 
+test('evidence supersession is a native-approved coordinator mutation and its audit is absent from child views',async t=>{
+  const f=await fixture(t),{readWork,acceptanceBasis}=await f.load('resources/lib/artifacts.mjs'),{atomicWrite,fingerprint,now}=await f.load('resources/lib/fs.mjs');
+  for(const [id,kind,status] of [['E-LOCAL','not_run','blocked'],['E-REPORTED','manual','pass']]){
+    const work=readWork(f.project,'WORK'),report=`.pulso/work/WORK/${id}.md`,basis=acceptanceBasis(work,{criterionIds:['AC-1'],taskIds:[]});
+    atomicWrite(f.project,report,id==='E-LOCAL'?'Local environment unavailable.':'User reports the current check passed remotely; no independent CI access.');
+    await f.call('pulso_work',{action:'update',workId:'WORK',expectedRevision:work.revision,actions:[{type:'evidence.add',evidence:{id,kind,status,checkedAt:now(),criterionIds:['AC-1'],taskIds:[],report,command:null,cwd:'.',exitCode:null,basis:'Scoped fixture report; not a local execution',files:[fingerprint(f.project,report)],acceptanceBasis:basis,summary:id}}]});
+  }
+  const args={action:'supersede_evidence',workId:'WORK',expectedRevision:readWork(f.project,'WORK').revision,operationId:'SUPERSEDE-1',evidenceId:'E-LOCAL',replacementEvidenceId:'E-REPORTED',criterionIds:['AC-1'],reason:'PRIVATE-COORDINATOR-DECISION: equivalent reported check replaces unavailable local method.'};
+  const before=snapshot(f.project),denied=await f.invoke('pulso_work',args,f.child);
+  assert.equal(denied.error.code,'ASSIGNMENT_SCOPE_DENIED');assert.deepEqual(snapshot(f.project),before);
+  assert.equal(f.requests.at(-1).metadata.mutating,true);assert.equal(f.requests.at(-1).metadata.action,'supersede_evidence');
+  const applied=await f.call('pulso_work',args);assert.equal(applied.applied,true);assert.equal(applied.duplicate,false);
+  const root=await f.call('pulso_work',{action:'get',workId:'WORK',section:'evidenceSupersessions'});
+  assert.equal(root.evidenceSupersessions.items[0].reason,args.reason);
+  for(const section of ['all','evidenceSupersessions','overview']){
+    const child=await f.call('pulso_work',{action:'get',workId:'WORK',section},f.child);
+    assert.equal(child.evidenceSupersessions.total,0);assert.equal(JSON.stringify(child).includes('PRIVATE-COORDINATOR-DECISION'),false);
+  }
+});
+
+test('supersede_evidence cannot bypass a native permission denial or cancellation after approval',async t=>{
+  const f=await fixture(t),before=snapshot(f.project),args={action:'supersede_evidence',workId:'WORK',expectedRevision:2,operationId:'DENIED-SUPERSESSION',evidenceId:'E-LOCAL',replacementEvidenceId:'E-REPORTED',criterionIds:['AC-1'],reason:'Scoped replacement'};
+  const denial=new Error('Permission denied by host');
+  f.parent.ask=async request=>{assert.equal(request.metadata.mutating,true);throw denial;};
+  await assert.rejects(f.invoke('pulso_work',args),error=>error===denial);assert.deepEqual(snapshot(f.project),before);
+  const controller=new AbortController();f.parent.abort=controller.signal;f.parent.ask=async()=>{controller.abort();};
+  await assert.rejects(f.invoke('pulso_work',args));assert.equal(controller.signal.aborted,true);assert.deepEqual(snapshot(f.project),before);
+});
+
 test('operation receipt and task progress commit together, replay ignores expectedRevision but changed payload conflicts',async t=>{
   const f=await fixture(t),before=await f.call('pulso_work',{action:'get_delegation',workId:'WORK',delegationId:f.prepared.delegationId});
   const applied=await f.call('pulso_work',f.update(),f.child);assert.equal(applied.appliedRevision,3);assert.equal(applied.duplicate,false);assert.equal(applied.sessionID,f.child.sessionID);

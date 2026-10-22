@@ -4,6 +4,7 @@ import {generateWorkId} from './identity.mjs';
 import {assertSchema} from './schema.mjs';
 import {safePath,exists,readJSON,readText,writeJSON,atomicWrite,assertID,now,fingerprint,sha256,withWorkspaceLock} from './fs.mjs';
 import {pendingDelegations} from './delegation-registry.mjs';
+import {validateEvidenceSupersessions} from './evidence-supersession.mjs';
 const terminal = status => ['done','cancelled'].includes(status);
 const wp = id => `.pulso/work/${assertID(id)}/work.json`;
 const unique = (values,label) => {if(new Set(values).size!==values.length)throw new Error(`${label}: duplicados`);};
@@ -39,6 +40,7 @@ function initArtifactsLocked(root) {
 }
 export function validateWork(root,w,{files=true,fresh=false}={}) {
   assertSchema('work',w);
+  validateEvidenceSupersessions(w);
   unique(w.objective.criteria.map(c=>c.id),'Criterios');unique(w.tasks.map(t=>t.id),'Tareas');unique(w.evidence.map(e=>e.id),'Evidencias');
   unique(w.documents.map(d=>d.path),'Documentos');
   unique((w.assignmentOperations||[]).map(r=>`${r.delegationId}:${r.operationId}`),'Operaciones de asignación');
@@ -190,7 +192,7 @@ function saveWorkLocked(root,candidate,expectedRevision){
   const w=structuredClone(candidate);
   w.completedTaskIds=[...new Set([...completedTaskIds(old),...completedTaskIds(w)])];
   for(const task of w.tasks)if(task.status==='cancelled')assertTaskCancellation(w,task.id);
-  w.revision++;w.updatedAt=now();validateWork(root,w);
+  w.revision++;w.updatedAt=now();validateEvidenceSupersessions(w,old);validateWork(root,w);
   const oldChanges=old.acceptanceChanges||[],newChanges=w.acceptanceChanges||[];
   if(newChanges.length<oldChanges.length||!same(newChanges.slice(0,oldChanges.length),oldChanges))throw new Error('Historial de aceptación inmutable');
   for(const before of old.evidence){

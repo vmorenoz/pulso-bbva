@@ -586,6 +586,63 @@ o Work cerrado; no repite el cierre. Otra carga con la misma clave falla. El rec
 se recupera desde la evidencia canónica del Work, no de una proyección. Sin operationId
 no hay idempotencia implícita: confirmar evidenceId antes de repetir.
 
+## `supersede_evidence` — sustitución selectiva de vínculos
+
+```text
+action: "supersede_evidence"
+workId: ID
+expectedRevision: entero positivo actual
+operationId: ID
+evidenceId: ID del intento anterior
+replacementEvidenceId: ID de la observación posterior
+criterionIds: ID[1..50], sin duplicados
+reason: texto no vacío, máximo 2000
+```
+
+Sólo el coordinador puede sustituir vínculos de un intento con status
+`not_run`/`blocked`. No retira un FAIL real. La evidencia posterior debe ser PASS
+ordinaria (`executed`, `static` o `manual`, nunca `origin:user_acceptance`), estar
+ya vinculada a cada criterio seleccionado y conservar informe íntegro, archivos
+vigentes y acceptanceBasis pertinente al Work/ciclo actual. La operación no
+interpreta prosa: el coordinador decide y documenta en reason la equivalencia
+entre métodos para ese resultado, sin dispensar un requisito local explícito.
+
+Un «pasó en CI/workflow/ambientes previos» referido claramente al cambio actual
+se registra con `update` → `evidence.add`: observación ordinaria `manual/pass`,
+`command:null`, `exitCode:null`, reporte y basis con procedencia `user_reported`
+declarada en texto. No requiere acceso de Pulso a CI ni URL/runID/SHA remoto cuando
+el contexto basta. Obtener la base vigente antes de observar y documentar esa
+correspondencia; checkedAt es la incorporación, no una fecha de ejecución remota
+inventada. El fingerprint real del reporte acredita sus bytes, no una ejecución.
+Un reporte genérico no cubre por sí mismo otros criterios o tareas, ni renueva
+evidencia anterior para un cambio distinto. Ante ambigüedad, aclarar sólo el alcance
+incierto. `accept_delivery` es aceptación del usuario, no este tipo de observación.
+
+Sólo se retira evidenceId de `criterion.evidenceIds` para criterionIds. Se
+conservan íntegros el intento local, sus vínculos históricos en la observación,
+otros criterios, tareas, requisitos, modo de aceptación, bloqueos y decisiones.
+No completa una tarea blocked ni limpia blockers: si el reporte cubre también
+su aceptación y taskIds, el coordinador reconcilia después esa tarea y el bloqueo
+resuelto mediante `task.set_status`/`work.set_overview` existentes. No toca tareas
+ajenas. Consultar readiness real y cerrar normalmente sólo cuando todo el alcance
+esté resuelto; ni silencio ni antigüedad constituyen finalización.
+
+`Work.evidenceSupersessions` es opcional, append-only y se persiste en la misma
+revisión que los vínculos. Registra operación, Work/ciclo, criterios, evidencias,
+motivo, base histórica y appliedRevision. `get section:evidenceSupersessions`
+devuelve páginas completas para el coordinador; la proyección child no expone
+este historial global, ni siquiera con section:all.
+
+CAS y mutex protegen la primera escritura; el adaptador conserva ask y su guarda
+de cancelación. Mismo operationId/carga/ciclo recupera el recibo sin repetir ni
+renovar bases, incluso después de cambiar criterios o cerrar. Otro contenido o
+un ciclo reabierto rechaza. El recibo indica applied/duplicate, appliedRevision,
+currentRevision y readiness actual; confirmar una decisión histórica no acredita
+aceptación vigente. Tras fallo de proyección, el retry exacto repara sin duplicar
+la decisión. Errores usan `EVIDENCE_SUPERSESSION_INVALID` con issues estructurados
+code/entity (por ejemplo `REPLACEMENT_STALE`, `SOURCE_NOT_LINKED`,
+`OPERATION_CONFLICT`); CAS usa `REVISION_CONFLICT`.
+
 ## Modo de aceptación y bases compatibles
 
 Cada criterio admite `acceptanceMode?: "evidence" | "user" | "both"`:
@@ -684,7 +741,7 @@ anterior; su retorno aún puede capturarse, sin afirmar que el proceso terminó.
 | Tool | Especialista probado | Denegado |
 | --- | --- | --- |
 | workspace | `get_assignment` | status/global, bind/resume/update_intent, prepare/recover/sync, telemetría |
-| work | `get` del Work propio (projection:assignment, completeWork:false), `get_delegation` propio, `get_assignment_receipts` propio, `update_assignment` propio | otro Work/encargo, update general, preparar/reconciliar delegación, aceptar, evidence.add, cierre/reapertura |
+| work | `get` del Work propio (projection:assignment, completeWork:false), `get_delegation` propio, `get_assignment_receipts` propio, `update_assignment` propio | otro Work/encargo, update general, preparar/reconciliar delegación, aceptar, evidence.add, supersede_evidence, cierre/reapertura |
 | history | filtro obligatorio de Work propio | global/otro Work |
 | context | read/summary con scope:project explícito | user/all o cualquier escritura |
 

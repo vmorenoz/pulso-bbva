@@ -55,6 +55,15 @@ unset PULSO_INSTALLER_ARCHIVE PULSO_TEST_ARTIFACTS
   model behavior. Existing integration, security, scope, cancellation, user
   acceptance, concurrency and persistence tests remain in place.
 
+`distribution/prompts` checks scoped obligations on both adapters' fully rendered
+agents, including dynamic Knowledge study, generic source/semantic tracing,
+inherited evidence definitions, publication authority, specialist receipts and
+reported verification. Negative mutations verify that removing discovery/study
+gates or reversing provenance safeguards fails those checks. These are structural
+prompt contracts, not proof of LLM compliance or a live CI execution. API/permission
+oracles and behavioral core tests remain independent; wording-only deduplication
+does not justify dropping concurrency, denial, recovery or acceptance scenarios.
+
 ## Recovery regression and limits
 
 `opencode/durable-hooks` includes a failed native task followed by explicit binding

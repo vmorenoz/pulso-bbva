@@ -101,6 +101,9 @@ export function assignmentWorkProjection(work,r){
     evidence:work.evidence.filter(e=>e.taskIds.some(id=>r.delegation.taskIds.includes(id))),
     results:(work.results||[]).filter(v=>v.delegationId===r.delegationId),
     assignmentOperations:(work.assignmentOperations||[]).filter(v=>v.delegationId===r.delegationId),
+    // Coordinator decisions may mention other criteria and user statements.
+    // A child receives no global evidence-supersession audit, even on section:all.
+    evidenceSupersessions:[],
     acceptanceChanges:(work.acceptanceChanges||[]).filter(v=>v.entity==='task'?r.delegation.taskIds.includes(v.entityId):criterionIds.has(v.entityId)),
     completedTaskIds:(work.completedTaskIds||[]).filter(id=>r.delegation.taskIds.includes(id))};
 }

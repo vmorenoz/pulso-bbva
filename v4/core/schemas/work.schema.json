@@ -998,6 +998,131 @@
         ]
       },
       "minItems": 0
+    },
+    "evidenceSupersessions": {
+      "type": "array",
+      "description": "Append-only, cycle-scoped decisions replacing selected criterion acceptance links; observations remain immutable.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+          },
+          "operationId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+          },
+          "evidenceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+          },
+          "replacementEvidenceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+          },
+          "criterionIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+            }
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "pattern": "\\S"
+          },
+          "requestHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "cycle": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "appliedRevision": {
+            "type": "integer",
+            "minimum": 2
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "acceptanceBasis": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "criteria": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "sha256"
+                  ]
+                }
+              },
+              "tasks": {
+                "type": "array",
+                "maxItems": 0,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "sha256"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "criteria",
+              "tasks"
+            ]
+          }
+        },
+        "required": [
+          "workId",
+          "operationId",
+          "evidenceId",
+          "replacementEvidenceId",
+          "criterionIds",
+          "reason",
+          "requestHash",
+          "cycle",
+          "appliedRevision",
+          "at",
+          "acceptanceBasis"
+        ]
+      }
     }
   },
   "required": [

@@ -81,7 +81,7 @@ const workspaceActions = {
 const workActions = {
   update_assignment:action('update_assignment',{...workRef,delegationId:id,operationId:id,actions:assignmentActions},['workId','expectedRevision','delegationId','operationId','actions']),
   get_assignment_receipts:action('get_assignment_receipts',{workId:id,delegationId:id,operationId:id,...readPage},['workId','delegationId']),
-  get:action('get',{workId:id,section:enumeration(['overview','tasks','criteria','evidence','results','documents','blockers','decisions','acceptanceChanges','assignmentOperations','all']),...readPage},['workId']),
+  get:action('get',{workId:id,section:enumeration(['overview','tasks','criteria','evidence','results','documents','blockers','decisions','acceptanceChanges','assignmentOperations','evidenceSupersessions','all']),...readPage},['workId']),
   get_delegation:action('get_delegation',{workId:id,delegationId:id,continuityId:id},['workId','delegationId']),
   reconcile_delegation:action('reconcile_delegation',{workId:id,delegationId:id,...continuityRef,reason:text(2000),source:object({text:text(8000),messageRef:text(2000)},['text']),resolution:enumeration(['not_dispatched','reported_terminal','retired','explicitly_reconciled'])},['workId','delegationId','continuityId','intentRevision','reason','resolution']),
   prepare_delegation:action('prepare_delegation',{
@@ -97,6 +97,9 @@ const workActions = {
     ...workRef,operationId:id,summary:text(2000),criterionIds:{type:'array',items:id,minItems:1,maxItems:50},
     source:object({text:text(8000),messageRef:text(2000)},['text']),limitations:{type:'array',items:text(1000),maxItems:30}
   },['workId','expectedRevision','summary','criterionIds','source','limitations']),
+  supersede_evidence:action('supersede_evidence',{
+    ...workRef,operationId:id,evidenceId:id,replacementEvidenceId:id,criterionIds:{type:'array',items:id,minItems:1,maxItems:50},reason:text(2000)
+  },['workId','expectedRevision','operationId','evidenceId','replacementEvidenceId','criterionIds','reason']),
   validate_result:action('validate_result',{delegation:clone(persistedSchema('delegation')),result:clone(persistedSchema('result'))},['delegation','result']),
   create:action('create',clone(createInput.properties),clone(createInput.required)),
   update:action('update',mutationInput.properties,mutationInput.required),
@@ -150,9 +153,10 @@ export const toolContracts={
   pulso_history:descriptor('pulso_history','Historial','Consulta cierres con fechas, ciclos, resumen completo, limitaciones y referencias. data.items se pagina con limit/cursor; sigue hasMore y nextCursor. Cambiar historial o filtros invalida el cursor.',null,[],historySchema),
   pulso_context:descriptor('pulso_context','Contexto','Consulta o registra contexto, preferencias y aprendizajes. read devuelve entradas completas, revisions y nextCursor. Las escrituras exigen scope y expectedRevision; preferencias y aprendizajes requieren source explícito. summary es una vista limitada a 8000 caracteres.',contextActions,['set_context','set_preference','remove_preference','add_learning'])
 };
-toolContracts.pulso_work.mutatingActions.push('close_by_user','update_assignment');
+toolContracts.pulso_work.mutatingActions.push('close_by_user','update_assignment','supersede_evidence');
 toolContracts.pulso_workspace.modelDescription+=' get_assignment obtiene identidad y capacidades acotadas del hijo probado por el adaptador; no acepta credenciales del modelo.';
 toolContracts.pulso_work.modelDescription+=' update_assignment sólo permite al hijo nativo probado progreso no terminal de sus tareas y registrar su output exacto; operationId estable y expectedRevision. get_assignment_receipts confirma acciones ya aplicadas para no repetirlas. No concede aceptación, evidence.add, cierre ni delegación.';
+toolContracts.pulso_work.modelDescription+=' supersede_evidence es decisión del coordinador: reemplaza solo vínculos criterionIds de un intento not_run/blocked por evidencia PASS ordinaria ya vinculada y vigente, con operationId y reason. Conserva observación histórica, tareas y requisitos; no retira FAIL reales ni acepta origin:user_acceptance como comprobación técnica. get section:evidenceSupersessions pagina el historial del coordinador.';
 toolContracts.pulso_work.modelDescription+=' close_by_user cierra done con verificación user_approved: todos los criterios y tareas no canceladas revisados y aprobados por usuario, readiness true y sin bloqueos pendientes. Conserva diagnóstico anterior como histórico, evidencia/resultados intactos y cancelaciones legítimas. No acredita ejecución de tests ni cese de agentes. Requiere source declarada por el host (core no autentica el texto), operationId y revisión; no inferir petición desde evidencia. Encargos pendientes requieren reconciliación previa.';
 function freeze(value){if(value&&typeof value==='object'){for(const child of Object.values(value))freeze(child);Object.freeze(value);}return value;}
 for(const descriptor of Object.values(toolContracts)){
