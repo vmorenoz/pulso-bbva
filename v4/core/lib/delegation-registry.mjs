@@ -123,12 +123,20 @@ function conflicts(a,b){
   const aw=a.delegation.writeScope,bw=b.delegation.writeScope;
   return aw.some(p=>[...bw,...b.stableReadScope].some(q=>overlap(p,q)))||bw.some(p=>a.stableReadScope.some(q=>overlap(p,q)))||a.integrationResources.some(p=>b.integrationResources.some(q=>overlap(p,q)));
 }
+function recoveryError(r,code,message){
+  const error=new Error(message);error.code=code;
+  error.recovery={workId:r.workId,continuityId:r.continuityId,delegationId:r.delegationId,readWith:{tool:'pulso_work',action:'get_delegation',workId:r.workId,continuityId:r.continuityId,delegationId:r.delegationId},nextActions:['accept_result','reconcile_delegation'],reservationResolved:r.reservationResolved,nativeCessation:'unknown',note:code==='DELEGATION_AWAITING_INCORPORATION'?'La reserva está resuelta, pero esta tarea espera incorporación o retirada explícita del encargo. Revisar capturas; no repetir trabajo por un fallo de registro.':'Recuperar el encargo y sus capturas antes de decidir. Un error de red o una reconciliación administrativa no certifica cancelación ni cese físico; no autoriza redispatch.'};
+  return error;
+}
 export function assertClaims(root,candidate){
   for(const r of store(root).records){
     if(r.delegationId===candidate.delegationId)continue;
     const sameTask=r.workId===candidate.workId&&r.cycle===candidate.cycle&&r.delegation.taskIds.some(id=>candidate.delegation.taskIds.includes(id));
     const awaitingIncorporation=sameTask&&!r.retired&&!derived(root,r).accepted&&!notDispatched(r);
-    if(awaitingIncorporation||!r.reservationResolved&&conflicts(r,candidate))throw new Error(`Reserva incompatible: ${r.delegationId}; reconciliar antes de repetir`);
+    if(awaitingIncorporation||!r.reservationResolved&&conflicts(r,candidate)){
+      const unresolved=r.attempts.some(a=>a.resolution==='unresolved');
+      throw recoveryError(r,unresolved?'DELEGATION_NATIVE_UNRESOLVED':awaitingIncorporation&&r.reservationResolved?'DELEGATION_AWAITING_INCORPORATION':'DELEGATION_RESERVATION_CONFLICT',`Reserva incompatible: ${r.delegationId}; recuperar e incorporar o reconciliar antes de repetir`);
+    }
   }
 }
 export function findPrepared(root,args,requestHash,options={}){
@@ -264,7 +272,7 @@ export function resolveReported(root,args,options={}){
     const explicit=args.resolution==='explicitly_reconciled';
     if(explicit&&(!args.reason?.trim()||!args.source?.text?.trim()))throw new Error('Reconciliación explícita requiere reason y source.text');
     const nativeUnresolved=r.attempts.some(a=>a.resolution==='unresolved');
-    if(nativeUnresolved&&args.resolution!=='retired'&&!explicit)throw new Error('Intento nativo sin terminal observado; declaración no lo resuelve');
+    if(nativeUnresolved&&args.resolution!=='retired'&&!explicit)throw recoveryError(r,'DELEGATION_NATIVE_UNRESOLVED','Intento nativo sin terminal observado; declaración no lo resuelve');
     // Capture blobs are durable facts even when their index commit failed.
     // Read only this delegation under the existing writer lock; do not promote
     // orphan captures or infer a host terminal from their presence.

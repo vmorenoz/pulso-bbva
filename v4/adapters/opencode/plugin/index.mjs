@@ -4,6 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {toolDefinitions, toolContracts, validateToolInput, isMutating} from '../resources/lib/tool-contracts.mjs';
 import {executeTool} from '../resources/lib/semantic-tools.mjs';
+import {recoveryDetails} from '../resources/lib/receipts.mjs';
 import {checkSchemaVocabulary, validateSchema} from '../resources/lib/schema.mjs';
 import {exists, readJSON} from '../resources/lib/fs.mjs';
 import {readWork} from '../resources/lib/artifacts.mjs';
@@ -23,7 +24,7 @@ function provenance(context) {
 }
 const failure = error => ({title: 'Pulso · Error', output: String(error?.message || 'Invalid operation').slice(0, 500), ok: false,
   error: {code: error?.code || 'OPERATION_FAILED', message: String(error?.message || 'Invalid operation').slice(0, 500),
-    ...(error?.issues ? {issues: error.issues} : {}), ...(error?.issueCount ? {issueCount: error.issueCount} : {})},
+    ...(error?.issues ? {issues: error.issues} : {}), ...(error?.issueCount ? {issueCount: error.issueCount} : {}), ...recoveryDetails(error)},
   ...(error?.persistence ? {persistence: error.persistence} : {})});
 const nativeResult = receipt => ({title: receipt.title, output: JSON.stringify(receipt),
   metadata: {pulso: true, ok: receipt.ok, ...(receipt.persistence ? {persistence: receipt.persistence} : {})}});

@@ -6,6 +6,7 @@ import {isUUID} from './identity.mjs';
 import {readWork} from './artifacts.mjs';
 import {validateToolInput} from './tool-contracts.mjs';
 import {listDelegations} from './delegation-registry.mjs';
+import {pageItems} from './pagination.mjs';
 
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 export const contentHash=value=>sha256(JSON.stringify(canonical(value)));
@@ -44,7 +45,12 @@ export function writeSidecar(root,name,value,options){
   checkContext(options);writeJSON(root,`.pulso/${name}-v2.json`,{...next,checksum:contentHash(next)});
 }
 export function assertOwner(value,{nativeContext}={}){
-  if(value.ownerSessionID&&value.ownerSessionID!==nativeContext?.sessionID)throw new Error('Continuidad de otra sesión; retomar explícitamente con bind_continuity y continuityId');
+  if(value.ownerSessionID&&value.ownerSessionID!==nativeContext?.sessionID)throw continuityRecoveryError(value,'CONTINUITY_OWNER_MISMATCH','Continuidad de otra sesión; retomar explícitamente con inspect_continuities y resume_continuity, o bind_continuity con intención confirmada');
+}
+function continuityRecoveryError(value,code,message){
+  const error=new Error(message);error.code=code;
+  error.recovery={workId:value.workId,continuityId:value.continuityId,readWith:{tool:'pulso_workspace',action:'inspect_continuities',workId:value.workId,continuityId:value.continuityId},nextActions:['resume_continuity','get_continuity'],note:'Seleccionar deliberadamente la continuidad; inspeccionar no adopta ni libera reservas. No requiere editar metadata ni liberación de un administrador.'};
+  return error;
 }
 function validateRecord(root,value){
   assertID(value.continuityId);assertID(value.workId);
@@ -60,6 +66,45 @@ export function readContinuity(root,continuityId,options={}){
   if(!value)throw new Error('Continuidad no encontrada');
   if(!options.skipOwner)assertOwner(value,options);
   return value;
+}
+// CAS over the selected identity/intention/ownership history, not a bearer token.
+// Ordinary Work progress does not invalidate recovery; closure/cycle changes do.
+function resumeBasis(root,projectId,work,value){
+  return contentHash({contract:'continuity-resume-1',projectRoot:root,projectId,workId:work.id,cycle:work.cycle,closed:Boolean(work.closure),continuity:value});
+}
+function selectedContinuity(root,store,work,continuityId){
+  const value=store.records.find(v=>v.continuityId===continuityId&&v.workId===work.id);
+  if(!value)throw new Error('Continuidad no encontrada para el Work seleccionado');
+  validateRecord(root,value);
+  if(value.projectId!==store.projectId)throw new Error('Continuidad de otro proyecto');
+  return value;
+}
+export function inspectContinuities(root,args,options={}){
+  validateToolInput('pulso_workspace',{...args,action:'inspect_continuities'});checkContext(options);
+  const store=readSidecar(root,'continuities'),work=readWork(root,args.workId,{files:false});
+  const selected=args.continuityId?[selectedContinuity(root,store,work,args.continuityId)]:store.records.filter(value=>value.workId===work.id).map(value=>selectedContinuity(root,store,work,value.continuityId));
+  const items=selected.map(value=>({contractVersion:value.contractVersion,projectId:value.projectId,workId:value.workId,cycle:value.cycle,continuityId:value.continuityId,intentId:value.intentId,intentRevision:value.intentRevision,revision:value.revision,ownerSessionID:value.ownerSessionID,objective:value.objective,repositories:value.repositories,constraints:value.constraints,requestKey:value.requestKey,resumeBasis:resumeBasis(root,store.projectId,work,value),resumable:!work.closure&&value.cycle===work.cycle,...(work.closure||value.cycle!==work.cycle?{reason:'Continuidad de otro ciclo o Work cerrado; requiere decisión explícita, no adopción.'}:{}),readWith:{action:'get_continuity',continuityId:value.continuityId}}));
+  return {projectId:store.projectId,workId:work.id,cycle:work.cycle,adopted:false,focusWorkId:null,...pageItems(items,{kind:'continuity-inspection',binding:{projectRoot:root,workId:work.id,continuityId:args.continuityId??null},snapshot:items,limit:args.limit||20,cursor:args.cursor}),note:'Lectura del Work seleccionado, sin adoptar continuidad ni foco global. Elegir una continuidad explícita antes de resume_continuity; resumeBasis no es autorización. No acredita actividad ni cese físico.'};
+}
+export function resumeContinuity(root,args,options={}){
+  validateToolInput('pulso_workspace',{...args,action:'resume_continuity'});
+  return withWorkspaceLock(root,()=>{
+    checkContext(options);
+    const store=readSidecar(root,'continuities'),work=readWork(root,args.workId,{files:false}),value=selectedContinuity(root,store,work,args.continuityId);
+    const owner=options.nativeContext?.sessionID;
+    if(typeof owner!=='string'||!owner.trim())throw continuityRecoveryError(value,'NATIVE_SESSION_IDENTITY_UNAVAILABLE','La retoma requiere identidad de sesión nativa actual; no se cambia el dueño a null ni se usa un binding de ventana como sesión');
+    if(work.closure||value.cycle!==work.cycle)throw continuityRecoveryError(value,'CONTINUITY_RESUME_STALE','Continuidad de otro Work/ciclo o Work cerrado; volver a inspeccionar antes de retomar');
+    const currentBasis=resumeBasis(root,store.projectId,work,value),last=value.history.at(-1);
+    const resumeIdentity=contentHash({projectRoot:root,projectId:store.projectId,workId:work.id,cycle:work.cycle,intentId:value.intentId,intentRevision:value.intentRevision});
+    // A lost successful response may be replayed only against that exact last
+    // transition and its still-current intention, never an arbitrary old hash.
+    const replay=value.ownerSessionID===owner&&last?.type==='resumed'&&last.sessionID===owner&&last.fromResumeBasis===args.expectedResumeBasis&&last.resumeIdentity===resumeIdentity&&last.intentRevision===value.intentRevision;
+    if(currentBasis!==args.expectedResumeBasis&&!replay)throw continuityRecoveryError(value,'CONTINUITY_RESUME_STALE','La continuidad cambió desde la inspección; volver a inspeccionar, no sobrescribir intención ni dueño');
+    if(value.ownerSessionID===owner)return {value,duplicate:true};
+    value.history.push({at:now(),type:'resumed',previousSessionID:value.ownerSessionID,sessionID:owner,fromResumeBasis:args.expectedResumeBasis,resumeIdentity,intentRevision:value.intentRevision});value.ownerSessionID=owner;
+    writeSidecar(root,'continuities',store,options);
+    return {value,duplicate:false};
+  });
 }
 export function assertIntent(root,args,options={},record){
   const c=readContinuity(root,args.continuityId,options),work=readWork(root,c.workId,{files:false});
@@ -85,6 +130,7 @@ export function bindContinuity(root,args,options={}){
       // Explicit resumption does not rewrite intention or the original bind request.
       if(args.objective!==value.objective||contentHash(args.repositories)!==contentHash(value.repositories)||contentHash(args.constraints)!==contentHash(value.constraints))throw new Error('Retoma requiere intención vigente; usar update_intent para cambiarla');
       const owner=options.nativeContext?.sessionID??null;
+      if(value.ownerSessionID&&(typeof owner!=='string'||!owner.trim()))throw continuityRecoveryError(value,'NATIVE_SESSION_IDENTITY_UNAVAILABLE','La retoma requiere identidad de sesión nativa actual; no se cambia el dueño a null ni se usa un binding de ventana como sesión');
       if(value.ownerSessionID===owner)return value;
       value.history.push({at:now(),type:'resumed',previousSessionID:value.ownerSessionID,sessionID:owner});value.ownerSessionID=owner;
     }else{

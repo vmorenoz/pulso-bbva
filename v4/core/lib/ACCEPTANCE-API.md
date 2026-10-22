@@ -20,6 +20,8 @@ gestionan snapshots v2. No hay migración ni recreación de bases históricas.
 bind_continuity {workId, requestKey, objective, repositories: string[],
                  constraints: string[], sourceText?, continuityId?}
 get_continuity {continuityId}
+inspect_continuities {workId, continuityId?, limit?, cursor?}
+resume_continuity {workId, continuityId, expectedResumeBasis}
 update_intent {continuityId, expectedRevision, objective, constraints,
                repositories?, compatibleDelegationIds?}
 status {continuityId?, ...paginación existente}
@@ -39,9 +41,41 @@ handle. Otra carga con esa clave falla. `nativeContext:{sessionID,messageID,call
 se recibe exclusivamente en el tercer argumento de `executeTool`, desde el
 adaptador; esos campos no se admiten en JSON del modelo. Si hay owner session,
 consultas y mutaciones dirigidas exigen esa sesión. **Retomar deliberadamente**
-desde otra sesión exige `bind_continuity` con `continuityId` explícito y los datos
-de intención actuales; cambia el owner, no el snapshot ni la intención. Sin
-identidad nativa, el handle sólo asegura coherencia: no autentica conversaciones.
+desde otra sesión admite `bind_continuity` con `continuityId` explícito e intención
+actual confirmada, o la receta de recuperación siguiente. Cambia el owner, no el
+snapshot ni la intención. Sin identidad nativa, el handle legacy sólo asegura
+coherencia: no autentica conversaciones.
+
+Si la nueva sesión perdió esos campos, `inspect_continuities` lee únicamente el
+Work seleccionado: devuelve `items`, `total`, `hasMore`, `nextCursor` y la intención
+completa vigente de cada candidato, con `resumeBasis` y `resumable`. Un
+`continuityId` opcional selecciona exactamente ese candidato. No busca ni adopta
+un foco global, no escribe y no adquiere el mutex escritor. Varios candidatos no
+autorizan elegir el más reciente. Sigue la paginación y selecciona deliberadamente.
+
+`resume_continuity` recibe ese Work/CONT y `expectedResumeBasis`, solicita permiso
+nativo actual en el adaptador y exige identidad de sesión real. Bajo lock valida
+raíz/proyecto, Work/ciclo abierto y cápsula íntegra (intención, dueño e historia).
+La base es CAS, **no credencial**. No se aceptan IDs nativos en JSON. Cambiar
+progreso del Work no invalida la base; cambiar intención/dueño/ciclo/cierre sí.
+La misma retoma confirmada puede recuperarse tras perder su respuesta: mismo
+dueño/base/identidad/intención y último evento coincidente devuelven `duplicate:true`
+sin otra escritura. No se reutiliza un hash viejo ante cambios posteriores.
+
+El recibo compacto conserva `readWith:get_continuity`; no reescribe intención,
+crea CONT, cambia foco ni libera reservas. `error.recovery` da IDs, lectura y
+siguientes acciones para dueño ajeno, base obsoleta y reservas. Una reserva resuelta
+puede seguir pendiente de incorporación/retirada (`DELEGATION_AWAITING_INCORPORATION`);
+un intento nativo irresuelto sigue bloqueado (`DELEGATION_NATIVE_UNRESOLVED`).
+Ninguna de estas acciones acredita cancelación/cese físico ni autoriza redispatch.
+El cambio de sesión no exige liberación administrativa; un bloqueo real
+`METADATA_BUSY` con `recovery.manualOnly` conserva su recuperación manual
+documentada, sin retirar locks por edad ni robarlos.
+
+La transferencia nueva está disponible donde el adaptador proporciona sessionID
+nativo actual. Los adaptadores que sólo exponen binding conservan su flujo legacy;
+un binding de ventana no se convierte en identidad de chat. Sin sessionID, resume
+falla con `NATIVE_SESSION_IDENTITY_UNAVAILABLE`, sin degradar un dueño a null.
 
 Las respuestas de herramienta de `bind_continuity` y `update_intent` son recibos
 compactos con identidad, ciclo, propietario y revisiones confirmadas; no repiten

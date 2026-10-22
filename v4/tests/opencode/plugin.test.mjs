@@ -369,3 +369,33 @@ test('failed initialization return preserves the seed and creates no Work blocke
   assert.equal(fs.readFileSync(path.join(project,'.pulso/project.md'),'utf8'),seed);
   assert.deepEqual(fs.readdirSync(path.join(project,'.pulso/work')),[]);
 });
+
+for (const outcome of ['approved','denied','revoked','cancelled']) test(`new-session recovery requests current native permission: ${outcome}`,async t=>{
+  const f=await fixture(t);f.context.sessionID='ses_old';
+  assert.equal((await f.invoke('pulso_workspace',{action:'prepare'})).ok,true);
+  assert.equal((await f.invoke('pulso_work',{action:'create',workId:'RESUME',title:'Recover',objective:'Original',criterion:'Preserved',verification:'Read saved state'})).ok,true);
+  const bound=await f.invoke('pulso_workspace',{action:'bind_continuity',workId:'RESUME',requestKey:'original',objective:'Exact objective',repositories:['.'],constraints:['No new execution']});assert.equal(bound.ok,true);
+  f.context.sessionID='ses_new';const before=metadataSnapshot(f.project),inspect={action:'inspect_continuities',workId:'RESUME',continuityId:bound.data.continuityId};
+  const deniedRead=await f.invoke('pulso_workspace',{action:'get_continuity',continuityId:bound.data.continuityId});
+  assert.equal(deniedRead.error.code,'CONTINUITY_OWNER_MISMATCH');assert.equal(deniedRead.error.recovery.readWith.action,'inspect_continuities');
+  f.requests.length=0;
+  const inspected=await f.invoke('pulso_workspace',inspect);assert.equal(inspected.ok,true);assert.equal(inspected.data.adopted,false);assert.deepEqual(metadataSnapshot(f.project),before);
+  assert.deepEqual(f.requests,[{permission:'pulso_workspace',patterns:['inspect_continuities:RESUME'],always:['inspect_continuities:RESUME'],metadata:{action:'inspect_continuities',resource:'RESUME',mutating:false}}]);
+  const args={action:'resume_continuity',workId:'RESUME',continuityId:bound.data.continuityId,expectedResumeBasis:inspected.data.items[0].resumeBasis},ask=f.context.ask,controller=new AbortController();f.context.abort=controller.signal;f.requests.length=0;
+  f.context.ask=async request=>{await ask(request);if(outcome==='denied')throw new Error('permission denied');if(outcome==='revoked')f.context.directory=f.second;if(outcome==='cancelled')controller.abort();};
+  if(outcome==='approved'){
+    const result=await f.invoke('pulso_workspace',args);assert.equal(result.ok,true);assert.equal(result.data.ownerSessionID,'ses_new');
+    assert.equal((await f.invoke('pulso_workspace',{action:'get_continuity',continuityId:bound.data.continuityId})).ok,true);
+  }else{
+    await assert.rejects(f.invoke('pulso_workspace',args),outcome==='denied'?/permission denied/:outcome==='revoked'?/directory changed/:/cancelled/);
+    assert.deepEqual(metadataSnapshot(f.project),before);assert.deepEqual(fs.readdirSync(f.second),[]);
+  }
+  assert.deepEqual(f.requests[0],{permission:'pulso_workspace',patterns:['resume_continuity:RESUME'],always:['resume_continuity:RESUME'],metadata:{action:'resume_continuity',resource:'RESUME',mutating:true}});
+});
+
+test('recovery inspection denied by native host is read-denied, not a fallback ownership transfer',async t=>{
+  const f=await fixture(t);f.context.sessionID='ses_old';
+  await f.invoke('pulso_workspace',{action:'prepare'});await f.invoke('pulso_work',{action:'create',workId:'RESUME',title:'Recover',objective:'Original',criterion:'Preserved',verification:'Read saved state'});
+  const before=metadataSnapshot(f.project);f.context.sessionID='ses_new';f.context.ask=async()=>{throw new Error('permission denied');};
+  await assert.rejects(f.invoke('pulso_workspace',{action:'inspect_continuities',workId:'RESUME'}),/permission denied/);assert.deepEqual(metadataSnapshot(f.project),before);
+});

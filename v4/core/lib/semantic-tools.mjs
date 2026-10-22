@@ -6,17 +6,17 @@ import {toolDefinitions,validateToolInput} from './tool-contracts.mjs';
 import * as artifacts from './artifacts.mjs';
 import * as mutations from './work-mutations.mjs';
 import {prepareDelegation,acceptResult,acceptDelivery} from './acceptance.mjs';
-import {bindContinuity,checkContext,getContinuity,updateIntent} from './continuity.mjs';
+import {bindContinuity,checkContext,getContinuity,inspectContinuities,resumeContinuity,updateIntent} from './continuity.mjs';
 import {getDelegation,reconcileDelegation} from './delegation-registry.mjs';
 import * as memory from './memory.mjs';
 import {prepareWorkspace,recoverWorkspaceMigration,workspacePreparation} from './workspace.mjs';
 import {exists,readJSON,withWorkspaceLock} from './fs.mjs';
-import {formatReceipt} from './receipts.mjs';
+import {formatReceipt,recoveryDetails} from './receipts.mjs';
 import {pagination,pageItems} from './pagination.mjs';
 
 const defaultResourceRoot=fileURLToPath(new URL('../',import.meta.url));
 const ok=(title,output,data)=>({title:`Pulso · ${title}`,output,ok:true,...(data===undefined?{}:{data})});
-const fail=(title,error)=>({title:`Pulso · ${title}`,output:`${error?.persistence?.applied?'Aplicado parcialmente; no repitas a ciegas':'No se completó'}: ${String(error?.message||'operación inválida').slice(0,500)}`,ok:false,error:{code:error?.code||'OPERATION_FAILED',message:String(error?.message||'operación inválida').slice(0,500),...(error?.issues?{issues:error.issues}:{}),...(error?.issueCount?{issueCount:error.issueCount}:{}),...(error?.revision?{revision:error.revision}:{})},...(error?.readiness?{data:{readiness:error.readiness}}:{}),...(error?.persistence?{persistence:error.persistence}:{})});
+const fail=(title,error)=>({title:`Pulso · ${title}`,output:`${error?.persistence?.applied?'Aplicado parcialmente; no repitas a ciegas':'No se completó'}: ${String(error?.message||'operación inválida').slice(0,500)}`,ok:false,error:{code:error?.code||'OPERATION_FAILED',message:String(error?.message||'operación inválida').slice(0,500),...(error?.issues?{issues:error.issues}:{}),...(error?.issueCount?{issueCount:error.issueCount}:{}),...(error?.revision?{revision:error.revision}:{}),...recoveryDetails(error)},...(error?.readiness?{data:{readiness:error.readiness}}:{}),...(error?.persistence?{persistence:error.persistence}:{})});
 const receipt=(title,data)=>ok(title,formatReceipt(data),data);
 
 function continuityReceipt(value){
@@ -71,6 +71,11 @@ const handlers={
     switch(args.action){
       case 'bind_continuity':return ok('continuidad','Continuidad vinculada.',continuityReceipt(bindContinuity(root,args,options)));
       case 'get_continuity':return ok('continuidad','Intención y operaciones conservadas.',getContinuity(root,args,options));
+      case 'inspect_continuities':return ok('continuidades','Continuidades del Work seleccionado; lectura sin adopción.',inspectContinuities(root,args,options));
+      case 'resume_continuity':{
+        const {value,duplicate}=resumeContinuity(root,args,options);
+        return ok('continuidad','Continuidad retomada; intención y reservas conservadas.',{...continuityReceipt(value),duplicate});
+      }
       case 'update_intent':return ok('intención','Intención actualizada; no detiene agentes nativos.',continuityReceipt(updateIntent(root,args,options)));
       case 'prepare':{
         const data=prepareWorkspace(root,{homeDir});

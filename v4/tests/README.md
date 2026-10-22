@@ -64,11 +64,16 @@ clear an unresolved attempt, explicit administrative reconciliation is recorded,
 replacement preparation is idempotent, and same-task redispatch is blocked. Work
 results/evidence and the old native provenance are not fabricated.
 
-This is an adapter contract fixture using real disk/core, **not** a live network
-failure or conversational acceptance test. It does not solve discovery when a new
-session lacks the old capsule's confirmed fields. Administrative reconciliation
-also does not prove the old process stopped. Recovery discoverability and future
-specialist-tool permissions require separate runtime design and verification.
+`core/session-recovery` covers the lost-capsule path: selected-Work inspection,
+complete paginated candidates, explicit CAS adoption, current intention preserved,
+root/cycle/owner races, absent native identity, lost-response replay and unresolved
+versus awaiting-incorporation diagnostics. `opencode/plugin` verifies current native
+permission, denial, cancellation and root revocation for this new flow.
+
+These are adapter contract fixtures using real disk/core, **not** a live network
+failure or conversational acceptance test. Administrative reconciliation does not
+prove the old process stopped. Specialist-tool permissions and autonomous adoption
+policy are separate work; this stage only adds explicit selected-Work recovery.
 
 ## Cleanup baseline (2026-10-22)
 

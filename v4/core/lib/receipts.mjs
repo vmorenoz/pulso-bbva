@@ -1,5 +1,15 @@
 import {assertSchema} from './schema.mjs';
 
+/** Forward only the documented recovery variants, never arbitrary error payloads. */
+export function recoveryDetails(error){
+  if(!error?.recovery)return {};
+  try{
+    const value=structuredClone(error.recovery);
+    assertSchema('tool-error',{code:error.code||'OPERATION_FAILED',message:'',recovery:value});
+    return {recovery:value};
+  }catch{return {};}
+}
+
 export function workReceipt(work,{operation='work.apply',changes=[]}={}) {
   return assertSchema('work-receipt',{
     schemaVersion:1,
