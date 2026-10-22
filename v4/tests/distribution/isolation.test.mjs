@@ -59,6 +59,17 @@ for(const target of ['opencode','vscode'])test(`${target}: builds independently,
     assert.equal(permissions.pulso_work,'deny');
     assert.equal(field(fs.readFileSync(agentPath('pulso-executor'),'utf8'),'permission').edit['.pulso/project.md'],'deny');
   } else {
+    assert.ok(!listFiles(output).some(file=>file.endsWith('.prompt.md')),'no prompt tool-list override');
+    const catalog=JSON.parse(fs.readFileSync(path.join(output,'resources/agents/catalog.json')));
+    for(const role of [catalog.orchestrator,...catalog.specialists]) {
+      const tools=field(fs.readFileSync(agentPath(role.id),'utf8'),'tools');
+      assert.deepEqual(tools.filter(tool=>tool.startsWith('pulso-knowledge/')),
+        ['search','read','outline','related','status','sources','technologies'].map(name=>`pulso-knowledge/knowledge_${name}`));
+      assert.ok(!tools.some(tool=>tool.includes('*')));
+      if(role.id!==catalog.orchestrator.id) {
+        for(const tool of ['agent','pulso_workspace','pulso_work','pulso_history','pulso_context']) assert.ok(!tools.includes(tool));
+      }
+    }
     assert.ok(field(primary,'tools').includes('agent'));
     assert.ok(field(primary,'agents').includes('pulso-explorer'));
     assert.ok(!field(primary,'tools').includes('edit'));

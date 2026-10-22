@@ -35,6 +35,24 @@ The `<technology_knowledge_policy>` blocks in [`core/agents/common.md`](core/age
 
 For better documentation support, use the separate private [Pulso Knowledge utility](https://github.com/vmorenoz/pulso-knowledge). Its [README](https://github.com/vmorenoz/pulso-knowledge#readme) is the installation source of truth for authorized corpus preparation, embedding model/index and host MCP configuration. Pulso neither bundles nor installs it; installing the VSIX does not configure this MCP in VS Code.
 
+Knowledge **0.3** supports OpenCode, VS Code or both as installation targets; check [releases](https://github.com/vmorenoz/pulso-knowledge/releases/latest) for the available version. [0.2.0](https://github.com/vmorenoz/pulso-knowledge/releases/tag/v0.2.0) remains the previous distribution. Its bundled corpus/model permits offline installation after download on macOS Apple Silicon with Metal and preinstalled Node 24; consult the utility's own README for current requirements.
+
+## Semantic parity and host controls
+
+Both adapters render canonical roles, documentation policy and six skills. Semantic parity does not imply identical host controls or observed UI behavior.
+
+| Concern | Shared semantics | OpenCode | VS Code |
+| --- | --- | --- | --- |
+| Roles and management | Coordinator and nine specialists; four management tools reserved for coordination | Native role permissions and `request` envelopes | Role tool lists, flat arguments and window binding |
+| Knowledge | Documentation-first policy; external optional MCP | Native MCP tools subject to host configuration and permissions | Seven explicit `pulso-knowledge/knowledge_*` names in all ten roles; availability requires configured MCP |
+| Skills | `bbva-engineering` common to all roles; integration verification for Executor, QA and Code Reviewer | Native skill permissions per role | Role-specific links and instructions, not a native skill ACL |
+| Operational guides | Only init, status, recap and resume receive coordinator-only adapter instructions | Native commands/skills | Contributed skills; no `.prompt.md` tool-list override |
+| Delegation | Send exact `specialistPrompt` to the canonical specialist; incorporate reviewed results separately | `task` with durable hooks for supported native events | `agent` (`agent/runSubagent` in Local); literal return reported by coordinator |
+| Steering | Explicit confirmed `compatibleDelegationIds`; omission equals `[]` and invalidates previous-intent delegations | Native steering/cancellation only when available | Native steering/cancellation only when available |
+| Execution and scope | Executor/QA execution capability; authorized output/write scope | Native permissions remain authoritative | Tool lists, Workspace Trust and approvals remain authoritative; scope instructions are not a filesystem sandbox |
+
+Auxiliary skills do not receive the operational coordinator guard. The common BBVA skill is copied unchanged. Keeping a delegation compatible does not establish activity or physical termination. VS Code has no automatic capture of `agent` returns; its binding is not a chat identity. Native conversational/UI acceptance remains **NOT_RUN** in both hosts, including VS Code Local and Copilot Agent Host.
+
 ## Developer build
 
 Node.js 22 or newer is required. From this directory:
@@ -131,9 +149,13 @@ All selected plans preflight before any writes. A failing target rolls itself ba
 
 ## Verification gates
 
+Local integration reported on 2026-10-22: Pulso OpenCode **4.2.0 installed, 175 hashes PASS**; VS Code upgraded **4.1.1 → 4.2.0** through the official CLI. Knowledge **0.3**, `target=both`: manifest v3 with two targets, 399-document corpus preserved, identical OpenCode configuration and unrelated VS Code entries preserved. Real SDK checks in both hosts: **seven tools and search PASS**; UI/conversation **NOT_RUN**. Subsequent documentation-only packaging does not reinstall globally: installed hashes describe that reported installation, not the regenerated packaged README bytes.
+
 `npm run verify` runs builds, static package checks and both real-core smokes (legacy and durable). It does not invoke `npm test`, installer doubles or global mock suites. `npm run test:continuity` selects the bounded core/process and adapter-contract regressions for 4.2.0; adapter doubles do not establish real-host behavior. Historical suite results in the changelog do not apply automatically to current changes.
 
-Current consolidation checks: distribution/installer tests **64 PASS, 1 skip**; explicit bootstrap tests **10 PASS**; `npm run verify`, package and staged verification **PASS**. OpenCode tar, VSIX and standalone archives were regenerated and verified at **4.2.0**. The global suite is **not green**: **455 tests, 408 PASS, 46 FAIL, 1 skip**. All 46 failures reproduced on baseline `a7351bf` (47 failures there, including one subsequently corrected fixture). These checks do not establish live-host installation or conversational acceptance.
+Current parity checks (2026-10-22, Node **24.18.0**): `tests/distribution/*.test.mjs`, `tests/vscode/*.test.mjs` and `tests/core/continuity.test.mjs`: **83 PASS, 0 FAIL, 0 skipped**. `npm run verify`, both package builds and `npm run verify:packages`: **PASS**, including happy-path and durable smokes against both extracted packages. Inventories: **155 OpenCode files**, **79 VS Code files**, one unchanged BBVA skill in each. The standalone installer was regenerated; its offline fixture passed once with a temporary package and once against the final archive using `PULSO_INSTALLER_ARCHIVE` (**1 test per run**). Three archives and their three SHA-256 sidecars remain at **4.2.0**, checked against current content. No global installation or live-host/UI conversation was performed.
+
+Earlier consolidation checks (distribution/installer **64 PASS, 1 skip**, bootstrap **10 PASS**, staged verification PASS) remain historical. The global suite was not rerun for parity: its previous result was **455 tests, 408 PASS, 46 FAIL, 1 skip**. All 46 failures reproduced on baseline `a7351bf` (47 failures there, including one subsequently corrected fixture). The current bounded checks do not declare the global suite green.
 
 ```sh
 npm run build:opencode

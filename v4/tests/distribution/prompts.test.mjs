@@ -24,6 +24,29 @@ test('both adapters deliver dynamic CELLS/APX/ASO knowledge policy once to every
       const destination=target==='opencode'?`agents/${agent.id}.md`:`resources/agents/${agent.id}.agent.md`;
       const body=renderPrompt(readAgentBody(coreRoot,agent.id),{boundary:adapterConfig.boundary,destination});
       const rendered=adapterConfig.renderAgent({agent,catalog,body});
+      const field=name=>JSON.parse(rendered.match(new RegExp(`^${name}: (.+)$`,'m'))[1]);
+      const primary=agent.id===catalog.orchestrator.id;
+      const execution=['pulso-executor','pulso-qa-auditor'].includes(agent.id);
+      if(target==='vscode') {
+        const knowledge=['search','read','outline','related','status','sources','technologies'].map(name=>`pulso-knowledge/knowledge_${name}`);
+        const base=primary
+          ? ['agent','read','search','web','vscode/askQuestions','pulso_workspace','pulso_work','pulso_history','pulso_context']
+          : ['read','search','web','edit',...(execution?['execute']:[])];
+        assert.deepEqual(field('tools'),[...base,...knowledge],agent.id);
+        assert.deepEqual(field('agents'),primary?catalog.specialists.map(role=>role.id):[]);
+        assert.ok(rendered.includes(`${agent.id}: tools=${[...base,...knowledge].join(', ')}.`));
+        assert.match(rendered,/Esta prohibición no afecta a las siete tools documentales Knowledge/);
+        assert.match(rendered,/Las cuatro tools de gestión Pulso reciben argumentos planos/);
+      } else {
+        // OpenCode keeps native MCP discovery and existing role permissions.
+        assert.doesNotMatch(rendered,/^tools:|pulso-knowledge\/knowledge_/m);
+        const permission=field('permission');
+        assert.equal(permission.bash['*'],execution?'ask':'deny');
+        for(const name of ['pulso_workspace','pulso_work','pulso_history','pulso_context']) {
+          assert.equal(permission[name],primary?undefined:'deny');
+        }
+        assert.ok(!Object.keys(permission).some(name=>name.startsWith('pulso-knowledge')));
+      }
       const policies=[...rendered.matchAll(/<technology_knowledge_policy>([\s\S]*?)<\/technology_knowledge_policy>/g)];
       assert.equal(policies.length,1,`${target}/${agent.id}: inherited policy`);
       assert.match(policies[0][1],/knowledge_search/);

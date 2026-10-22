@@ -53,7 +53,10 @@ export async function build(target,{root=sourceRoot,outputRoot}={}) {
   for(const file of listFiles(path.join(coreRoot,'skills'))) {
     const destination=target==='vscode'?`resources/skills/${file}`:`skills/${file}`;
     const bytes=fs.readFileSync(path.join(coreRoot,'skills',file));
-    const result=file.startsWith('bbva-')?bytes:renderSkill(bytes.toString('utf8'),{boundary:config.operationalSkillBoundary,resourceBase:'resources',destination});
+    const operational=operationSkills.includes(file.split('/')[0]);
+    // Auxiliary skills retain their core instructions without coordinator-only guidance.
+    const text=operational?bytes.toString('utf8'):bytes.toString('utf8').replaceAll('{{ADAPTER_BOUNDARY}}','');
+    const result=file.startsWith('bbva-')?bytes:renderSkill(text,{boundary:config.operationalSkillBoundary,resourceBase:'resources',destination});
     add(destination,result,`core/skills/${file}`,bytes);
     if(file.endsWith('/SKILL.md')) chatSkills.push({path:destination});
   }

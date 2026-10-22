@@ -1,6 +1,6 @@
 # Instalar Pulso en otro equipo
 
-Esta guía instala **Pulso V4 para OpenCode desde el código de este repositorio**, incluyendo sus agentes, prompts, skills y política documental CELLS/APX/ASO. Para reproducir exactamente una instalación, conserva el commit utilizado; `main` puede avanzar.
+Esta guía describe la instalación de **Pulso V4 en OpenCode o VS Code**, incluyendo sus agentes, prompts, skills y política documental CELLS/APX/ASO. El recorrido de reconstrucción detallado corresponde a OpenCode; VS Code dispone de su guía específica. Para reproducir exactamente una instalación, conserva el commit utilizado; `main` puede avanzar.
 
 ## Instalación rápida con el paquete incluido
 
@@ -137,7 +137,9 @@ El estudio es proporcional: sin barrido completo, ceremonia ni informe extra. Re
 
 **Recomendamos [Pulso Knowledge](https://github.com/vmorenoz/pulso-knowledge) para mejorar el trabajo con documentación tecnológica.** Su repositorio es privado. Es un utilitario externo: Pulso no incorpora su implementación y su instalador no lo instala ni configura.
 
-Para instalarlo, sigue el [README de Pulso Knowledge](https://github.com/vmorenoz/pulso-knowledge#readme) como fuente única de requisitos y comandos: acceso al repositorio privado, preparación de un corpus documental autorizado, modelo de embeddings, ingesta e índice, y configuración MCP en el host elegido. Comprueba allí las dependencias y el modelo vigentes. Instalar Pulso en OpenCode o instalar su VSIX en VS Code no configura automáticamente ese MCP.
+Para instalarlo, sigue el [README de Pulso Knowledge](https://github.com/vmorenoz/pulso-knowledge#readme) como fuente única de requisitos y comandos y consulta las [releases](https://github.com/vmorenoz/pulso-knowledge/releases/latest). **Knowledge 0.3** permite seleccionar OpenCode, VS Code o ambos como destino; comprueba la versión disponible en ese enlace. La [0.2.0 anterior](https://github.com/vmorenoz/pulso-knowledge/releases/tag/v0.2.0) incluye programa, dependencias, modelo y corpus CELLS/APX/ASO con vectores para instalar sin red tras la descarga; requiere macOS Apple Silicon con Metal y Node 24 preinstalado. La ingesta permite ampliar o actualizar el corpus, no es requisito inicial de ese paquete completo. Comprueba los requisitos vigentes de la release que descargues. Instalar Pulso en OpenCode o instalar su VSIX en VS Code no configura automáticamente ese MCP.
+
+En VS Code, el servidor debe utilizar el ID `pulso-knowledge` en `servers` de `.vscode/mcp.json` o del perfil de usuario, conforme a la guía del utilitario. Los diez roles de Pulso declaran sus siete herramientas documentales explícitas; declararlas no demuestra conexión ni disponibilidad. En OpenCode se utiliza la configuración MCP nativa del host. La política documental y `bbva-engineering` son comunes; los controles nativos se detallan en la [matriz de paridad](README.md#semantic-parity-and-host-controls).
 
 La política está reforzada en `<technology_knowledge_policy>` de [`v4/core/agents/common.md`](core/agents/common.md) y [`v4/core/agents/pulso.md`](core/agents/pulso.md), y en la única skill BBVA vigente, [`v4/core/skills/bbva-engineering/SKILL.md`](core/skills/bbva-engineering/SKILL.md). Esta skill consolida las cuatro guías APX/CELLS retiradas y orienta el estudio documental; no es una fuente exhaustiva de APIs o versiones. Las keywords por sí solas no justifican su activación ni reemplazan la confirmación del stack y la consulta de fuentes pertinentes.
 

@@ -193,3 +193,24 @@ test('v2 reported return reaches execution intact even with a semantically inval
   assert.match(nativeBoundary,/orchestrator_reported/);
   assert.doesNotMatch(nativeBoundary,/prepare_delegation es lectura|result\.markdown/);
 });
+
+test('prepare transports the literal specialist prompt without launching or wrapping a subagent',async t=>{
+  const f=await extensionFixture(t),bound=await f.status();
+  const specialistPrompt='# Encargo literal\n\nUnicode: á → 漢字\n```json\n{"literal":true}\n```\n';
+  let calls=0;
+  f.setHandler(async(name,input)=>{
+    calls++;
+    assert.equal(name,'pulso_work');
+    assert.equal(input.action,'prepare_delegation');
+    assert.equal(input.expectedBindingId,undefined);
+    return {ok:true,output:'prepared',data:{delegationId:'D',specialistPrompt}};
+  });
+  const result=await f.invoke('pulso_work',{action:'prepare_delegation',contractVersion:2,continuityId:'C',intentRevision:1,
+    expectedRevision:1,requestKey:'P',workId:'W',taskIds:['T'],objective:'O',inputs:[],output:'conversation',constraints:[],
+    templateId:'implementation',expectedBindingId:bound.bindingId});
+  assert.equal(result.data.specialistPrompt,specialistPrompt);
+  assert.equal(calls,1);
+  assert.deepEqual([...f.tools.keys()].sort(),['pulso_context','pulso_history','pulso_work','pulso_workspace']);
+  assert.match(nativeBoundary,/specialistPrompt exacto, sin reescribir ni envolver su texto/);
+  assert.match(nativeBoundary,/no acredita captura durable, sesiones reanudables ni terminación física/);
+});
