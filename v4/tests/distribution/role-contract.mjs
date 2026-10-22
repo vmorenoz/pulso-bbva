@@ -31,7 +31,7 @@ export function assertRolePermissions(target,text,agent,catalog) {
     assert.equal(field(text,'mode'),primary?'primary':'subagent');
     assert.equal(permissions.bash['*'],execution?'ask':'deny');
     assert.deepEqual(permissions.task,primary?{'*':'deny',...Object.fromEntries(catalog.specialists.map(role=>[role.id,'allow']))}:{'*':'deny'});
-    for(const tool of management)assert.equal(permissions[tool],primary?undefined:'deny');
+    for(const tool of management)assert.equal(permissions[tool],primary?undefined:'ask');
     assert.ok(!Object.keys(permissions).some(name=>name.startsWith('pulso-knowledge')));
     if(primary)assert.equal(permissions.edit['*'],'deny');
     else {

@@ -72,8 +72,7 @@ permission, denial, cancellation and root revocation for this new flow.
 
 These are adapter contract fixtures using real disk/core, **not** a live network
 failure or conversational acceptance test. Administrative reconciliation does not
-prove the old process stopped. Specialist-tool permissions and autonomous adoption
-policy are separate work; this stage only adds explicit selected-Work recovery.
+prove the old process stopped. Autonomous adoption policy is separate; recovery primitives require explicit selected-Work recovery.
 
 ## Cleanup baseline (2026-10-22)
 
@@ -89,3 +88,18 @@ Build/check, happy and durable core smokes, extracted package tests and staged
 installer verification pass locally. No live OpenCode/VS Code conversation or
 macOS/Node 22 CI run is claimed by these local results. Test count reduction is not
 a goal: duplicated assertions were consolidated while useful coverage increased.
+
+
+## Scoped specialist tools
+
+`opencode/scoped-tools` uses public SDK-shaped session/message responses plus the
+real plugin, hooks and core on temporary disk. It reproduces the pinned order:
+before restores canonical args, task publishes parent/child metadata and current
+input, then the child invokes a tool. It covers fail-closed ancestry, role/call/
+prompt mismatch and ambiguous proof, four-tool scope denial, current native
+permission, owner-transfer revocation with later return capture, restricted Work
+projection, concurrent sibling CAS, atomic receipts, lost-response replay,
+changed-key conflict, output/symlink limits and partial projection repair.
+Existing plugin/package fixtures now supply realistic mandatory ToolContext
+identity and public SDK reads; they no longer omit session/agent metadata.
+These fixtures do not claim live host conversation, remote execution or macOS.

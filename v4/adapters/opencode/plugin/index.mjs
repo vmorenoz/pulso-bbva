@@ -11,6 +11,8 @@ import {readWork} from '../resources/lib/artifacts.mjs';
 import {schemaToZod, nativeToolSchemas} from './schema-converter.mjs';
 import {attemptActionSchemas} from './attempt-contracts.mjs';
 import {createDelegationObserver, readDelegationAttempts, correlation} from './delegation-observer.mjs';
+import {nativeAuthority} from './assignment-authority.mjs';
+import {authorizeTool} from '../resources/lib/assignment-tools.mjs';
 import {createDurableHooks, nativeContext} from './durable-hooks.mjs';
 
 const resourceRoot = fileURLToPath(new URL('../resources/', import.meta.url));
@@ -35,7 +37,9 @@ function rootOf(context) {
   return root;
 }
 function invocationContext(context, root, originalDirectory) {
+  const identity=Object.fromEntries(['sessionID','messageID','agent'].map(key=>[key,context[key]]));
   return () => {
+    if(Object.entries(identity).some(([key,value])=>context[key]!==value))throw new Error('Native invocation identity changed; operation blocked');
     if (context.abort?.aborted) throw new Error('Native invocation cancelled');
     if (context.directory !== originalDirectory || rootOf(context) !== root) throw new Error('Native project directory changed; no further mutation is allowed');
   };
@@ -49,7 +53,7 @@ function correlatedTask(directory, args, catalog) {
   return tasks.every(id => work.tasks.some(task => task.id === id && task.agent === args.subagent_type));
 }
 
-export async function PulsoPlugin({directory, homeDir = os.homedir()}, native = {}) {
+export async function PulsoPlugin({directory, client, homeDir = os.homedir()}, native = {}) {
   const {tool} = native.tool ? native : await import('./vendor/sdk/index.js');
   const z = native.z || tool.schema;
   if (!z) throw new Error('Native Zod API unavailable');
@@ -86,11 +90,16 @@ export async function PulsoPlugin({directory, homeDir = os.homedir()}, native = 
         // Denial/cancellation remains a host rejection, never normal success.
         await context.ask({permission: definition.name, patterns: [`${action}:${resource}`], always: [`${action}:${resource}`], metadata: {action, resource, mutating: isMutating(definition.name, semantic)}});
         assertContext();
-        let receipt;
+        let receipt,authorization;
+        try{
+          authorization=await nativeAuthority(client,context,root);
+          assertContext();
+          authorizeTool(root,definition.name,semantic,{authorization,nativeContext:nativeContext(context),assertContext});
+        }catch(error){return respond(failure(error));}
         if (definition.name === 'pulso_workspace' && attemptActionSchemas[semantic.action]) {
           receipt = {title: 'Pulso · Intentos', output: 'Telemetría pasiva; no confirma actividad ni aceptación.', ok: true,
             data: {items: readDelegationAttempts(root, semantic), liveness: 'unknown', acceptance: 'not_assessed'}};
-        } else receipt = await executeTool(definition.name, semantic, {projectRoot: root, homeDir, resourceRoot, assertContext, nativeContext: nativeContext(context)});
+        } else receipt = await executeTool(definition.name, semantic, {projectRoot: root, homeDir, resourceRoot, assertContext, nativeContext: nativeContext(context), authorization});
         try { assertContext(); } catch (error) {
           receipt = {...receipt, ok: false, contextChanged: true, output: `${receipt.output}\nContext changed after invocation: ${error.message}`};
         }

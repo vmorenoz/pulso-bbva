@@ -669,3 +669,48 @@ reintento ciego. La recuperación existente no borra documentos huérfanos.
 El contrato durable usa los mutexes breves de metadatos descritos arriba; no son
 locks sobre la ejecución de especialistas ni un scheduler. No se garantiza que
 runtimes antiguos acepten los campos nuevos.
+
+
+## Herramientas acotadas del especialista
+
+El adaptador entrega `authorization` confiable fuera del JSON del modelo. Sólo un
+hijo con sesión/mensaje/rol y ToolPart padre correlacionados con un dispatch
+canónico obtiene capacidades; IDs copiados del prompt no son credenciales.
+`get_assignment` expone selección y límites, sin robar el owner. Cada llamada
+revalida owner actual, ciclo, intención (o compatibilidad explícita), asignación,
+base de aceptación y estado durable. Transferir owner revoca las tools del hijo
+anterior; su retorno aún puede capturarse, sin afirmar que el proceso terminó.
+
+| Tool | Especialista probado | Denegado |
+| --- | --- | --- |
+| workspace | `get_assignment` | status/global, bind/resume/update_intent, prepare/recover/sync, telemetría |
+| work | `get` del Work propio (projection:assignment, completeWork:false), `get_delegation` propio, `get_assignment_receipts` propio, `update_assignment` propio | otro Work/encargo, update general, preparar/reconciliar delegación, aceptar, evidence.add, cierre/reapertura |
+| history | filtro obligatorio de Work propio | global/otro Work |
+| context | read/summary con scope:project explícito | user/all o cualquier escritura |
+
+`update_assignment {workId,delegationId,operationId,expectedRevision,actions}`
+admite sólo `task.progress {taskId,status?,summary?}` (pending/in_progress/blocked/
+paused; tareas del encargo no realizadas/canceladas) y `document.register
+{document:{kind,path,templateVersion}}` (output exacto, dentro de writeScope, archivo
+existente sin symlinks). No escribe el documento, crea evidencia ni enlaza criterios.
+Los permisos de archivo/ejecución del rol se conservan; las tools no son un sandbox
+para comandos externos ni autorización para editar metadata directamente.
+
+La mutación y `Work.assignmentOperations[]` se guardan en el mismo commit atómico:
+operationId, hash de carga lógica, identidad de encargo/sesión, intención vigente,
+revisión aplicada, fecha y cambios (hash real del documento si se registra).
+Misma clave/carga recupera ese recibo sin repetir cambios, aunque la revisión
+original ya no sea actual; otra carga falla. expectedRevision no forma parte del
+hash pero exige CAS hasta el primer commit. Hermanos concurrentes releen tras
+REVISION_STALE, sin sobrescribir. El historial de recibos es append-only y opcional
+para Works legacy. `get_assignment_receipts {workId,delegationId,operationId?,limit?,
+cursor?}` devuelve páginas completas; el coordinador verifica lo aplicado antes de
+incorporar el reporte, nunca vuelve a emitir acciones que ya constan.
+
+Fallo después del commit del Work conserva receipt y `persistence.applied`; recuperar
+el recibo y reparar proyecciones desde el coordinador, sin repetir efectos. Status,
+summary, documentos y recibos no cambian la base semántica de aceptación. Cambios
+de criterio, rol, alcance o dependencias siguen invalidándola; no se recalculan
+bases para aceptar trabajo antiguo. Sólo el coordinador incorpora observaciones,
+acepta tareas y cierra. Si el adaptador no acredita hijos, prepare devuelve
+assignmentCapabilities.available:false y el especialista conserva retorno Markdown.

@@ -58,3 +58,37 @@ Tras `METADATA_BUSY`, `after` comunica captura pendiente. Un nuevo `after` o un 
 Sin `.pulso/delegations-v2.json` no se activa la ruta gestionada: proyectos sin `.pulso` y legacy sin identidad pasan sin escritura. El marcador se conserva también para el índice del registro por archivos. Con registro presente, identidad/snapshot ausente, corrupción o árbol externo se rechazan; no se silencia un ENOENT anidado como si fuera legacy.
 
 La telemetría legacy sigue siendo pasiva: no confirma aceptación ni actividad. Las fixtures con core real y formas públicas de hooks comprueban el contrato del adaptador, **no una conversación nativa**. Las formas de wrapper/metadata proceden de la auditoría de 58 tasks persistidas; eso no garantiza por sí solo que cada hook vivo reciba esos mismos campos. La capacidad efectiva de bloquear dispatch, recibir los payloads y capturar en OpenCode requiere aceptación en el host real; permanece pendiente. No se depende de SQLite interno, scheduler propio ni cancelación inventada.
+
+
+### Tools de especialistas: autoridad nativa y recibos
+
+Las cuatro tools quedan en `ask` para especialistas, no en permiso global. El
+runtime permite únicamente la matriz de asignación documentada en la API del core;
+`task` sigue deny y no se amplían permisos de edición/terminal. Cada invocación,
+incluido el primario, exige permiso efectivo y prueba de identidad mediante el
+`client` entregado al plugin: `session.get` de sesión/proyecto, `session.message`
+del mensaje actual y su rol efectivo. Un primario sin padre debe ser Pulso; un
+especialista no puede usar ese camino aunque se seleccione como agente raíz.
+
+Para hijos se consulta el historial completo `session.messages` del padre (sin
+limit), exige padre raíz del mismo proyecto y un único ToolPart task con
+metadata.parentSessionId/sessionId, rol y prompt canónicos, callID registrado y
+estado activo. Running foreground y completed con wrapper running/background
+son formas soportadas. Parte terminal, ambigua, padre recursivo, SDK ausente o
+fallido: fail closed, sin sustituir identidad por texto ni caché permisiva.
+No hay lookup global ni acceso a SQLite interno.
+
+Contrato contrastado con fuentes oficiales **v1.18.2**:
+[PluginInput.client](https://github.com/anomalyco/opencode/blob/v1.18.2/packages/plugin/src/index.ts),
+[ToolContext](https://github.com/anomalyco/opencode/blob/v1.18.2/packages/plugin/src/tool.ts),
+[SDK v1](https://github.com/anomalyco/opencode/blob/v1.18.2/packages/sdk/js/src/gen/types.gen.ts),
+[ejecución de tools](https://github.com/anomalyco/opencode/blob/v1.18.2/packages/opencode/src/session/tools.ts)
+[task](https://github.com/anomalyco/opencode/blob/v1.18.2/packages/opencode/src/tool/task.ts),
+[HTTP messages sin límite](https://github.com/anomalyco/opencode/blob/v1.18.2/packages/opencode/src/server/routes/instance/httpapi/handlers/session.ts)
+y [paginación interna completa](https://github.com/anomalyco/opencode/blob/v1.18.2/packages/opencode/src/session/session.ts).
+La ejecución normal llama before con args, luego task; metadata publica
+state.input=args y relación padre/hijo antes de ops.prompt. Así el prompt
+restaurado por before queda disponible para comprobar la primera tool hija.
+El camino especial slash-subtask no se supone equivalente: cualquier discrepancia
+de callID/parte/rol bloquea capacidades. Estas son pruebas contractuales con SDK
+real y disco; la conversación nativa permanece **NOT_RUN**.

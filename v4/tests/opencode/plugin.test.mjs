@@ -1,3 +1,4 @@
+import {primaryClient} from '../opencode/native-fixture.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -34,9 +35,9 @@ async function fixture(t) {
   fs.cpSync(path.join(root, 'adapters/opencode/vendor'), path.join(runtime, 'plugin/vendor'), {recursive: true});
   fs.writeFileSync(path.join(runtime, 'package.json'), JSON.stringify(adapterConfig.packageManifest()));
   const {PulsoPlugin} = await import(pathToFileURL(path.join(runtime, 'plugin/index.mjs')).href);
-  const plugin = await PulsoPlugin({directory: project, homeDir});
+  const plugin = await PulsoPlugin({directory: project, homeDir,client:primaryClient(project)});
   const requests = [];
-  const context = {directory: project, abort: new AbortController().signal, async ask(request) {requests.push(request);}};
+  const context = {directory: project,sessionID:'ses_primary',messageID:'msg_primary',agent:'pulso', abort: new AbortController().signal, async ask(request) {requests.push(request);}};
   const invoke = async (name, input) => JSON.parse((await plugin.tool[name].execute(name === 'pulso_history' ? input : {request: input}, context)).output);
   return {base, runtime, project, second, homeDir, plugin, context, requests, invoke};
 }

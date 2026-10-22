@@ -1,3 +1,4 @@
+import {primaryClient} from '../opencode/native-fixture.mjs';
 /** Adapter contract checks with real core and public hook shapes; NOT native host conversation acceptance. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -28,8 +29,8 @@ async function fixture(t) {
   const load = relative => import(pathToFileURL(path.join(runtime,relative)).href);
   const {PulsoPlugin} = await load('plugin/index.mjs');
   const {readDelegation} = await load('resources/lib/delegation-registry.mjs');
-  const plugin = await PulsoPlugin({directory:project,homeDir:path.join(base,'home')});
-  const context = {directory:project,sessionID:'ses_parent',messageID:'msg_prepare',callID:'call_prepare',async ask() {}};
+  const plugin = await PulsoPlugin({directory:project,homeDir:path.join(base,'home'),client:primaryClient(project)});
+  const context = {directory:project,agent:'pulso',sessionID:'ses_parent',messageID:'msg_prepare',callID:'call_prepare',async ask() {}};
   const invoke = async (name,request) => {
     const receipt = JSON.parse((await plugin.tool[name].execute({request},context)).output);
     assert.equal(receipt.ok,true,JSON.stringify(receipt));

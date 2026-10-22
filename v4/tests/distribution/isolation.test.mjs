@@ -1,3 +1,4 @@
+import {primaryClient} from '../opencode/native-fixture.mjs';
 import test from 'node:test';
 import {assertRolePermissions} from './role-contract.mjs';
 import assert from 'node:assert/strict';
@@ -78,9 +79,9 @@ for(const target of ['opencode','vscode'])test(`${target}: actual extracted arch
   if(target==='opencode') {
     const {PulsoPlugin}=await import(pathToFileURL(path.join(payload,'plugin/index.mjs')).href);
     const workspace=path.join(root,'workspace'),home=path.join(root,'home');fs.mkdirSync(workspace);fs.mkdirSync(home);
-    const plugin=await PulsoPlugin({directory:workspace,homeDir:home});
+    const plugin=await PulsoPlugin({directory:workspace,homeDir:home,client:primaryClient(workspace)});
     assert.deepEqual(Object.keys(plugin.tool).sort(),['pulso_context','pulso_history','pulso_work','pulso_workspace']);
-    const receipt=await plugin.tool.pulso_workspace.execute({request:{action:'status'}},{directory:workspace,ask:async()=>{},abort:new AbortController().signal});
+    const receipt=await plugin.tool.pulso_workspace.execute({request:{action:'status'}},{directory:workspace,sessionID:'ses_primary',messageID:'msg_primary',agent:'pulso',ask:async()=>{},abort:new AbortController().signal});
     assert.equal(JSON.parse(receipt.output).ok,true);
     assert.equal(fs.existsSync(path.join(workspace,'.pulso')),false);
   } else {

@@ -48,7 +48,7 @@ test('v2 snapshot survives fresh process, same request reuses original revision 
 
 test('public v2 prepare is compact and accepts by IDs without retrieving the canonical contract',async t=>{
   const f=await fixture(t),prepared=await f.call('pulso_work',f.prep);
-  assert.deepEqual(Object.keys(prepared).sort(),['agent','contractVersion','continuityId','delegationId','intentRevision','preparedFromRevision','readWith','specialistPrompt','state','workId'].sort());
+  assert.deepEqual(Object.keys(prepared).sort(),['agent','assignmentCapabilities','contractVersion','continuityId','delegationId','intentRevision','preparedFromRevision','readWith','specialistPrompt','state','workId'].sort());
   assert.equal(prepared.agent,'pulso-executor');
   assert.deepEqual(await f.call('pulso_work',{...f.prep,expectedRevision:999}),prepared);
   assert.equal(prepared.preparedFromRevision,f.work().revision);assert.equal(prepared.state,'prepared');

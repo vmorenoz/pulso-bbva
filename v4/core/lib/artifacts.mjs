@@ -41,6 +41,8 @@ export function validateWork(root,w,{files=true,fresh=false}={}) {
   assertSchema('work',w);
   unique(w.objective.criteria.map(c=>c.id),'Criterios');unique(w.tasks.map(t=>t.id),'Tareas');unique(w.evidence.map(e=>e.id),'Evidencias');
   unique(w.documents.map(d=>d.path),'Documentos');
+  unique((w.assignmentOperations||[]).map(r=>`${r.delegationId}:${r.operationId}`),'Operaciones de asignación');
+  for(const r of w.assignmentOperations||[])if(r.workId!==w.id||r.cycle>w.cycle||r.appliedRevision>w.revision)throw new Error('Recibo de asignación ajeno o futuro');
   if (Date.parse(w.updatedAt)<Date.parse(w.createdAt))throw new Error('updatedAt anterior a createdAt');
   if (terminal(w.status)!==Boolean(w.closure))throw new Error('Cierre y estado terminal incoherentes');
   if(w.closure && (w.closure.cycle!==w.cycle || w.closure.outcome!==w.status || w.closure.id!==`${w.id}:c${w.cycle}`)) throw new Error('Identidad de cierre incoherente');
@@ -196,6 +198,8 @@ function saveWorkLocked(root,candidate,expectedRevision){
     const observed=e=>{const {summary,editedAt,...rest}=e;return rest;};
     if(!same(observed(before),observed(after)))throw new Error(`Observación de evidencia inmutable: ${before.id}; repetir con un ID nuevo`);
   }
+  const oldOperations=old.assignmentOperations||[],newOperations=w.assignmentOperations||[];
+  if(newOperations.length<oldOperations.length||!same(newOperations.slice(0,oldOperations.length),oldOperations))throw new Error('Recibos de asignación inmutables');
   const oldResults=old.results||[],newResults=w.results||[];
   if(newResults.length<oldResults.length||!same(newResults.slice(0,oldResults.length),oldResults))throw new Error('Resultados aceptados inmutables');
   for(const record of newResults.slice(oldResults.length)){
