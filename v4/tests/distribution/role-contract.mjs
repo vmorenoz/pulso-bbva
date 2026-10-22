@@ -36,8 +36,19 @@ export function assertRolePermissions(target,text,agent,catalog) {
     if(primary)assert.equal(permissions.edit['*'],'deny');
     else {
       assert.equal(permissions.edit['*'],execution?undefined:'deny');
-      for(const key of ['.pulso/state.json','.pulso/history.jsonl','.pulso/work/**/work.json'])assert.equal(permissions.edit[key],'deny');
-      assert.equal(permissions.edit['.pulso/project.md'],agent.id==='pulso-explorer'?'allow':'deny');
+    }
+    // Trace artifacts are the only structured-document exception. Exercise root
+    // and nested workspaces in this independent oracle, including built packages.
+    for(const prefix of ['.pulso/','**/.pulso/']) {
+      for(const extension of ['json','zip']) {
+        assert.equal(permissions.edit[`${prefix}work/*/trace-evidence/*.${extension}`],execution?'allow':undefined,`${agent.id}: ${prefix}${extension}`);
+      }
+      if(!primary) {
+        for(const file of ['**','state.json','history.jsonl','memory.json','project.json','work/**/work.json','preparation.json','recovery/**','delegation-attempts/**']) {
+          assert.equal(permissions.edit[`${prefix}${file}`],'deny',`${agent.id}: ${prefix}${file}`);
+        }
+        assert.equal(permissions.edit[`${prefix}project.md`],agent.id==='pulso-explorer'?'allow':'deny',agent.id);
+      }
     }
   }
 }

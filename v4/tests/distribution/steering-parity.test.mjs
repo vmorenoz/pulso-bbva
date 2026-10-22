@@ -3,18 +3,24 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {sourceRoot} from '../../scripts/build.mjs';
-import {readAgentBody,renderPrompt,renderSkill} from '../../scripts/prompts.mjs';
+import {readAgentBody,renderPrompt,renderSkill,agentBoundary} from '../../scripts/prompts.mjs';
 import {toolContracts,validateToolInput} from '../../core/lib/tool-contracts.mjs';
 
-const signature='update_intent(continuityId, expectedRevision, objective, constraints, repositories?, compatibleDelegationIds)';
+const coreRoot=path.join(sourceRoot,'core');
+const catalog=JSON.parse(fs.readFileSync(path.join(coreRoot,'agents/catalog.json')));
+const primary=readAgentBody(coreRoot,'pulso');
+const resume=fs.readFileSync(path.join(coreRoot,'skills/pulso-resume/SKILL.md'),'utf8');
 // Structural prompt checks only; actual compatibility/omission behavior lives
 // in core/continuity.test.mjs (two-delegation acceptance and capture flow).
 function assertSteeringInstructions(text){
-  const authored=/update_intent\(([^)]+)\)/.exec(text);
-  assert.ok(authored,'authored update_intent signature');
-  const fields=authored[1].split(',').map(name=>name.trim().replace(/\?$/,''));
-  const expected=Object.keys(toolContracts.pulso_workspace.actionSchemas.update_intent.properties).filter(name=>name!=='action');
-  assert.deepEqual(fields.sort(),expected.sort());
+  const authored=[...text.matchAll(/update_intent\(([^)]+)\)/g)];
+  assert.ok(authored.length,'authored update_intent signature');
+  const expected=Object.keys(toolContracts.pulso_workspace.actionSchemas.update_intent.properties).filter(name=>name!=='action').sort();
+  // Check every occurrence: a current signature must not mask a stale copy.
+  for(const [,signature] of authored) {
+    const fields=signature.split(',').map(name=>name.trim().replace(/\?$/,'')).sort();
+    assert.deepEqual(fields,expected);
+  }
   assert.match(text,/compatibleDelegationIds[^.\n]*get_continuity\/get_delegation/);
   assert.match(text,/conserva solo[^.\n]*compatibles/);
   assert.match(text,/envía \[\] cuando ninguno sea compatible/);
@@ -24,24 +30,20 @@ function assertSteeringInstructions(text){
 
 for(const target of ['opencode','vscode']) test(`${target}: primary and resume render explicit steering compatibility`,async()=>{
   const {adapterConfig}=await import(`../../adapters/${target}/build.mjs`);
-  const coreRoot=path.join(sourceRoot,'core');
-  const catalog=JSON.parse(fs.readFileSync(path.join(coreRoot,'agents/catalog.json')));
-  const primary=readAgentBody(coreRoot,'pulso');
-  const resume=fs.readFileSync(path.join(coreRoot,'skills/pulso-resume/SKILL.md'),'utf8');
   const destination=target==='vscode'?'resources/agents/pulso.agent.md':'agents/pulso.md';
-  const body=renderPrompt(primary,{boundary:adapterConfig.boundary,destination});
+  const body=renderPrompt(primary,{boundary:agentBoundary(adapterConfig,catalog.orchestrator,catalog),destination});
   const renderedPrimary=adapterConfig.renderAgent({agent:catalog.orchestrator,catalog,body});
   const renderedResume=renderSkill(resume,{boundary:adapterConfig.operationalSkillBoundary,destination:target==='vscode'?'resources/skills/pulso-resume/SKILL.md':'skills/pulso-resume/SKILL.md'});
-  for(const text of [primary,resume,renderedPrimary,renderedResume]) {
+  for(const text of [renderedPrimary,renderedResume]) {
     assertSteeringInstructions(text);
-    assert.doesNotMatch(text,/update_intent\(continuityId, expectedRevision, objective, constraints, repositories\?\)/);
   }
 });
 
-test('authored steering signature matches the shared schema without changing omission semantics',()=>{
+test('canonical steering sources match the shared schema and retain omission semantics',()=>{
+  // Authored sources are identical across adapters; check them once. Each native
+  // rendering above remains a separate boundary where substitution can regress.
+  for(const text of [primary,resume]) assertSteeringInstructions(text);
   const schema=toolContracts.pulso_workspace.actionSchemas.update_intent;
-  const fields=signature.slice(signature.indexOf('(')+1,-1).split(', ').map(name=>name.replace(/\?$/,''));
-  assert.deepEqual(fields.sort(),Object.keys(schema.properties).filter(name=>name!=='action').sort());
   assert.equal(schema.properties.compatibleDelegationIds.type,'array');
   assert.equal(schema.properties.compatibleDelegationIds.items.type,'string');
   assert.ok(!schema.required.includes('compatibleDelegationIds'));

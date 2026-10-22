@@ -49,11 +49,25 @@ unset PULSO_INSTALLER_ARCHIVE PULSO_TEST_ARTIFACTS
   longer demand automatic staging deletion or obsolete rollback behavior.
 - **Distribution:** `role-contract` centralizes the current native permission
   matrix and applies it to both direct rendering and isolated built packages.
+  It also owns trace-evidence JSON/ZIP exceptions and root/nested metadata denies;
+  the redundant standalone `trace-permissions` test has been folded into it.
   `prompts` owns Knowledge guidance; `native-parity` owns role/skill composition;
   `isolation` retains reproducibility, archive/import activation, package inventory
   and shipped guidance. Steering checks inspect instructions/schema shape, not
   model behavior. Existing integration, security, scope, cancellation, user
   acceptance, concurrency and persistence tests remain in place.
+
+`steering-parity` validates canonical sources once, then checks each adapter's
+rendered primary agent and resume skill separately. Every authored API signature
+must match the contract, so a correct signature cannot hide a stale second copy.
+
+Knowledge's full policy checklist runs against the two authored policies, rather
+than repeating it for all twenty rendered agents. Exact section comparison still
+checks every role on both adapters. Recovery's source policy is checked once and
+its complete sections verified in both coordinators, with specialists excluded.
+Bounded editorial variants are paired with missing/reversed-safeguard mutations;
+these checks are not a general natural-language semantics parser. BBVA byte
+integrity, inventory and packaged-copy checks remain exact and independent.
 
 `distribution/prompts` checks scoped obligations on both adapters' fully rendered
 agents, including dynamic Knowledge study, generic source/semantic tracing,
@@ -135,7 +149,7 @@ These fixtures do not claim live host conversation, remote execution or macOS.
 
 ## Integrated verification snapshot (2026-10-22)
 
-Linux x64, Node 24.19.0: **583/583 tests pass**, with no failures or skips,
+Linux x64, Node 24.19.0: **580/580 tests pass**, with no failures or skips,
 using the freshly regenerated tracked standalone installer archive through
 `PULSO_INSTALLER_ARCHIVE`. Build/check, happy/durable smokes, verification of both
 runtime archives and checksums, and the staged installer also pass. OpenCode,
@@ -155,3 +169,8 @@ from the earlier main version. Counts exclude frontmatter, tools and dynamic
 context. Operational skills retain their complete coordinator boundary; runtime
 schemas and permission enforcement are unchanged. These measurements are not
 token counts or evidence of live-model behavioral equivalence.
+
+The subsequent test-only consolidation reduced 583 registered cases to 580 and
+40 test files to 39; it did not remove runtime scenarios. Most savings are repeated
+assertions, not the case count. Runtime, prompts, schemas and shipped artifacts
+were unchanged by that cleanup; the same verified installer archive was used.

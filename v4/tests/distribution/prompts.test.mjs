@@ -32,12 +32,12 @@ function contracts(text,rules) {
 // or a fixed ordering of every example/role in an enumeration.
 function assertKnowledgePolicy(policy,{primary=false}={}) {
   for(const name of ['search','read','outline','related','status','sources','technologies']) assert.ok(policy.includes(`knowledge_${name}`),name);
-  const study=/Antes de[^.]*estudi[^.]*/.exec(policy)?.[0];
+  const study=/(?:Antes de|Previamente a)[^.]*estudi[^.]*/.exec(policy)?.[0];
   assert.ok(study,'study precedes dependent work');
   for(const phase of [/diseñar/,/planificar/,/implementar/,/revisar/,/preparar/,/ejecutar pruebas/,/migrar/]) assert.match(study,phase,'study covers each engineering phase');
   assert.match(study,/tecnología cubierta y confirmada/,'study follows dynamic coverage and observed project context');
   contracts(policy,[
-    ['dynamic coverage',/CELLS, APX, ASO[^.\n]*catálogo dinámico/],
+    ['dynamic coverage',/cubre (?=[^.\n]*\bCELLS\b)(?=[^.\n]*\bAPX\b)(?=[^.\n]*\bASO\b)[^.\n]*catálogo dinámico/],
     ['catalog before availability claims',/Antes de afirmar disponibilidad[^.\n]*knowledge_technologies/],
     ['host exposes knowledge alias',/pulso-knowledge[^.\n]*alias[^.\n]*host/],
     ['prompts and skills do not prove installation',/no deduzcas disponibilidad[^.\n]*prompts[^.\n]*skills/],
@@ -75,7 +75,7 @@ function assertKnowledgePolicy(policy,{primary=false}={}) {
     ['no unsupported implementation',/Sin evidencia suficiente, no[^.\n]*implement[^.\n]*memoria[^.\n]*snippets[^.\n]*finjas aprobación/],
     ['block only affected decision',/bloquea únicamente la decisión afectada[^.\n]*continúa[^.\n]*independiente sustentado/],
     ['document scopes are not compatibility',/current\/historical\/all[^.\n]*ubicación documental[^.\n]*no compatibilidad/],
-    ['skill complements, not replaces documentation',/bbva-engineering[^.\n]*complementaria[^.\n]*no reemplaza el MCP/],
+    ['skill complements, not replaces documentation',/bbva-engineering[^.\n]*complementaria[^.\n]*no (?:reemplaza|sustituye) el MCP/],
     ['skill loading is contextual',/tarea encaje[^.\n]*descripción[^.\n]*no solo por palabras clave/],
     ['validate skill examples',/snippets y contratos[^.\n]*versión del proyecto[^.\n]*documentación consultada/],
   ]);
@@ -98,25 +98,45 @@ async function renderedAgents(target) {
   });
 }
 
-for(const target of ['opencode','vscode']) test(`${target}: every rendered role retains one complete dynamic Knowledge policy`,async()=>{
-  for(const {agent,text} of await renderedAgents(target)) {
-    assertKnowledgePolicy(section(text,'technology_knowledge_policy'),{primary:agent.id===catalog.orchestrator.id});
+test('rendered roles retain their independently checked authored Knowledge policy',async()=>{
+  // Two authored policies, not twenty independent copies. Validate each once;
+  // exact section equality then detects loss or alteration in every render path.
+  const policies={
+    primary:section(readAgentBody(coreRoot,'pulso'),'technology_knowledge_policy'),
+    specialist:section(readAgentBody(coreRoot,'pulso-executor'),'technology_knowledge_policy'),
+  };
+  assertKnowledgePolicy(policies.primary,{primary:true});
+  assertKnowledgePolicy(policies.specialist);
+  for(const target of ['opencode','vscode']) for(const {agent,text} of await renderedAgents(target)) {
+    const primary=agent.id===catalog.orchestrator.id;
+    assert.equal(section(text,'technology_knowledge_policy'),policies[primary?'primary':'specialist'],`${target}/${agent.id}: complete applicable policy`);
     assert.doesNotMatch(text,/póliza|p[oó]lizas?|\bpolis\b|identificadores\/importes|skills legacy complementarias|no usan tools Pulso/i);
     assert.doesNotMatch(text,/herramientas `pulso_\*`|<\/?cells_knowledge_policy>/);
     assert.ok(!text.includes('{{'),`${agent.id}: expanded slots`);
   }
 });
 
-test('Knowledge contract checks reject missing gates and reversed evidence safeguards',()=>{
+test('Knowledge checks accept editorial variants but reject missing or reversed safeguards',()=>{
   const policy=section(readAgentBody(coreRoot,'pulso-executor'),'technology_knowledge_policy');
   assertKnowledgePolicy(policy);
+  for(const [before,after] of [
+    ['CELLS, APX, ASO','ASO, CELLS y APX'],
+    ['Antes de diseñar','Previamente a diseñar'],
+    ['no reemplaza el MCP','no sustituye el MCP'],
+  ]) {
+    const editorial=policy.replace(before,after);
+    assert.notEqual(editorial,policy,before);
+    assertKnowledgePolicy(editorial);
+  }
   for(const [label,remove,replace] of [
     ['catalog discovery','knowledge_technologies','unverified_catalog'],
+    ['dynamic technology coverage','CELLS, APX, ASO','CELLS, APX'],
     ['study prerequisite','Antes de diseñar','Después de diseñar'],
     ['original reading','un snippet no basta','un snippet basta'],
     ['source compatibility','no compatibilidad verificada','compatibilidad verificada'],
     ['fallback','fuentes oficiales o locales autorizadas','fuentes sin procedencia'],
     ['unsupported implementation','Sin evidencia suficiente, no implementes','Sin evidencia suficiente, implementa'],
+    ['skill cannot replace documentation','no reemplaza el MCP','reemplaza el MCP'],
   ]) {
     const altered=policy.replace(remove,replace);
     assert.notEqual(altered,policy,label);
@@ -251,11 +271,15 @@ function assertAutomaticRecovery(text) {
   ]);
 }
 
-for(const target of ['opencode','vscode']) test(`${target}: rendered automatic recovery is conditional, semantically scoped and permissioned`,async()=>{
-  const rendered=await renderedAgents(target);
-  assertAutomaticRecovery(rendered.find(({agent})=>agent.id==='pulso').text);
-  for(const {agent,text} of rendered.filter(({agent})=>agent.id!=='pulso')) {
-    assert.doesNotMatch(text,/<automatic_continuity_recovery>/,`${agent.id} is not the recovery coordinator`);
+test('rendered recovery preserves the checked coordinator policy and excludes specialists',async()=>{
+  const authored=readAgentBody(coreRoot,'pulso');
+  assertAutomaticRecovery(authored);
+  for(const target of ['opencode','vscode']) for(const {agent,text} of await renderedAgents(target)) {
+    if(agent.id==='pulso') {
+      for(const name of ['turn_intent_gate','automatic_continuity_recovery']) {
+        assert.equal(section(text,name),section(authored,name),`${target}: complete ${name}`);
+      }
+    } else assert.doesNotMatch(text,/<automatic_continuity_recovery>/,`${agent.id} is not the recovery coordinator`);
   }
 });
 
