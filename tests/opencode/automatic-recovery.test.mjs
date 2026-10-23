@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-import {adapterConfig} from '../../adapters/opencode/build.mjs';
+import {adapterConfig} from '../../harness/build.mjs';
 
 const source = fileURLToPath(new URL('../../', import.meta.url));
 const snapshot = root => Object.fromEntries(fs.readdirSync(root, {recursive: true}).sort().filter(file => fs.statSync(path.join(root, file)).isFile()).map(file => [file, fs.readFileSync(path.join(root, file), 'utf8')]));
@@ -19,8 +19,8 @@ async function fixture(t, {prepare = true} = {}) {
   const runtime = path.join(base, 'runtime'), root = path.join(base, 'project');
   fs.mkdirSync(root);fs.mkdirSync(path.join(runtime, 'plugin'), {recursive: true});
   fs.cpSync(path.join(source, 'core'), path.join(runtime, 'resources'), {recursive: true});
-  fs.copyFileSync(path.join(source, 'adapters/opencode/plugin/recovery-policy.mjs'), path.join(runtime, 'plugin/recovery-policy.mjs'));
-  for (const file of ['durable-hooks.mjs', 'delegation-observer.mjs', 'native-read.mjs']) fs.copyFileSync(path.join(source, 'adapters/opencode/plugin', file), path.join(runtime, 'plugin', file));
+  fs.copyFileSync(path.join(source, 'harness/plugin/recovery-policy.mjs'), path.join(runtime, 'plugin/recovery-policy.mjs'));
+  for (const file of ['durable-hooks.mjs', 'delegation-observer.mjs', 'native-read.mjs']) fs.copyFileSync(path.join(source, 'harness/plugin', file), path.join(runtime, 'plugin', file));
   const load = relative => import(pathToFileURL(path.join(runtime, relative)).href);
   const policyModule = await load('plugin/recovery-policy.mjs');
   const {executeTool} = await load('resources/lib/semantic-tools.mjs');
@@ -75,9 +75,9 @@ async function failedChild(f) {
 async function runtimePlugin(f) {
   for (const [sourceFile, target] of Object.entries(adapterConfig.runtimeFiles)) {
     fs.mkdirSync(path.dirname(path.join(f.runtime, target)), {recursive: true});
-    fs.copyFileSync(path.join(source, 'adapters/opencode', sourceFile), path.join(f.runtime, target));
+    fs.copyFileSync(path.join(source, 'harness', sourceFile), path.join(f.runtime, target));
   }
-  fs.cpSync(path.join(source, 'adapters/opencode/vendor'), path.join(f.runtime, 'plugin/vendor'), {recursive: true});
+  fs.cpSync(path.join(source, 'harness/vendor'), path.join(f.runtime, 'plugin/vendor'), {recursive: true});
   fs.writeFileSync(path.join(f.runtime, 'package.json'), JSON.stringify(adapterConfig.packageManifest()));
   const {createPulsoPlugin}=await f.load('plugin/index.mjs');
   const registered={},hooks={},asks=[];
@@ -600,7 +600,7 @@ test('native reader rejects mismatched full-service ancestry/project/root and ne
 
 test('official generated V2 client reads a bound loopback host, no model call or service start',async t=>{
   const f=await fixture(t),{createNativeReader}=await f.load('plugin/native-read.mjs');
-  fs.cpSync(path.join(source,'adapters/opencode/vendor'),path.join(f.runtime,'plugin/vendor'),{recursive:true});
+  fs.cpSync(path.join(source,'harness/vendor'),path.join(f.runtime,'plugin/vendor'),{recursive:true});
   const requests=[];let version='2.1.2';
   const server=http.createServer((request,response)=>{
     const url=new URL(request.url,'http://localhost');requests.push([request.method,url.pathname]);response.setHeader('content-type','application/json');

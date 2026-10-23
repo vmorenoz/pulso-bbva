@@ -90,7 +90,7 @@ function assertKnowledgePolicy(policy,{primary=false}={}) {
 }
 
 async function renderedAgents(target) {
-  const {adapterConfig}=await import(`../../adapters/${target}/build.mjs`);
+  const {adapterConfig}=await import(`../../harness/build.mjs`);
   return [catalog.orchestrator,...catalog.specialists].map(agent=>{
     const destination=`agents/${agent.id}.md`;
     const body=renderPrompt(readAgentBody(coreRoot,agent.id),{boundary:agentBoundary(adapterConfig,agent,catalog),destination});
@@ -319,7 +319,7 @@ function assertSpecialistNativeBoundary(text) {
 }
 
 test('OpenCode selects applicable native contracts before rendering and keeps child safeguards',async()=>{
-  const {adapterConfig,specialistBoundary,coordinatorBoundary,operationalSkillBoundary}=await import('../../adapters/opencode/build.mjs');
+  const {adapterConfig,specialistBoundary,coordinatorBoundary,operationalSkillBoundary}=await import('../../harness/build.mjs');
   for(const {agent,text} of await renderedAgents('opencode')) {
     const selected=agentBoundary(adapterConfig,agent,catalog);
     if(agent.id===catalog.orchestrator.id) {

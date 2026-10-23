@@ -29,7 +29,7 @@ function assertSteeringInstructions(text){
 }
 
 for(const target of ['opencode']) test(`${target}: primary and resume render explicit steering compatibility`,async()=>{
-  const {adapterConfig}=await import(`../../adapters/${target}/build.mjs`);
+  const {adapterConfig}=await import(`../../harness/build.mjs`);
   const destination='agents/pulso.md';
   const body=renderPrompt(primary,{boundary:agentBoundary(adapterConfig,catalog.orchestrator,catalog),destination});
   const renderedPrimary=adapterConfig.renderAgent({agent:catalog.orchestrator,catalog,body});
@@ -40,7 +40,7 @@ for(const target of ['opencode']) test(`${target}: primary and resume render exp
 });
 
 test('canonical steering sources match the shared schema and retain omission semantics',()=>{
-  // Authored sources are identical across adapters; check them once. Each native
+  // Authored core sources are shared by native composition; check them once. Each native
   // rendering above remains a separate boundary where substitution can regress.
   for(const text of [primary,resume]) assertSteeringInstructions(text);
   const schema=toolContracts.pulso_workspace.actionSchemas.update_intent;

@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {fileURLToPath,pathToFileURL} from 'node:url';
-import {adapterConfig} from '../../adapters/opencode/build.mjs';
+import {adapterConfig} from '../../harness/build.mjs';
 const source=fileURLToPath(new URL('../../',import.meta.url));
 const literal=(text='Bloqueado: falta acceso al recurso.')=>`<subagent sessionID="ses_child" state="completed">\n${text}\n</subagent>`;
 const nativeOutput=(text=literal(),extra={})=>({output:{sessionID:'ses_child',status:'completed',output:text.startsWith('<subagent sessionID="ses_child" state="completed">\n')&&text.endsWith('\n</subagent>')?text.slice('<subagent sessionID="ses_child" state="completed">\n'.length,-'\n</subagent>'.length):text},content:text,metadata:{sessionID:'ses_child',status:'completed',truncated:false,...extra}});
@@ -15,8 +15,8 @@ async function fixture(t) {
   const base=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'pulso-durable-hooks-')));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
   const runtime=path.join(base,'runtime'),project=path.join(base,'project');fs.mkdirSync(project);
   fs.cpSync(path.join(source,'core'),path.join(runtime,'resources'),{recursive:true});
-  for(const [from,to] of Object.entries(adapterConfig.runtimeFiles)){fs.mkdirSync(path.dirname(path.join(runtime,to)),{recursive:true});fs.copyFileSync(path.join(source,'adapters/opencode',from),path.join(runtime,to));}
-  fs.cpSync(path.join(source,'adapters/opencode/vendor'),path.join(runtime,'plugin/vendor'),{recursive:true});
+  for(const [from,to] of Object.entries(adapterConfig.runtimeFiles)){fs.mkdirSync(path.dirname(path.join(runtime,to)),{recursive:true});fs.copyFileSync(path.join(source,'harness',from),path.join(runtime,to));}
+  fs.cpSync(path.join(source,'harness/vendor'),path.join(runtime,'plugin/vendor'),{recursive:true});
   fs.writeFileSync(path.join(runtime,'package.json'),JSON.stringify(adapterConfig.packageManifest()));
   const load=relative=>import(pathToFileURL(path.join(runtime,relative)).href),module=await load('plugin/index.mjs');
   const {readDelegation}=await load('resources/lib/delegation-registry.mjs');

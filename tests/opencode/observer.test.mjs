@@ -7,7 +7,7 @@ import {pathToFileURL,fileURLToPath} from 'node:url';
 const runtime=fs.mkdtempSync(path.join(os.tmpdir(),'pulso-observer-runtime-'));
 fs.mkdirSync(path.join(runtime,'plugin'));
 fs.mkdirSync(path.join(runtime,'resources/lib'),{recursive:true});
-fs.copyFileSync(new URL('../../adapters/opencode/plugin/delegation-observer.mjs',import.meta.url),path.join(runtime,'plugin/delegation-observer.mjs'));
+fs.copyFileSync(new URL('../../harness/plugin/delegation-observer.mjs',import.meta.url),path.join(runtime,'plugin/delegation-observer.mjs'));
 fs.copyFileSync(new URL('../../core/lib/fs.mjs',import.meta.url),path.join(runtime,'resources/lib/fs.mjs'));
 const {createDelegationObserver,readDelegationAttempts}=await import(pathToFileURL(path.join(runtime,'plugin/delegation-observer.mjs')).href);
 test.after(()=>fs.rmSync(runtime,{recursive:true,force:true}));

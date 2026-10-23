@@ -1,5 +1,7 @@
 # Pulso
 
+<p align="center"><img src="assets/pulso.svg" alt="Pulso: robot con antena y ondas de sonar" width="192" height="192"></p>
+
 Coordinación nativa de desarrollo para **OpenCode 2.1.2**: un coordinador, nueve especialistas, seis skills y cuatro herramientas semánticas. La versión del producto es **0.1.0** y permanecerá en **0.1.\*** hasta nuevo aviso.
 
 El antiguo núcleo de `v4` es ahora la raíz canónica. No se mantienen implementaciones históricas ni una integración para otros editores. El cambio de versión del producto **no** reinicia `schemaVersion`, `contractVersion`, historial, identidades ni revisiones persistidas.
@@ -48,7 +50,7 @@ npm run verify:installer-staged
 ```
 
 - `core/`: persistencia, identidad, contratos, agentes, skills y recursos neutrales.
-- `adapters/opencode/`: plugin nativo v2, permisos, correlación y recuperación.
+- `harness/`: plugin nativo v2, permisos, correlación y recuperación.
 - `scripts/`: renderizado, inventarios positivos, construcción y paquetes.
 - `installer/`: instalación global revisable, ownership, backups y rollback.
 - `tests/`: núcleo, contratos nativos, distribución e instalación aislada.

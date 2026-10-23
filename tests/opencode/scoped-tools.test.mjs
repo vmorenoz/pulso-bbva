@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
-import {adapterConfig} from '../../adapters/opencode/build.mjs';
+import {adapterConfig} from '../../harness/build.mjs';
 import {setupPlugin} from './native-fixture.mjs';
 const source=fileURLToPath(new URL('../../',import.meta.url));
 const snapshot=root=>Object.fromEntries(fs.readdirSync(root,{recursive:true}).sort().filter(p=>fs.statSync(path.join(root,p)).isFile()).map(p=>[p,fs.readFileSync(path.join(root,p),'utf8')]));
@@ -13,8 +13,8 @@ async function fixture(t,{editedPrompt=false}={}){
   const base=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'pulso-scoped-tools-')));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
   const project=path.join(base,'project'),runtime=path.join(base,'runtime'),home=path.join(base,'home');for(const p of [project,runtime,home])fs.mkdirSync(p);
   fs.cpSync(path.join(source,'core'),path.join(runtime,'resources'),{recursive:true});
-  for(const [from,to] of Object.entries(adapterConfig.runtimeFiles)){fs.mkdirSync(path.dirname(path.join(runtime,to)),{recursive:true});fs.copyFileSync(path.join(source,'adapters/opencode',from),path.join(runtime,to));}
-  fs.cpSync(path.join(source,'adapters/opencode/vendor'),path.join(runtime,'plugin/vendor'),{recursive:true});fs.writeFileSync(path.join(runtime,'package.json'),JSON.stringify(adapterConfig.packageManifest()));
+  for(const [from,to] of Object.entries(adapterConfig.runtimeFiles)){fs.mkdirSync(path.dirname(path.join(runtime,to)),{recursive:true});fs.copyFileSync(path.join(source,'harness',from),path.join(runtime,to));}
+  fs.cpSync(path.join(source,'harness/vendor'),path.join(runtime,'plugin/vendor'),{recursive:true});fs.writeFileSync(path.join(runtime,'package.json'),JSON.stringify(adapterConfig.packageManifest()));
   const load=p=>import(pathToFileURL(path.join(runtime,p)).href),module=await load('plugin/index.mjs');
   const sessions=new Map(),messages=new Map(),messageSessions=new Map(),reads=[];
   const context=(sessionID,agent='pulso',parentID)=>{

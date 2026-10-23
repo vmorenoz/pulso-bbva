@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="350 -98 1074 1074" role="img" aria-labelledby="title desc">
+  <title id="title">Pulso</title>
+  <desc id="desc">Robot azul marino de rostro blanco y sonrisa, antena turquesa y ondas laterales azules y turquesas.</desc>
+  <g fill="none" stroke-linecap="round">
+    <path d="M 513,340 C 409,432 409,587 513,679 M 1262,340 C 1366,432 1366,587 1262,679" stroke="#2DCCD3" stroke-width="59"/>
+    <path d="M 573,405 C 513,468 513,552 573,616 M 1203,405 C 1263,468 1263,552 1203,616" stroke="#0072CE" stroke-width="58"/>
+  </g>
+  <g fill="#0072CE">
+    <rect x="597" y="430" width="121" height="163" rx="60"/>
+    <rect x="1057" y="430" width="121" height="163" rx="60"/>
+  </g>
+  <g fill="#072D58">
+    <path d="M 840,322 C 866,310 868,294 868,255 L 906,255 C 906,294 909,310 935,322 Z"/>
+    <rect x="652" y="320" width="471" height="377" rx="147"/>
+  </g>
+  <circle cx="887.5" cy="219" r="48" fill="#2DCCD3"/>
+  <rect x="693" y="406" width="389" height="216" rx="101" fill="#FFFFFF"/>
+  <g fill="#072D58">
+    <circle cx="786.5" cy="504.5" r="36.5"/>
+    <circle cx="988" cy="504.5" r="36.5"/>
+  </g>
+  <path d="M 857,559 C 874,577 900,577 917,559" fill="none" stroke="#072D58" stroke-width="24" stroke-linecap="round"/>
+</svg>

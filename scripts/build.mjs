@@ -23,11 +23,11 @@ export function verifyBBVA(coreRoot) {
 /** Build the sole native OpenCode distribution; no legacy adapter is loaded. */
 export async function build(target='opencode',{root=sourceRoot,outputRoot}={}) {
   if(target!=='opencode') throw new Error('Only the opencode target is supported');
-  const coreRoot=path.join(root,'core'),adapterRoot=path.join(root,'adapters',target);
+  const coreRoot=path.join(root,'core'),harnessRoot=path.join(root,'harness');
   const output=outputRoot||path.join(root,'dist',target);
   if(!path.isAbsolute(output)) throw new Error('Output root must be absolute');
   verifyBBVA(coreRoot);
-  const {adapterConfig:config}=await import(pathToFileURL(path.join(adapterRoot,'build.mjs')).href);
+  const {adapterConfig:config}=await import(pathToFileURL(path.join(harnessRoot,'build.mjs')).href);
   const catalog=JSON.parse(fs.readFileSync(path.join(coreRoot,'agents/catalog.json')));
   if(catalog.orchestrator.id!=='pulso'||catalog.specialists.length!==9||new Set(catalog.specialists.map(x=>x.id)).size!==9) throw new Error('Invalid canonical catalog');
   // Clean only the designated generated target, never a sibling or source directory.
@@ -67,18 +67,18 @@ export async function build(target='opencode',{root=sourceRoot,outputRoot}={}) {
     if(!description) throw new Error(`Missing skill description: ${name}`);
     add(`commands/${name}.md`,config.renderCommand({name,description}),`core/skills/${name}/SKILL.md`,text);
   }
-  for(const [source,destination] of Object.entries(config.runtimeFiles)) copy(path.join(adapterRoot,source),destination,`adapter/${source}`);
+  for(const [source,destination] of Object.entries(config.runtimeFiles)) copy(path.join(harnessRoot,source),destination,`harness/${source}`);
   const vendor=JSON.parse(fs.readFileSync(path.join(root,'scripts/vendor-integrity.json')));
-  const vendorRoot=path.join(adapterRoot,'vendor');
+  const vendorRoot=path.join(harnessRoot,'vendor');
   if(JSON.stringify(listFiles(vendorRoot).sort())!==JSON.stringify(Object.keys(vendor).sort())) throw new Error('Vendor closure inventory changed');
   for(const [file,digest]of Object.entries(vendor)) {
     const bytes=fs.readFileSync(path.join(vendorRoot,file));
     if(hash(bytes)!==digest)throw new Error(`Vendor integrity changed: ${file}`);
-    add(`plugin/vendor/${file}`,bytes,`adapter/vendor/${file}`);
+    add(`plugin/vendor/${file}`,bytes,`harness/vendor/${file}`);
   }
   const manifest=await config.packageManifest({coreRoot,version:releaseVersion});
   if(manifest.version!==releaseVersion) throw new Error('Wrong package version');
-  add('package.json',JSON.stringify(manifest,null,2)+'\n','adapter/package-manifest');
+  add('package.json',JSON.stringify(manifest,null,2)+'\n','harness/package-manifest');
   inventory.sort((a,b)=>a.path.localeCompare(b.path,'en'));
   writeFile(output,'pulso-package.json',JSON.stringify({version:releaseVersion,files:inventory},null,2)+'\n');
   return {target,output,files:inventory.length+1};

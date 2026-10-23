@@ -33,7 +33,7 @@ export function verifyPackage(target,root,{coreRoot=path.join(sourceRoot,'core')
     if(/\.(?:png|jpe?g|gif|woff2?)$/.test(file))continue;
     const text=bytes.toString('utf8');
     // Upstream client implementation is pinned byte-for-byte, not Pulso's runtime integration.
-    if(!file.startsWith('plugin/vendor/')&&(foreign.test(text)||/v3-opencode-v1|v3-vscode|adapters\/(?:vscode|opencode)|\.\.\/.*adapters\//i.test(text)))throw new Error(`Foreign/source implementation leaked: ${file}`);
+    if(!file.startsWith('plugin/vendor/')&&(foreign.test(text)||/v3-opencode-v1|v3-vscode|adapters\/(?:vscode|opencode)|\.\.\/.*(?:adapters|harness)\//i.test(text)))throw new Error(`Foreign/source implementation leaked: ${file}`);
     if(!file.startsWith('resources/templates/')&&/\{\{(?:ADAPTER_|RESOURCE_)/.test(text))throw new Error(`Unexpanded slot: ${file}`);
     if(/\.(?:mjs|cjs|js)$/.test(file)) for(const match of text.matchAll(/(?:\sfrom\s+|\bimport\s*\(\s*|^\s*import\s*)(['"])([^'"]+)\1/gm)) {
       if(match[2].startsWith('node:'))continue;

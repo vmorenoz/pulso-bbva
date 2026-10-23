@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-import {adapterConfig} from '../../adapters/opencode/build.mjs';
+import {adapterConfig} from '../../harness/build.mjs';
 import {toolContracts, validateToolInput, validateInput} from '../../core/lib/tool-contracts.mjs';
 import {checkSchemaVocabulary, validateSchema} from '../../core/lib/schema.mjs';
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -31,9 +31,9 @@ async function fixture(t) {
   fs.cpSync(path.join(root, 'core'), path.join(runtime, 'resources'), {recursive: true});
   for (const [source, target] of Object.entries(adapterConfig.runtimeFiles)) {
     fs.mkdirSync(path.dirname(path.join(runtime, target)), {recursive: true});
-    fs.copyFileSync(path.join(root, 'adapters/opencode', source), path.join(runtime, target));
+    fs.copyFileSync(path.join(root, 'harness', source), path.join(runtime, target));
   }
-  fs.cpSync(path.join(root, 'adapters/opencode/vendor'), path.join(runtime, 'plugin/vendor'), {recursive: true});
+  fs.cpSync(path.join(root, 'harness/vendor'), path.join(runtime, 'plugin/vendor'), {recursive: true});
   fs.writeFileSync(path.join(runtime, 'package.json'), JSON.stringify(adapterConfig.packageManifest()));
   const module = await import(pathToFileURL(path.join(runtime, 'plugin/index.mjs')).href);
   const authority={directory:project};

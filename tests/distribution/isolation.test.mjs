@@ -14,11 +14,14 @@ const snapshot=root=>Object.fromEntries(listFiles(root).map(file=>[file,hash(fs.
 for(const target of ['opencode'])test(`${target}: builds independently, reproducibly, with exact package inventory`,async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'pulso-isolated-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
   for(const folder of ['core','scripts'])fs.cpSync(path.join(sourceRoot,folder),path.join(root,folder),{recursive:true});
-  fs.mkdirSync(path.join(root,'adapters'));fs.cpSync(path.join(sourceRoot,'adapters',target),path.join(root,'adapters',target),{recursive:true});
+  fs.cpSync(path.join(sourceRoot,'harness'),path.join(root,'harness'),{recursive:true});
   fs.copyFileSync(path.join(sourceRoot,'package.json'),path.join(root,'package.json'));
-  assert.deepEqual(fs.readdirSync(path.join(root,'adapters')),['opencode']);
+  assert.equal(fs.existsSync(path.join(root,'adapters')),false);
+  assert.ok(fs.existsSync(path.join(root,'harness/build.mjs')));
   const run=()=>{const result=spawnSync(process.execPath,['scripts/build.mjs',target],{cwd:root,encoding:'utf8'});assert.equal(result.status,0,result.stderr||result.stdout);};
   run();const output=path.join(root,'dist',target),first=snapshot(output);run();assert.deepEqual(snapshot(output),first);
+  const inventory=JSON.parse(fs.readFileSync(path.join(output,'pulso-package.json')));
+  assert.ok(inventory.files.every(file=>/^(?:core|harness)\//.test(file.source)),'Inventory sources use the canonical root layout');
   verifyPackage(target,output,{coreRoot:path.join(root,'core')});assert.deepEqual(fs.readdirSync(path.join(root,'dist')),['opencode']);
   const agentPath = id => path.join(output,`agents/${id}.md`);
   const primary = fs.readFileSync(agentPath('pulso'),'utf8'), explorer = fs.readFileSync(agentPath('pulso-explorer'),'utf8');
@@ -65,7 +68,7 @@ test('neutral core and BBVA inputs have no native adapter code',()=>{
 for(const target of ['opencode'])test(`${target}: actual extracted archive has exact inventory and activates packaged code`,async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'pulso-archive-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
   for(const folder of ['core','scripts'])fs.cpSync(path.join(sourceRoot,folder),path.join(root,folder),{recursive:true});
-  fs.mkdirSync(path.join(root,'adapters'));fs.cpSync(path.join(sourceRoot,'adapters',target),path.join(root,'adapters',target),{recursive:true});
+  fs.cpSync(path.join(sourceRoot,'harness'),path.join(root,'harness'),{recursive:true});
   fs.copyFileSync(path.join(sourceRoot,'package.json'),path.join(root,'package.json'));
   const {packageTarget}=await import('../../scripts/package.mjs');
   const result=await packageTarget(target,{root});

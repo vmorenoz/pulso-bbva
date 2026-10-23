@@ -18,8 +18,8 @@ async function fixture(t){
   const host='opencode';
   const base=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'pulso-native-service-'))),project=path.join(base,'project'),otherProject=path.join(base,'other-project'),plugin=path.join(base,'plugin');
   for(const directory of [project,otherProject,plugin])fs.mkdirSync(directory);
-  fs.copyFileSync(path.join(source,'adapters/opencode/plugin/native-read.mjs'),path.join(plugin,'native-read.mjs'));
-  fs.cpSync(path.join(source,'adapters/opencode/vendor'),path.join(plugin,'vendor'),{recursive:true});
+  fs.copyFileSync(path.join(source,'harness/plugin/native-read.mjs'),path.join(plugin,'native-read.mjs'));
+  fs.cpSync(path.join(source,'harness/vendor'),path.join(plugin,'vendor'),{recursive:true});
   const {createNativeReader}=await import(pathToFileURL(path.join(plugin,'native-read.mjs')).href);
   const version='2.1.2',password='isolated-test-secret',serviceFile=path.join(base,'service.json');
   const requests=[],session={id:'ses_test',projectID:'project_test',parentID:'ses_parent',agent:'pulso-explorer',location:{directory:project}};

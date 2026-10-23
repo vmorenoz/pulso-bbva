@@ -25,7 +25,7 @@ while(pending.length){
     pending.push(path.posix.normalize(path.posix.join(path.posix.dirname(file),imported)));
   }
 }
-const vendor=path.join(sourceRoot,'adapters/opencode/vendor'),destination=path.join(vendor,'client');
+const vendor=path.join(sourceRoot,'harness/vendor'),destination=path.join(vendor,'client');
 fs.rmSync(vendor,{recursive:true,force:true});
 for(const [file,bytes] of files){const to=path.join(destination,file);fs.mkdirSync(path.dirname(to),{recursive:true});fs.writeFileSync(to,bytes);}
 fs.writeFileSync(path.join(destination,'package.json'),JSON.stringify({name:'@opencode/client',version:manifest.version,type:'module',license:'MIT',private:true},null,2)+'\n');

@@ -76,7 +76,7 @@ const tools=history=>history.flatMap(message=>message.type==='assistant'?message
 const parsed=part=>JSON.parse(part.state.content.map(c=>c.text??'').join(''));
 try{
  await start();
- const {OpenCode}=await import(pathToFileURL(path.join(source,'adapters/opencode/vendor/client/promise/index.js')));
+ const {OpenCode}=await import(pathToFileURL(path.join(source,'harness/vendor/client/promise/index.js')));
  const client=OpenCode.make({baseUrl:url,headers});const info=await client.server.info();assert.equal(info.version,'2.1.2');
  const session=await client.session.create({title:'Native acceptance',agent:'pulso',model:{providerID,id:modelID},location:{directory:project}});
  await client.session.prompt({sessionID:session.id,text:'NATIVE_HAPPY: Run only the isolated fixture.'});

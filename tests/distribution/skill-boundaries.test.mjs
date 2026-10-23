@@ -10,7 +10,7 @@ for(const target of ['opencode']) test(`${target}: coordinator boundary is restr
   const temp=fs.mkdtempSync(path.join(os.tmpdir(),'pulso-skill-boundaries-'));
   t.after(()=>fs.rmSync(temp,{recursive:true,force:true}));
   await build(target,{outputRoot:temp});
-  const {adapterConfig}=await import(`../../adapters/${target}/build.mjs`);
+  const {adapterConfig}=await import(`../../harness/build.mjs`);
   const catalog=JSON.parse(fs.readFileSync(path.join(sourceRoot,'core/agents/catalog.json')));
   if(target==='opencode') for(const agent of [catalog.orchestrator,...catalog.specialists]) {
     const text=fs.readFileSync(path.join(temp,`agents/${agent.id}.md`),'utf8');

@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {readAgentBody,renderPrompt,renderSkill,agentBoundary} from '../../scripts/prompts.mjs';
 import {operationSkills} from '../../scripts/build.mjs';
-import {adapterConfig as opencode} from '../../adapters/opencode/build.mjs';
+import {hash} from '../../scripts/files.mjs';
+import {adapterConfig as opencode} from '../../harness/build.mjs';
 
 const coreRoot=fileURLToPath(new URL('../../core/',import.meta.url));
 const catalog=JSON.parse(fs.readFileSync(new URL('../../core/agents/catalog.json',import.meta.url)));
@@ -49,9 +50,23 @@ test('package declares one pinned native-v2 entrypoint without runtime dependenc
   const manifest=opencode.packageManifest();
   assert.equal(manifest.version,'0.1.0');
   assert.equal(manifest.license,'UNLICENSED');
-  assert.deepEqual(fs.readFileSync(new URL('../../LICENSE.md',import.meta.url)),fs.readFileSync(new URL('../../adapters/opencode/LICENSE.md',import.meta.url)));
+  assert.deepEqual(fs.readFileSync(new URL('../../LICENSE.md',import.meta.url)),fs.readFileSync(new URL('../../harness/LICENSE.md',import.meta.url)));
   assert.equal(manifest.exports,'./plugin/index.mjs');
   assert.deepEqual(manifest.pulso,{host:'opencode',apiVersion:2,hostVersion:'2.1.2'});
   assert.equal(manifest.compatibleHosts,undefined);
   assert.ok(!Object.keys(opencode.runtimeFiles).some(file=>/schema-converter|vendor/.test(file)));
+});
+
+
+test('the sole native source integration lives at the root harness directory',()=>{
+  assert.ok(fs.existsSync(new URL('../../harness/build.mjs',import.meta.url)));
+  assert.equal(fs.existsSync(new URL('../../adapters/',import.meta.url)),false);
+  assert.match(fs.readFileSync(new URL('../../README.md',import.meta.url),'utf8'),/`harness\/`/);
+});
+
+test('README restores the exact existing Pulso SVG without redesign',()=>{
+  const icon=fs.readFileSync(new URL('../../assets/pulso.svg',import.meta.url));
+  assert.equal(hash(icon),'cba0e7823234f58bfd7063946bf6ec34aa43935f808e9aa0810be343183fabed');
+  const readme=fs.readFileSync(new URL('../../README.md',import.meta.url),'utf8');
+  assert.match(readme,/<p align="center"><img src="assets\/pulso\.svg" alt="Pulso: robot con antena y ondas de sonar" width="192" height="192"><\/p>/);
 });
