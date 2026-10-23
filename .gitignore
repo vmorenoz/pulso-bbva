@@ -1,12 +1,4 @@
-.DS_Store
-.idea/
-.pulso/
-*.diff
-*.patch
-*.zip
-**/node_modules/
-**/dist/
-**/coverage/
-**/*.log
-**/evidence/
-**/reports/
+node_modules/
+dist/
+artifacts/
+*.log

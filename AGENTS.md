@@ -2,11 +2,10 @@
 
 Este repositorio construye Pulso; no utiliza Pulso para gestionar su propio desarrollo.
 
-- Utiliza únicamente agentes, skills y herramientas nativas de OpenCode durante el desarrollo.
+- Para esta migración autorizada a OpenCode v2 se permite desarrollar con Codex y sus herramientas/agentes nativos. El producto resultante usa exclusivamente la API nativa v2 de OpenCode.
 - No invoques agentes `pulso-*`, skills `pulso-*` ni herramientas `pulso_*` para orquestar este repositorio o registrar el trabajo de desarrollo.
 - Las pruebas pueden importar y ejecutar el código de Pulso en fixtures aislados: esto verifica el producto, no activa su orquestación sobre este repositorio.
-- Delega trabajo independiente mediante agentes nativos de OpenCode, con ámbitos de escritura delimitados.
-- El desarrollo actual está en `v4`: núcleo canónico en `v4/core` y adaptadores nativos en `v4/adapters/opencode` y `v4/adapters/vscode`. El nombre público es **Pulso**.
-- Las distribuciones anteriores se conservan como histórico. Si se mantiene expresamente `v3-vscode`, su base es exclusivamente `v3-opencode-v1`, nunca `v1`, `v2` o `v3`.
-- Consulta CodeGraph primero para explorar código; si no cubre los archivos solicitados, utiliza herramientas nativas de búsqueda y lectura.
+- Delega trabajo independiente mediante agentes nativos del entorno autorizado, con ámbitos de escritura delimitados.
+- El núcleo canónico está en `core` y la única integración nativa en `adapters/opencode`. El nombre público es **Pulso**, versión `0.1.*` hasta nuevo aviso.
+- Utiliza las herramientas nativas de búsqueda y lectura; el repositorio ya no conserva índices históricos de CodeGraph.
 - No inicialices ni modifiques `.pulso/` de este repositorio para organizar el desarrollo.

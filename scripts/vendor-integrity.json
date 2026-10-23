@@ -1,0 +1,15 @@
+{
+  "client/LICENSE": "625f0f619133f89bbbb2abe37369613dfa1885eba1e50d02170deb62bb42cb6b",
+  "client/chunks/service-probe-6vp15eh6.js": "7f74955e00b0fb6c3e9954c5b60ff6529cb5f85e15ccd1ebe915391724b2688b",
+  "client/chunks/service-probe-77ntr0t0.js": "5bfd6785373e8867c0a3f14559b332baf96aecc44432b31b31feb08de2a40654",
+  "client/chunks/service-probe-9rqn6x4v.js": "7d87e6da55ff0df298feb4a26f0335a161575d2e19f16f1919d18e85bfab3da8",
+  "client/chunks/service-probe-ezt8t3fk.js": "d35c6fd5c1b5f675f5fd786b148acca2846fa0ed17c61a87ee88e800ffb5d387",
+  "client/chunks/service-probe-frbwqjmf.js": "91340bebf1b3213fb2fc5e56adf7f990f766ad56c87fac5b113c35ed34401918",
+  "client/chunks/service-probe-k9g6n5n1.js": "12d51db83bc2f2cfd987d6a485a59d92b61ed300e5f7dab7c4a5e6c5d2e844a9",
+  "client/chunks/service-probe-m2eywc8w.js": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "client/chunks/service-probe-nwcpakzx.js": "daf15d1e36515dda19895b3de6a3011caae4f1bd0e7265adaf165ed272bdc2a4",
+  "client/chunks/service-probe-vyas3vgt.js": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "client/package.json": "ea8808fcc229fe2d595fba87f6bad6cf4d3c389be0feea188d085b19cf2237ce",
+  "client/promise/index.js": "29e020d2ff626a7a230b7054eb86d2c4933bebe6feb3629cd934afd799816177",
+  "provenance.json": "bd261a349d3337c1118d925c0959ade9ca567dd635c908c6f0863fe492c59c9d"
+}

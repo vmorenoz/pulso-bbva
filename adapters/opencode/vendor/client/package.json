@@ -1,0 +1,7 @@
+{
+  "name": "@opencode/client",
+  "version": "2.1.2",
+  "type": "module",
+  "license": "MIT",
+  "private": true
+}

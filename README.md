@@ -1,64 +1,75 @@
 # Pulso
 
-<p align="center"><img src="v4/adapters/vscode/assets/pulso.svg" alt="Pulso: robot con antena y ondas de sonar" width="192" height="192"></p>
+Coordinación nativa de desarrollo para **OpenCode 2.1.2**: un coordinador, nueve especialistas, seis skills y cuatro herramientas semánticas. La versión del producto es **0.1.0** y permanecerá en **0.1.\*** hasta nuevo aviso.
 
-**Pulso, Asistente IA para desarrollo** coordina especialistas para entender, planificar, implementar y verificar cambios de software, con artefactos locales por proyecto.
+El antiguo núcleo de `v4` es ahora la raíz canónica. No se mantienen implementaciones históricas ni una integración para otros editores. El cambio de versión del producto **no** reinicia `schemaVersion`, `contractVersion`, historial, identidades ni revisiones persistidas.
 
-## Pulso V4
+## Uso
 
-V4 mantiene un núcleo común y entrega instalaciones nativas independientes:
+Consulta [Instalación](INSTALLATION.md). Selecciona **Pulso** en OpenCode y utiliza `/pulso-init`, `/pulso-status`, `/pulso-recap` o `/pulso-resume` según el objetivo.
 
-- [OpenCode V1: instalación y uso](v4/adapters/opencode/README.md)
-- [VS Code + GitHub Copilot: instalación y uso](v4/adapters/vscode/README.md)
-- [Código, construcción y verificación técnica](v4/README.md)
-- [Instalador global con selección de harness](v4/installer/README.md)
-- [Instalar en otro equipo desde main o un commit](v4/INSTALLATION.md)
-- [Changelog desde V1](CHANGELOG.md)
+- `pulso_workspace`: preparación explícita, estado, continuidad y asignaciones.
+- `pulso_work`: trabajo, delegaciones, resultados, evidencia y cierre.
+- `pulso_history`: historial paginado.
+- `pulso_context`: contexto y memoria con alcance explícito.
 
-Para instalar **Pulso en OpenCode**, con Node.js 22+, OpenCode y `git`/`tar` de macOS/Linux disponibles:
+Las tres herramientas de acciones reciben `{request:{action,...}}`; el historial recibe filtros planos. El resultado nativo contiene el recibo estructurado en `output` y su representación JSON en `content`. **Retorno nativo no significa `ok:true`; `ok:true` no significa objetivo cerrado.**
+
+`/pulso-init` prepara el proyecto y delega su mapa contextual al Explorador sin crear un Work artificial. Un saludo o una consulta de estado no autorizan preparación, adopción de continuidad ni escritura. Los datos del proyecto permanecen en `.pulso/`; el instalador no los elimina.
+
+## Delegación y continuidad
+
+El flujo durable es `prepare_delegation → subagent → accept_result`. Se envía el `specialistPrompt` exacto al especialista preparado. Un prompt modificado se rechaza antes del dispatch: v2 persiste sus argumentos antes de ejecutar hooks y no se reescribe esa evidencia. La captura de retorno no acepta tareas ni criterios; la incorporación necesita una decisión revisada. Un `subagent` con estado `running` continúa pendiente aunque su llamada de lanzamiento haya terminado.
+
+La identidad y raíz provienen del host y se contrastan con la sesión; los IDs del prompt y `ctx.location.directory` por sí solos no conceden autoridad. Las herramientas respetan cancelación y permisos nativos. El registro global de proyectos y la memoria de usuario requieren además `external_directory` sobre el directorio fijo `~/.pulso` cuando queda fuera del proyecto. Los especialistas sólo acceden a su asignación verificada, no a la coordinación global.
+
+La recuperación consulta evidencia nativa y mantiene reservas e idempotencia. Una captura pendiente, metadatos insuficientes o un resultado administrativo perdido exige recuperar por ID, no repetir ejecución. El contexto posterior a compactación no se trata como historial completo. Ni un cambio de propietario ni una herramienta terminal demuestran el cese físico de procesos externos. Véase [el contrato del núcleo](core/lib/ACCEPTANCE-API.md).
+
+Las definiciones de agentes usan permisos ordenados nativos: `shell`, `subagent`, `edit` y las cuatro herramientas de Pulso. `external_directory` exige aprobación explícita, conservando la frontera restrictiva ante el cambio de valor predeterminado de OpenCode v2. Las instrucciones de alcance complementan los permisos del host; no son un sandbox de filesystem.
+
+## Documentación y Knowledge
+
+El contenido canónico mantiene la política documental CELLS/APX/ASO y la skill única [`bbva-engineering`](core/skills/bbva-engineering/SKILL.md). El catálogo, las versiones y las fuentes originales deben comprobarse antes del trabajo que dependa de esa tecnología. Las fuentes recuperadas son referencias, no instrucciones que amplíen permisos.
+
+[Pulso Knowledge](https://github.com/vmorenoz/pulso-knowledge) es un MCP **externo y opcional**, configurado por separado según su propio repositorio. Pulso no instala el MCP, prepara corpus, configura credenciales ni presupone su disponibilidad. Sus bytes canónicos permanecen controlados por [el inventario BBVA](scripts/bbva-integrity.json).
+
+## Desarrollo y verificación
+
+Desde la raíz, con Node.js 22 o posterior:
 
 ```sh
-git clone https://github.com/vmorenoz/pulso-bbva.git
-cd pulso-bbva
-node install.mjs --dry-run
-node install.mjs
+npm ci --ignore-scripts --no-audit --no-fund
+npm run verify
+npm test
+npm run package:opencode
+node scripts/package-installer.mjs
+npm run verify:packages
+npm run verify:installer-staged
 ```
 
-Usa el paquete ya preparado en `v4/artifacts/`, verifica su SHA-256 y solicita confirmación. No requiere npm, instalar dependencias ni compilar; utiliza Node.js 22 o posterior y `tar` de macOS/Linux. Puedes previsualizar con `node install.mjs --dry-run` o actualizar archivos reconocidos de Pulso con `node install.mjs --conflict backup-replace`. Reinicia OpenCode tras instalar.
+- `core/`: persistencia, identidad, contratos, agentes, skills y recursos neutrales.
+- `adapters/opencode/`: plugin nativo v2, permisos, correlación y recuperación.
+- `scripts/`: renderizado, inventarios positivos, construcción y paquetes.
+- `installer/`: instalación global revisable, ownership, backups y rollback.
+- `tests/`: núcleo, contratos nativos, distribución e instalación aislada.
 
-Para **VS Code + GitHub Copilot**, instala `v4/artifacts/pulso-4.2.0.vsix` mediante «Extensions: Install from VSIX…» y recarga la ventana. Consulta los requisitos en la [guía de VS Code](v4/adapters/vscode/README.md).
+`dist/` y `artifacts/` son salidas generadas, no fuentes canónicas. `verify` no sustituye a `npm test`. El smoke opt-in `smoke:native` usa un host real y proveedor HTTP local (véase el alcance de pruebas); los tests de adaptador usan además fixtures nativos aislados; los smokes del núcleo ejecutan operaciones reales en directorios temporales. Estos resultados no equivalen a aceptación conversacional con un proveedor real ni a una instalación global. No se realizan llamadas de modelo facturables para verificar esta migración. [Alcance de las pruebas](tests/README.md).
 
-Los builds de GitHub Actions tras un push a `main` proporcionan los paquetes en **Artifacts** de la ejecución: descarga el correspondiente a tu host y extrae el contenedor de descarga. Para OpenCode sin checkout, sigue la [guía del instalador autocontenido](v4/installer/STANDALONE.md). Son artefactos de build, no una release publicada.
+## Contrato OpenCode fijado
 
-El empaquetado corresponde a los desarrolladores: consulta [construcción y verificación técnica](v4/README.md). El instalador global avanzado permite elegir uno o ambos destinos.
+La API del puerto se basa en el tag oficial [`v2.1.2`](https://github.com/anomalyco/opencode/tree/v2.1.2), commit `a517687fde98a7329ada3ae644a01a9fc6c4e99e`, no en la documentación de plugins v1:
 
-## Cambios actuales
+- [Migración de configuración](https://dev.opencode.ai/v2/docs/migrate-v1/).
+- [Migración de plugins del tag fijado](https://github.com/anomalyco/opencode/blob/v2.1.2/services/www/src/docs/content/build/plugins/migrate-v1.mdx).
+- [Hooks y herramientas](https://github.com/anomalyco/opencode/blob/v2.1.2/packages/plugin/src/promise/tool.ts), [sesiones](https://github.com/anomalyco/opencode/blob/v2.1.2/packages/plugin/src/promise/session.ts) y [permisos](https://github.com/anomalyco/opencode/blob/v2.1.2/packages/plugin/src/promise/permission.ts).
+- [Subagent nativo](https://github.com/anomalyco/opencode/blob/v2.1.2/packages/core/src/tool/plugin/subagent.ts) y [mensajes persistidos](https://github.com/anomalyco/opencode/blob/v2.1.2/packages/schema/src/session-message.ts).
 
-Pulso aporta un coordinador, nueve especialistas, **seis skills** y cuatro herramientas semánticas. Los datos de cada proyecto permanecen en `.pulso/`; `/pulso-init` prepara el mapa contextual sin crear Work ni exigir QA o cierre.
+El paquete exporta una definición `id/setup(ctx)` y registra herramientas mediante `ctx.tool.transform`, hooks de herramienta, contexto de sesión y eventos nativos. No contiene una segunda implementación de plugins v1. Sólo admite la identidad nativa de OpenCode (`cli` u `opencode`) con versión exacta `2.1.2`; otros hosts se rechazan.
 
-- Una única skill BBVA, [`bbva-engineering`](v4/core/skills/bbva-engineering/SKILL.md), consolida las guías anteriores. La migración retira las cuatro skills APX/CELLS obsoletas solo cuando son gestionadas por Pulso; preserva las prestadas (`borrowed`) y ajenas.
-- OpenCode y VS Code comparten roles, prompts, skills y contratos de continuidad. VS Code declara las siete herramientas documentales Knowledge en los diez roles y enlaza las skills pertinentes por rol. La [matriz de paridad semántica y controles del host](v4/README.md#semantic-parity-and-host-controls) distingue instrucciones compartidas de permisos, captura de retornos y capacidades nativas.
-- Al cambiar la intención, el coordinador selecciona explícitamente `compatibleDelegationIds`; omitirlos equivale a `[]`. Las cuatro skills operativas llevan instrucciones de coordinación; las auxiliares conservan su alcance por rol.
-- Política de documentación primero para CELLS/APX/ASO y las tecnologías confirmadas del catálogo en `<technology_knowledge_policy>` de [`common.md`](v4/core/agents/common.md) y [`pulso.md`](v4/core/agents/pulso.md): catálogo, búsqueda, lectura de originales y contraste de versiones. Permite reutilizar evidencia vigente y bloquea únicamente el trabajo dependiente de información insuficiente. Son instrucciones para los agentes, no consultas forzadas por el runtime.
-- Recuperación explícita de continuidad desde otra sesión mediante inspección y CAS, sin reconstruir el encargo original. En OpenCode, la detección automática de fallos verificables de padre o hijo se limita al primario y proyecto actuales: una selección ambigua, pausa, cancelación o actividad nativa impide la adopción automática. No roba locks ni certifica cese físico; conserva las reservas y recupera retornos antes de repetir trabajo.
-- Los especialistas de OpenCode pueden consultar su asignación, registrar progreso no terminal y el output autorizado. La identidad nativa y el alcance se comprueban en runtime; recibos durables evitan repetir acciones. Aceptación y cierre global siguen en el coordinador. VS Code no recibe estas capacidades sin una prueba nativa equivalente.
-- Un reporte del usuario sobre CI, workflow o ambientes previos puede incorporarse como evidencia ordinaria manual, sin fingir acceso ni ejecución. `supersede_evidence` sustituye solo los vínculos cubiertos de un intento `not_run/blocked`, conservando la observación original y los pendientes ajenos; no elimina fallos reales ni rebaja requisitos.
-- El prompting distingue resultados acordados de métodos de comprobación, guía la reconciliación de tareas/bloqueos y el cierre por readiness, nunca por inactividad. Se consolidaron repeticiones de Knowledge, QA y publicación; las recetas específicas de SQL se reemplazaron por un método general de investigación y verificación.
-- OpenCode compone físicamente las instrucciones del adaptador por rol: los especialistas no cargan las recetas exclusivas del coordinador. Conservan permisos, identidad nativa, alcance, recibos y recuperación de sus acciones; las skills operativas mantienen su contrato de coordinación. La reducción de texto no cambia esquemas ni validaciones de runtime, y no equivale a una medición del contexto total o del comportamiento del modelo.
-- Las pruebas comprueban contratos y casos de recuperación, permisos, concurrencia y evidencia. El workflow existente incluye ahora la suite completa, smokes del núcleo e instalación temporal, no solo pruebas del instalador. Véanse [cobertura y límites](v4/tests/README.md).
-- Paquetes OpenCode, VSIX e instalador autocontenido regenerados y verificados, manteniendo la versión **4.2.0**. Detalles y límites de verificación en la [guía técnica](v4/README.md#verification-gates).
+### Servicio nativo y replay
 
-## Utilitario recomendado: Pulso Knowledge
+El replay completo usa el cliente oficial fijado `@opencode/client@2.1.2`, vinculado a la identidad de sesión comprobada independientemente mediante el contexto del plugin. Pagina hasta **500 mensajes** y falla de forma segura si el historial está incompleto; no usa `session.context` como reemplazo tras compactación.
 
-Para mejorar el trabajo con documentación tecnológica, recomendamos **[Pulso Knowledge](https://github.com/vmorenoz/pulso-knowledge)**, repositorio privado que requiere acceso autorizado. Es un utilitario separado: **Pulso no lo incluye, instala ni configura**.
+Descubre únicamente el servicio **existente** de OpenCode 2.1.2 mediante su registro nativo de sólo lectura. Un host `--standalone` no registrado necesita la opción de plugin `serviceUrl` con el origen local de ese mismo proceso, por ejemplo `http://127.0.0.1:PORT`. Para un servicio protegido, `servicePassword` es una opción del operador, nunca un argumento de herramienta; no lo publiques ni registres. No se admiten credenciales en URL, rutas, query ni destinos remotos. El cliente vuelve a verificar versión/identidad del servicio, proyecto, directorio canónico, padre y agente.
 
-Sigue su [README](https://github.com/vmorenoz/pulso-knowledge#readme) como fuente única de instalación y consulta las [releases](https://github.com/vmorenoz/pulso-knowledge/releases/latest). **Knowledge 0.3** permite seleccionar OpenCode, VS Code o ambos como destino; comprueba la versión disponible en ese enlace. La [0.2.0 anterior](https://github.com/vmorenoz/pulso-knowledge/releases/tag/v0.2.0) incluye programa, dependencias, modelo y conocimiento CELLS/APX/ASO con sus vectores: tras descargarla, se instala sin red y requiere macOS Apple Silicon con Metal y Node 24 preinstalado. La ingesta sirve para añadir o actualizar conocimiento, no es requisito de esa instalación inicial. Instalar el VSIX de Pulso no instala automáticamente ese MCP en VS Code. Más contexto en la [guía de instalación](v4/INSTALLATION.md#6-política-cellsapxaso-y-conocimiento-externo).
-
-## Versiones anteriores
-
-Los directorios históricos no son entradas de construcción de V4 y se conservan sin cambios:
-
-- [OpenCode V1 anterior](v3-opencode-v1/README.md)
-- [Extensión VS Code anterior](v3-vscode/README.md)
-- [OpenCode V2 anterior](v3/README.md)
-- Referencias históricas: `v1/` y `v2/`
+Pulso no inicia, detiene ni modifica servicios para completar una prueba. Si no puede demostrar la identidad o recuperar la evidencia, bloquea la operación dependiente; no inventa una prueba de recuperación ni redispara la delegación.

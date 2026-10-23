@@ -1,6 +1,0 @@
-{
-  "id": "NEGATIVE_AMOUNT",
-  "description": "Negative amounts are rejected; positive amounts remain valid and an empty list totals zero.",
-  "amounts": [-1],
-  "expectedError": "NEGATIVE_AMOUNT"
-}

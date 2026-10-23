@@ -1,0 +1,33 @@
+{
+  "name": "pulso-source",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:opencode": "node scripts/build.mjs opencode",
+    "check": "node scripts/check.mjs",
+    "test": "node --test tests/*/*.test.mjs",
+    "smoke:happy": "node scripts/happy-path.mjs",
+    "smoke:durable": "node scripts/durable-smoke.mjs",
+    "test:continuity": "node --test tests/core/persistence-transactions.test.mjs tests/core/migration-recovery.test.mjs tests/core/durable-delegations.test.mjs tests/core/continuity.test.mjs tests/core/session-recovery.test.mjs tests/opencode/durable-hooks.test.mjs tests/opencode/plugin.test.mjs tests/opencode/scoped-tools.test.mjs tests/opencode/automatic-recovery.test.mjs tests/opencode/observer.test.mjs",
+    "verify": "npm run build && npm run check && npm run smoke:happy && npm run smoke:durable",
+    "package:opencode": "node scripts/package.mjs opencode",
+    "verify:packages": "node scripts/verify-packages.mjs",
+    "install:pulso": "node installer/cli.mjs",
+    "verify:installer-staged": "node tests/installer/stage-smoke.mjs",
+    "package:installer": "node scripts/package-installer.mjs",
+    "vendor:client": "node scripts/vendor-client.mjs",
+    "smoke:native": "node tests/opencode/native-host-smoke.mjs"
+  },
+  "dependencies": {
+    "jsonc-parser": "3.3.1"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@opencode/client": "2.1.2"
+  }
+}

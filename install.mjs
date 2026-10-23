@@ -1,4 +1,4 @@
 #!/usr/bin/env node
-import {main} from './v4/installer/bootstrap.mjs';
+import {main} from './installer/bootstrap.mjs';
 
 main();

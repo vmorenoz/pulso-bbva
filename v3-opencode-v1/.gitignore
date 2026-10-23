@@ -1,9 +1,0 @@
-node_modules/
-*.tmp
-.DS_Store
-coverage/
-*.log
-*.zip
-*.diff
-*.patch
-evidence/

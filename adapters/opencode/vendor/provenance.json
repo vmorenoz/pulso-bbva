@@ -1,0 +1,15 @@
+{
+  "package": "@opencode/client",
+  "version": "2.1.2",
+  "source": "https://registry.npmjs.org/@opencode/client/-/client-2.1.2.tgz",
+  "integrity": "sha512-c7FqI/zMy6HrdVGHynzouiz3y1smokGuimh2+Is2iVWz8I8VzJEty9eTrvQkQzXG1Hj5K2FL1K5fytQ7yJEd9w==",
+  "git": {
+    "tag": "v2.1.2",
+    "commit": "a517687fde98a7329ada3ae644a01a9fc6c4e99e",
+    "license": "https://github.com/anomalyco/opencode/blob/v2.1.2/LICENSE"
+  },
+  "entrypoints": [
+    "client/promise/index.js"
+  ],
+  "note": "Unmodified import-reachable official Promise client runtime; metadata and license copied separately. Pulso only calls read-only APIs. Native registration is bounded and validated before probing; no service lifecycle helpers are called."
+}
